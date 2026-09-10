@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C00 complete.** Next: C01 — Tile space, camera, isometric projection. |
+| **Status** | **C01 complete.** Next: C02 — World, world chunks, terrain. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C01 — Tile space, camera, isometric projection** |
+| **First action** | Chunk **C02 — World, world chunks, terrain** |
 
 ---
 
@@ -376,6 +376,27 @@ screenToTile(sx, sy):
 else in the codebase may contain `TILE_W`, `/ 2`-style projection math, or the
 words "iso"/"diamond". If a second file needs to project, it imports this one.
 
+**Implementation note (C01).** Two things this section left implicit, now fixed
+by the shipped code and pinned by tests:
+
+- **`tileToScreen(x, y)` returns the diamond's top vertex, not its centre.**
+  Tile `(x, y)` covers the unit square `[x, x+1] x [y, y+1]` in tile space, so
+  its diamond's centre is `TILE_H / 2` *below* the returned point. This is
+  forced by the transform as written — it is what makes `floor(screenToTile(p))`
+  the tile containing `p` — but C03 has to know it to anchor a sprite, so it is
+  written down rather than rediscovered.
+- **Flooring lives on the camera, not here.** `projection.ts` really does expose
+  only the two functions; `Camera.screenToTile` applies `Math.floor` to a
+  `screenToWorld` result. `Math.floor` is not projection arithmetic, and keeping
+  it out preserves "exactly these two functions" literally.
+
+The rule itself is now enforced rather than merely stated:
+`tests/unit/projection-boundary.test.ts` scans every file under `src/` except
+`projection.ts` and fails on `TILE_W`/`TILE_H`, on the words "isometric" or
+"diamond" in code, and on the two transforms written out by hand. A file that
+one day genuinely needs a tile dimension is added to its allow-list with a
+note, which makes the leak a decision instead of an accident.
+
 ### Depth sorting
 
 Painter's algorithm on a stable key.
@@ -480,8 +501,17 @@ ordering. Ids are `number`, allocated from a counter that is itself serialized.
 Two inserters reaching for the same item, two machines pulling the last ore:
 lowest entity id wins. Document it, test it.
 
-**R7 — No NaN, no Infinity.** Every division guards its denominator. A
-determinism test asserts every numeric field in a serialized save is finite.
+**R7 — No NaN, no Infinity, and no `-0`.** Every division guards its
+denominator. A determinism test asserts every numeric field in a serialized save
+is finite.
+
+`-0` was added to this rule in C01, after `rotateOffset` produced it for a zero
+component. It is the quietest of the three: `-0 === 0` is true, so it is
+invisible to every ordinary comparison, but `Object.is` and `deepEqual` treat it
+as distinct while `JSON.stringify` silently normalises it to `0`. A `-0` written
+into authoritative state therefore survives a save round trip as a *different*
+value and fails R8 — months after the code that created it was written. Write
+negation as `0 - v` rather than `-v` wherever the operand may be zero.
 
 **R8 — Save round-trip is a determinism test.**
 
@@ -1088,6 +1118,47 @@ src/renderer/camera.ts           tests/unit/{coordinates,projection,camera}.test
 injectivity over the documented range including negatives; `zoomAt` invariant.
 
 **Out of scope.** Drawing anything. Input handling (C04 wires the camera up).
+
+**Implementation note (C01).** Four departures from the tasks above, each with a
+reason:
+
+1. **`tileKey` validates on every call, not only in dev builds.** Task 1 says
+   "assert it in dev builds", but `game/**` may not import Vite (§4), so there
+   is no build-mode flag to branch on and the honest choice is always or never.
+   Always: an out-of-range or fractional coordinate does not throw, it collides
+   with a *different* tile and corrupts the world silently. Four comparisons are
+   noise next to the hash lookup they precede. §16 says profile before
+   optimising, so gating this is C28's decision to make, not C01's.
+2. **The packable range is `[-32768, 32767]`, not `±32,768`.** A signed 16-bit
+   field is asymmetric. Exported as `TILE_MIN` / `TILE_MAX`; C02 should derive
+   world-chunk limits from those constants rather than restate the number.
+3. **The camera holds the viewport.** Task 3 writes
+   `visibleTileBounds(viewportW, viewportH)`; the shipped camera takes
+   `setViewport(w, h)` and `visibleTileBounds()` takes nothing. `zoomAt` and
+   `screenToWorld` need the same two numbers, and four call sites each passing
+   their own copy is four chances to pass a stale one after a resize.
+   `CanvasSurface` already emits a resize notification and the camera is the one
+   thing that needs to hear it.
+4. **The zoom ease snaps on a derived threshold, not a constant.** An
+   exponential ease never reaches its target, so it needs one; an arbitrary
+   value is either a visible jump or a tail that keeps `isZooming()` true long
+   after the motion has stopped. The camera snaps once the residual would move
+   the furthest on-screen pixel less than half a pixel — `0.5 / viewport
+   diagonal` in log-zoom space. On a 1080p viewport a wheel notch is visually
+   finished in ~200 ms and formally settled in ~380 ms.
+
+`Camera.screenToTile` was also added beyond the listed methods: it is
+`floor(screenToWorld(...))`, it is the primitive the "hovered tile stays under
+the cursor" criterion is stated in, and picking is unambiguously camera
+business. It returns the **ground** tile; sprite-bounds picking is still C04
+(§5 hazard 2).
+
+**Noticed, not fixed.** `visibleTileBounds` returns the bounding box of a
+rotated rectangle, so at minimum zoom on a 1080p screen it reports ~65,000 tiles
+where ~32,000 are genuinely visible. That factor of two is inherent to returning
+a rectangle and is correct-and-conservative, but C03 should not assume the
+bounds are tight: either walk the diamond row by row or make per-tile work cheap
+enough that 2x does not matter.
 
 ---
 
