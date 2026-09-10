@@ -4,6 +4,8 @@ import { DebugOverlay } from '../../src/debug/debug-overlay.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { TPS } from '../../src/game/simulation-clock.js';
+import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { World } from '../../src/game/world/world.js';
 import { CanvasSurface } from '../../src/platform/canvas-surface.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
 
@@ -141,13 +143,16 @@ describe('DebugOverlay', () => {
     const rowCount = node?.childElementCount ?? 0;
     const firstValue = node?.querySelector('.debug-overlay__value');
 
-    overlay.update(stats, 123, '800x600 @2x', 200);
-    overlay.update({ ...stats, fps: 30 }, 456, '800x600 @2x', 200);
+    overlay.update(stats, 123, '800x600 @2x', '1 chunk(s)', 200);
+    overlay.update({ ...stats, fps: 30 }, 456, '800x600 @2x', '1 chunk(s)', 200);
 
     // §13: no panel rebuilds its subtree on update.
     expect(node?.childElementCount).toBe(rowCount);
     expect(node?.querySelector('.debug-overlay__value')).toBe(firstValue);
     expect(node?.textContent).toContain('456');
+    // C02's readout: until C03 draws terrain, this row is how the world proves
+    // it is alive in the page and not only in the test suite.
+    expect(node?.textContent).toContain('1 chunk(s)');
   });
 
   it('throttles updates rather than writing every frame', () => {
@@ -155,10 +160,10 @@ describe('DebugOverlay', () => {
     document.body.append(root);
     const overlay = new DebugOverlay(root);
 
-    overlay.update(stats, 1, 'x', 200); // crosses the interval
+    overlay.update(stats, 1, 'x', 'w', 200); // crosses the interval
     const after = root.textContent ?? '';
 
-    overlay.update(stats, 999, 'x', 5); // well inside the interval: ignored
+    overlay.update(stats, 999, 'x', 'w', 5); // well inside the interval: ignored
     expect(root.textContent).toBe(after);
     expect(root.textContent).not.toContain('999');
   });
@@ -171,7 +176,7 @@ describe('DebugOverlay', () => {
     overlay.toggle();
     expect(overlay.isVisible()).toBe(false);
 
-    overlay.update(stats, 777, 'x', 500);
+    overlay.update(stats, 777, 'x', 'w', 500);
     expect(root.textContent).not.toContain('777');
   });
 });
@@ -180,7 +185,7 @@ describe('bootstrap wiring', () => {
   it('advances the simulation at TPS and paints every frame', () => {
     vi.stubGlobal('devicePixelRatio', 2);
     const surface = new CanvasSurface(makeCanvas(800, 600));
-    const simulation = new Simulation();
+    const simulation = new Simulation(new World(createCheckerboardGenerator()));
     const scheduler = new FakeScheduler();
 
     let painted = 0;

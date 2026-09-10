@@ -1,4 +1,4 @@
-import type { TileCoord } from '../game/world/coordinates.js';
+import type { TileBounds, TileCoord } from '../game/world/coordinates.js';
 
 import { screenToTile, tileToScreen, type ScreenPoint, type WorldPoint } from './projection.js';
 
@@ -36,13 +36,15 @@ const ZOOM_SMOOTHING_MS = 55;
 const MIN_SNAP_EPSILON = 1e-6;
 const MAX_SNAP_EPSILON = 1e-2;
 
-/** Inclusive tile bounds. `maxX < minX` means nothing is visible. */
-export interface TileBounds {
-  readonly minX: number;
-  readonly minY: number;
-  readonly maxX: number;
-  readonly maxY: number;
-}
+/**
+ * Inclusive tile bounds. `maxX < minX` means nothing is visible.
+ *
+ * Defined in `game/world/coordinates.ts` and re-exported here: the world
+ * iterates the same rectangle the camera culls to, and two structurally
+ * identical declarations would let their inclusivity conventions drift apart
+ * without a single type error.
+ */
+export type { TileBounds };
 
 export interface CameraOptions {
   /** Tile-space position shown at the centre of the viewport. Fractional. */

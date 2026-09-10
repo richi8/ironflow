@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C01 complete.** Next: C02 — World, world chunks, terrain. |
+| **Status** | **C02 complete.** Next: C03 — Canvas renderer & placeholder atlas. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C02 — World, world chunks, terrain** |
+| **First action** | Chunk **C03 — Canvas renderer & placeholder atlas** |
 
 ---
 
@@ -1153,6 +1153,14 @@ the cursor" criterion is stated in, and picking is unambiguously camera
 business. It returns the **ground** tile; sprite-bounds picking is still C04
 (§5 hazard 2).
 
+**Amended by C02.** `TileBounds` was declared in `renderer/camera.ts` and now
+lives in `game/world/coordinates.ts`, re-exported from the camera. It is a
+tile-space value with no screen-space content, and `game/**` may not import
+`renderer/**` (§4), so `World.forEachChunkInBounds` could not otherwise share
+it. Two structurally identical declarations would let the renderer's cull
+rectangle and the world's iteration rectangle drift apart on inclusivity
+without producing a single type error.
+
 **Noticed, not fixed.** `visibleTileBounds` returns the bounding box of a
 rotated rectangle, so at minimum zoom on a 1080p screen it reports ~65,000 tiles
 where ~32,000 are genuinely visible. That factor of two is inherent to returning
@@ -1207,6 +1215,57 @@ transitions; bounds iteration inclusivity.
 
 **Out of scope.** Generation content (C19 — until then use a trivial checkerboard
 or noise stub). Rendering.
+
+**Implementation note (C02).** Six departures from the tasks above.
+
+1. **`getResource` returns the resource *type*; `getResourceAmount` returns the
+   remaining units.** Task 2 gives a world chunk two resource arrays and task 3
+   names one accessor for them. Returning a `{type, amount}` object instead
+   would allocate on a path the mining system hits every tick for every miner,
+   so the accessor is split rather than boxed. `getResource` keeps the name of
+   the field it reads.
+2. **`setResource(x, y, type, amount)` exists**, though task 3 does not list it.
+   `setTile` is listed and terrain is the *less* mutable of the two arrays; a
+   resource layer writable only by the generator would have to be reopened by
+   C09 and again by C24's save loader replaying deltas. It validates against the
+   array widths, which is where a 70,000-unit patch would otherwise wrap to 4,464.
+3. **Depletion leaves the resource type in place and drops the amount to zero.**
+   The alternative — clearing the type at zero — makes a world-chunk delta lossy:
+   §14 records changed *amounts*, and a restored zero would need a second field
+   to say what kind of nothing it is. "Is this tile mineable?" is
+   `getResourceAmount(x, y) > 0`, and that is the predicate C09's four ore-pile
+   buckets and its "a depleted tile stops rendering" rule should be written
+   against.
+4. **`dirty` is set only on actual divergence.** Writing the terrain already
+   present, or consuming zero, or consuming from an exhausted tile, changes
+   nothing and dirties nothing. Task 5 says "the moment anything diverges", and
+   a re-assertion is not a divergence — the looser reading would push the whole
+   explored map into every save the first time any code re-asserted terrain in a
+   loop.
+5. **`peekChunk(cx, cy)` complements `getChunk`.** `getChunk` generates on first
+   touch, which is the design; but the debug readout, the tests that count
+   creations, and C24's serializer all need to ask what exists without bringing
+   it into existence — a serializer that generated the explored map while trying
+   to write it would be a memorably bad afternoon. **`forEachChunkInBounds`
+   generates**, deliberately: viewport-driven lazy creation is how the map fills
+   in, and C03 culling to `visibleTileBounds` is exactly the intended trigger.
+6. **`world-generator.ts` ships now, with the checkerboard stub this chunk's
+   "out of scope" note calls for.** It is already pure and positional in C19's
+   sense, so C19 replaces a function rather than a contract. It outlines every
+   world-chunk boundary in stone and anchors an 8-tile checkerboard to absolute
+   coordinates, so the two things C02 must get right — no seams, and a negative
+   half that is continuous rather than mirrored — are visible by eye the moment
+   C03 draws anything.
+
+`Simulation` now takes a `World` in its constructor and exposes it read-only,
+per §4: every piece of authoritative state hangs off the simulation, and the
+renderer and UI reach it through a view rather than holding their own reference.
+
+**Noticed, not fixed.** C03 task 4 keys its terrain cache on `dirty`, but
+`dirty` is a persistence flag (§14): it latches true on the first divergence and
+never clears, so it answers "must this world chunk be saved?" and not "has this
+world chunk changed since I last drew it?". C03 needs a separate signal — a
+per-world-chunk revision counter, or cache invalidation at the mutation sites.
 
 ---
 

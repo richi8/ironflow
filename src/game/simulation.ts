@@ -1,13 +1,27 @@
+import type { World } from './world/world.js';
+
 /**
  * Authoritative game state and the ordered systems that advance it.
  * See ironflow.md §8 (phase order) and §6 (determinism contract).
  *
- * In C00 this is a skeleton: it owns the tick counter and nothing else. The
- * phase block below is the contract that later chunks fill in, and the order is
- * deliberate — changing it is a decision with a changelog entry, not a tidy-up.
+ * In C00 this was a skeleton owning only the tick counter. C02 gives it the
+ * world; the phase block below is the contract that later chunks fill in, and
+ * the order is deliberate — changing it is a decision with a changelog entry,
+ * not a tidy-up.
  */
 export class Simulation {
+  /**
+   * The terrain and resources. Authoritative (§10) and owned here, because §4
+   * puts every piece of simulated state under `Simulation` — the renderer and
+   * the UI reach it through a view, never by holding their own reference.
+   */
+  readonly world: World;
+
   private tickCount = 0;
+
+  constructor(world: World) {
+    this.world = world;
+  }
 
   /** Ticks elapsed since this world was created. Authoritative; serialized. */
   getTick(): number {

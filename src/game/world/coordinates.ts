@@ -120,3 +120,20 @@ export function rotateOffset(o: TileCoord, r: Rotation): TileCoord {
       return { x: o.y, y: 0 - o.x };
   }
 }
+
+/**
+ * An inclusive rectangle in tile space. `maxX < minX` means "nothing".
+ *
+ * This lives here rather than beside the camera that first needed it (C01)
+ * because it is a tile-space value with no screen-space content, and `game/`
+ * may not import `renderer/` (§4). `World.forEachChunkInBounds` and
+ * `Camera.visibleTileBounds` must agree on inclusivity or the renderer culls a
+ * row of tiles the world happily provides — one shared type makes that
+ * disagreement impossible rather than merely unlikely.
+ */
+export interface TileBounds {
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}

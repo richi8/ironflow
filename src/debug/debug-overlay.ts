@@ -31,7 +31,7 @@ export class DebugOverlay {
     title.textContent = 'IRONFLOW — F3';
     this.root.append(title);
 
-    for (const label of ['fps', 'frame', 'sim', 'render', 'tick', 'steps', 'alpha', 'shed', 'size']) {
+    for (const label of ['fps', 'frame', 'sim', 'render', 'tick', 'steps', 'alpha', 'shed', 'size', 'world']) {
       this.addRow(label);
     }
 
@@ -48,9 +48,10 @@ export class DebugOverlay {
   }
 
   /**
+   * @param worldLabel world-chunk residency, per C02.
    * @param frameMs real time since the previous call, used only for throttling.
    */
-  update(stats: LoopStats, tick: number, sizeLabel: string, frameMs: number): void {
+  update(stats: LoopStats, tick: number, sizeLabel: string, worldLabel: string, frameMs: number): void {
     if (!this.visible) return;
 
     this.msSinceUpdate += frameMs;
@@ -66,6 +67,7 @@ export class DebugOverlay {
     this.setRow('alpha', stats.alpha.toFixed(3));
     this.setRow('shed', String(stats.shedCount));
     this.setRow('size', sizeLabel);
+    this.setRow('world', worldLabel);
   }
 
   destroy(): void {

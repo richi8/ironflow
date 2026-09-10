@@ -3,6 +3,9 @@ import './styles/main.css';
 import { DebugOverlay } from './debug/debug-overlay.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
+import { tileProperties } from './game/world/tile.js';
+import { createCheckerboardGenerator } from './game/world/world-generator.js';
+import { World } from './game/world/world.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 
@@ -31,7 +34,10 @@ function bootstrap(): void {
 
   const surface = new CanvasSurface(canvas);
   const overlay = new DebugOverlay(uiRoot);
-  const simulation = new Simulation();
+  // C19 replaces the checkerboard with real generation. The world is empty
+  // until something asks about a tile — see World.getChunk.
+  const world = new World(createCheckerboardGenerator());
+  const simulation = new Simulation(world);
   const scheduler = new BrowserFrameScheduler();
 
   // C03 replaces this with the real Renderer. Until then: a flat background,
@@ -50,10 +56,18 @@ function bootstrap(): void {
     const now = scheduler.now();
     const elapsedMs = (now - lastOverlayUs) / 1000;
     lastOverlayUs = now;
+    // Until C03 draws the world, this readout is the proof it is alive in the
+    // browser and not only in the test suite: one world chunk, generated on the
+    // first touch, with the terrain the stub generator says belongs at the
+    // origin.
+    const originTile = world.getTile(0, 0);
+    const worldLabel = `${world.chunkCount} chunk(s), (0,0)=${tileProperties(originTile).name}`;
+
     overlay.update(
       game.getStats(),
       simulation.getTick(),
       `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
+      worldLabel,
       elapsedMs,
     );
   };
