@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | Pre-implementation. Repository contains this plan and two art references only. |
+| **Status** | **C00 complete.** Next: C01 — Tile space, camera, isometric projection. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C00 — Project foundation & test harness** |
+| **First action** | Chunk **C01 — Tile space, camera, isometric projection** |
 
 ---
 
@@ -282,6 +282,10 @@ src/
     memory-save-repository.ts  # test double
     export-import.ts
 
+  platform/                    # browser adapters behind interfaces game/ defines
+    browser-clock.ts           # FrameScheduler: rAF + performance.now
+    canvas-surface.ts          # canvas sizing, devicePixelRatio, ResizeObserver
+
   debug/
     debug-overlay.ts
     profiler.ts
@@ -308,6 +312,7 @@ These are enforceable and must be enforced (see C00, lint boundaries).
 | `input/**` | `game/**` command types | `renderer/**` internals, simulation state |
 | `ui/**` | `game/game-controller`, view models | simulation internals, `renderer/**` |
 | `persistence/**` | `game/save/**` types | simulation systems, DOM rendering |
+| `platform/**` | `game/**` interfaces | simulation state, `ui/**`, `renderer/**` internals |
 | `main.ts` | everything | — |
 
 **Corollaries:**
@@ -574,6 +579,16 @@ accumulator.
 
 Also handle `visibilitychange` by resetting `last` on resume, and pause the loop
 outright when a modal save/load dialog is open.
+
+**Implementation note (C00).** The accumulator sketched above is a float in
+milliseconds. The shipped `SimulationClock` counts in integer units of
+`microseconds x TPS`, where one tick costs exactly 1,000,000, because 1000/30 is
+not representable in binary floating point and the error compounds — a float
+accumulator loses a tick over ten seconds, and loses a *different* number
+depending on frame spacing. It also sheds debt only when a full tick of debt
+actually remains, rather than unconditionally on hitting the step cap, so a
+frame that consumed exactly its budget keeps its legitimate sub-tick remainder
+for interpolation. Both are refinements of this section, not departures from it.
 
 **Simulation rate and render rate are independent.** Production speed must never
 depend on FPS. A test at C18 runs 1,000 ticks with three different frame

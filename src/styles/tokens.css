@@ -1,0 +1,51 @@
+/**
+ * IronFlow design tokens — ironflow.md §11.
+ *
+ * Derived from ironflow_visual_reference.png: deep navy surfaces, orange as the
+ * action/energy colour, blue as structure. These are the single source of truth
+ * for colour; from C03 the renderer reads them here too, so canvas and DOM
+ * cannot drift apart.
+ */
+:root {
+  /* surfaces */
+  --if-bg-deep: #0b111c;
+  --if-bg: #131c2b;
+  --if-panel: #1b2536;
+  --if-panel-high: #24334a;
+  --if-stroke: #2c3a52;
+
+  /* text */
+  --if-text: #dbe4f0;
+  --if-text-muted: #8a9ab0;
+  --if-text-dim: #5d6b80;
+
+  /* brand */
+  --if-accent: #f2681f;
+  --if-accent-high: #ff8a3d;
+  --if-accent-dim: #a8481a;
+  --if-blue: #3d7ebd;
+  --if-blue-high: #5aa3e0;
+
+  /* status */
+  --if-ok: #3fbf7f;
+  --if-warn: #e8b13a;
+  --if-danger: #e0523f;
+  --if-ghost-valid: rgba(63, 191, 127, 0.45);
+  --if-ghost-invalid: rgba(224, 82, 63, 0.45);
+
+  /* terrain */
+  --if-terrain-grass: #4a6b3a;
+  --if-terrain-dirt: #6b5540;
+  --if-terrain-sand: #b09361;
+  --if-terrain-stone: #55606e;
+  --if-terrain-water: #23516e;
+
+  /* resources */
+  --if-iron: #7d94ad;
+  --if-copper: #c96a3a;
+  --if-coal: #2b3242;
+  --if-stone: #9aa3ad;
+
+  --if-radius: 4px;
+  --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}

@@ -1,0 +1,10 @@
+{
+  /* Tests and build config run in Node, so they get Node types. `src` does not:
+     keeping them apart means a stray `process` or `Buffer` in the game core is
+     a type error, not a silent dependency on a runtime that will not be there. */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["tests", "*.config.ts", "eslint.config.js"]
+}
