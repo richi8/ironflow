@@ -1,6 +1,7 @@
 import './styles/main.css';
 
 import { DebugOverlay } from './debug/debug-overlay.js';
+import { createDemoEntities } from './debug/demo-entities.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
 import { tileProperties } from './game/world/tile.js';
@@ -8,6 +9,9 @@ import { createCheckerboardGenerator } from './game/world/world-generator.js';
 import { World } from './game/world/world.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
+import { Camera } from './renderer/camera.js';
+import { CanvasRenderer } from './renderer/canvas-renderer.js';
+import type { RenderState } from './renderer/render-state.js';
 
 /**
  * Composition root. See ironflow.md §4.
@@ -23,10 +27,8 @@ function requireElement<T extends Element>(selector: string): T {
   return el;
 }
 
-function readToken(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value.length > 0 ? value : fallback;
-}
+/** A wheel notch is 100 units of `deltaY` on every platform that matters. */
+const WHEEL_UNITS_PER_NOTCH = 100;
 
 function bootstrap(): void {
   const canvas = requireElement<HTMLCanvasElement>('#game');
@@ -40,39 +42,115 @@ function bootstrap(): void {
   const simulation = new Simulation(world);
   const scheduler = new BrowserFrameScheduler();
 
-  // C03 replaces this with the real Renderer. Until then: a flat background,
-  // which is enough to prove the loop runs and the canvas is sized correctly.
-  const background = readToken('--if-bg-deep', '#0b111c');
+  const camera = new Camera({ x: 6, y: 6 });
+  const renderer = new CanvasRenderer(surface.ctx);
 
-  let lastOverlayUs = scheduler.now();
+  const applySize = (): void => {
+    const { cssWidth, cssHeight, dpr } = surface.getSize();
+    camera.setViewport(cssWidth, cssHeight);
+    renderer.resize(cssWidth, cssHeight, dpr);
+  };
+  applySize();
+  surface.onResize(applySize);
 
-  const render = (_alpha: number): void => {
-    const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
-    const ctx = surface.ctx;
+  // Scaffolding until C05 owns entities; see debug/demo-entities.ts.
+  const demoEntities = createDemoEntities();
+  let hover: RenderState['hover'] = null;
 
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, cssWidth, cssHeight);
+  let lastFrameUs = scheduler.now();
 
+  const render = (alpha: number): void => {
     const now = scheduler.now();
-    const elapsedMs = (now - lastOverlayUs) / 1000;
-    lastOverlayUs = now;
-    // Until C03 draws the world, this readout is the proof it is alive in the
-    // browser and not only in the test suite: one world chunk, generated on the
-    // first touch, with the terrain the stub generator says belongs at the
-    // origin.
+    const elapsedMs = (now - lastFrameUs) / 1000;
+    lastFrameUs = now;
+
+    // Wall-clock smoothing of a presentation value. §6 permits exactly this and
+    // nothing more: the camera is never serialized and no system reads it.
+    camera.update(elapsedMs);
+
+    // The read-only view the renderer is allowed to see (C03 task 2). C07's
+    // GameController takes this job over; until it exists, assembling it is
+    // composition, which is what this file is for.
+    const state: RenderState = {
+      world: simulation.world,
+      entities: demoEntities,
+      hover,
+      ghost: null,
+      selected: null,
+    };
+    renderer.render(state, camera, alpha);
+
+    const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
     const originTile = world.getTile(0, 0);
-    const worldLabel = `${world.chunkCount} chunk(s), (0,0)=${tileProperties(originTile).name}`;
+    const stats = renderer.getStats();
 
     overlay.update(
       game.getStats(),
       simulation.getTick(),
       `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
-      worldLabel,
+      `${world.chunkCount} chunk(s), (0,0)=${tileProperties(originTile).name}`,
+      `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
       elapsedMs,
     );
   };
 
   const game = new Game({ simulation, scheduler, render });
+
+  /* ------------------------------------------------------------------ *
+   * Temporary camera controls.
+   *
+   * C04 owns input and will delete these, replacing them with the real
+   * input layer. They are here because three of C03's five acceptance
+   * criteria — no seams at any zoom step, panning holds 60 fps, the hovered
+   * tile stays under the cursor — cannot be looked at in a view that cannot
+   * move. Moving the camera is not a command (§7): it changes no
+   * authoritative state, so nothing about the pipeline is being pre-empted.
+   * ------------------------------------------------------------------ */
+  let dragPointer: number | null = null;
+  let lastX = 0;
+  let lastY = 0;
+
+  canvas.addEventListener('pointerdown', (event) => {
+    dragPointer = event.pointerId;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    canvas.setPointerCapture(event.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    hover = camera.screenToTile(event.clientX - rect.left, event.clientY - rect.top);
+
+    if (dragPointer !== event.pointerId) return;
+    camera.pan(event.clientX - lastX, event.clientY - lastY);
+    lastX = event.clientX;
+    lastY = event.clientY;
+  });
+
+  const endDrag = (event: PointerEvent): void => {
+    if (dragPointer !== event.pointerId) return;
+    dragPointer = null;
+    canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', () => {
+    hover = null;
+  });
+
+  canvas.addEventListener(
+    'wheel',
+    (event) => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      camera.zoomAt(
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        -event.deltaY / WHEEL_UNITS_PER_NOTCH,
+      );
+    },
+    { passive: false },
+  );
 
   document.addEventListener('keydown', (event) => {
     if (event.code === 'F3') {

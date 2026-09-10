@@ -143,16 +143,17 @@ describe('DebugOverlay', () => {
     const rowCount = node?.childElementCount ?? 0;
     const firstValue = node?.querySelector('.debug-overlay__value');
 
-    overlay.update(stats, 123, '800x600 @2x', '1 chunk(s)', 200);
-    overlay.update({ ...stats, fps: 30 }, 456, '800x600 @2x', '1 chunk(s)', 200);
+    overlay.update(stats, 123, '800x600 @2x', '1 chunk(s)', '4 cached', 200);
+    overlay.update({ ...stats, fps: 30 }, 456, '800x600 @2x', '1 chunk(s)', '4 cached', 200);
 
     // §13: no panel rebuilds its subtree on update.
     expect(node?.childElementCount).toBe(rowCount);
     expect(node?.querySelector('.debug-overlay__value')).toBe(firstValue);
     expect(node?.textContent).toContain('456');
-    // C02's readout: until C03 draws terrain, this row is how the world proves
-    // it is alive in the page and not only in the test suite.
     expect(node?.textContent).toContain('1 chunk(s)');
+    // C03's readout: terrain-cache residency, which is the only way to see
+    // from inside the page whether the world-chunk bitmaps are being reused.
+    expect(node?.textContent).toContain('4 cached');
   });
 
   it('throttles updates rather than writing every frame', () => {
@@ -160,10 +161,10 @@ describe('DebugOverlay', () => {
     document.body.append(root);
     const overlay = new DebugOverlay(root);
 
-    overlay.update(stats, 1, 'x', 'w', 200); // crosses the interval
+    overlay.update(stats, 1, 'x', 'w', 't', 200); // crosses the interval
     const after = root.textContent ?? '';
 
-    overlay.update(stats, 999, 'x', 'w', 5); // well inside the interval: ignored
+    overlay.update(stats, 999, 'x', 'w', 't', 5); // well inside the interval: ignored
     expect(root.textContent).toBe(after);
     expect(root.textContent).not.toContain('999');
   });
@@ -176,7 +177,7 @@ describe('DebugOverlay', () => {
     overlay.toggle();
     expect(overlay.isVisible()).toBe(false);
 
-    overlay.update(stats, 777, 'x', 'w', 500);
+    overlay.update(stats, 777, 'x', 'w', 't', 500);
     expect(root.textContent).not.toContain('777');
   });
 });

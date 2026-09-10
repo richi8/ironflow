@@ -49,6 +49,22 @@ export interface WorldChunk {
    * back full; always set, and the save is tens of megabytes.
    */
   dirty: boolean;
+  /**
+   * Bumped on every change to this world chunk's contents. Never persisted.
+   *
+   * `dirty` cannot answer "has this changed since I last drew it?": it latches
+   * on the first divergence and never clears, because §14 needs it to mean
+   * "must this world chunk be saved?". A cache keyed on `dirty` would therefore
+   * go stale the moment a second tile changed. This counter is the separate
+   * signal C02's closing note said C03 would need — the renderer's terrain
+   * cache stores the revision it drew and rebuilds when the two differ.
+   *
+   * Derived, presentation-facing, and owned by `World`: nothing in `game/`
+   * reads it, and the world chunk is still the only thing that knows when its
+   * own bytes moved. Wrapping is not a concern — at one change per tick it
+   * would take three million years to reach `Number.MAX_SAFE_INTEGER`.
+   */
+  revision: number;
 }
 
 /**
@@ -128,5 +144,6 @@ export function createChunk(cx: number, cy: number): WorldChunk {
     resource: new Uint8Array(CHUNK_AREA),
     resourceAmount: new Uint16Array(CHUNK_AREA),
     dirty: false,
+    revision: 0,
   };
 }

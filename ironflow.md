@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C02 complete.** Next: C03 — Canvas renderer & placeholder atlas. |
+| **Status** | **C03 complete.** Next: C04 — Input & command pipeline. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C03 — Canvas renderer & placeholder atlas** |
+| **First action** | Chunk **C04 — Input & command pipeline** |
 
 ---
 
@@ -262,6 +262,7 @@ src/
     projection.ts              # THE ONLY file that converts tile <-> screen
     camera.ts
     sprite-atlas.ts
+    palette.ts                 # TS mirror of styles/tokens.css (§11)
     layers/                    # terrain, entities, overlays, ghost
     render-state.ts
 
@@ -735,7 +736,9 @@ v1 asset list and the eight HUD icons. Treat it as the art spec.
 
 Author these once in `styles/tokens.css` and use them everywhere — UI **and**
 canvas. The renderer reads them from a TS constant mirror so canvas and DOM
-never drift.
+never drift. That mirror is `renderer/palette.ts` (added in C03), and
+`tests/unit/sprite-atlas.test.ts` parses this stylesheet and fails on any
+disagreement between the two in either direction.
 
 ```css
 :root {
@@ -1266,6 +1269,8 @@ renderer and UI reach it through a view rather than holding their own reference.
 never clears, so it answers "must this world chunk be saved?" and not "has this
 world chunk changed since I last drew it?". C03 needs a separate signal — a
 per-world-chunk revision counter, or cache invalidation at the mutation sites.
+**Resolved in C03** with the former: `WorldChunk.revision`, bumped beside
+`dirty` in `World.markChanged`. See the C03 implementation note.
 
 ---
 
@@ -1324,6 +1329,100 @@ cache invalidation on dirty; cull-bounds include partially visible tiles.
 Rendering output itself is verified by eye, not by test.
 
 **Out of scope.** Sprites from image files, animation, lighting, WebGL.
+
+**Implementation note (C03).** Ten departures from the tasks above.
+
+1. **`WorldChunk.revision` was added to `game/`,** which is the fix C02's
+   closing note asked for. `dirty` latches on the first divergence and never
+   clears, so a cache keyed on it shows the world as it was at the *second*
+   change, forever. `World.markChanged` now sets both flags at the one place
+   every mutation already funnelled through, so a future mutation cannot set
+   one and forget the other. It is never serialized, and nothing in `game/`
+   reads it — a version stamp is the world's to issue and the renderer's to
+   interpret.
+2. **`renderer/palette.ts` exists, beyond the listed deliverables.** §11 says
+   the renderer reads the design tokens "from a TS constant mirror" but does not
+   say where that mirror lives, and three of the four new renderer files need
+   it. `getComputedStyle` was the alternative and is worse: unavailable to a
+   test, dependent on the stylesheet having loaded, and silently `''` when a
+   token is renamed. `tests/unit/sprite-atlas.test.ts` parses `tokens.css` and
+   fails on any disagreement in either direction, which is what makes the
+   duplication safe.
+3. **The atlas derives tile geometry from `tileToScreen`, not from `TILE_W`.**
+   `tests/unit/projection-boundary.test.ts` invites exactly this file to import
+   the constants and be added to its allow-list. Asking instead — the projection
+   is linear, so `tileToScreen(1, 0)` and `tileToScreen(0, 1)` *are* its whole
+   geometry — needs no exception at all, and the allow-list stays at one file.
+   §5's rule is honoured more closely by not taking the exemption it offers.
+4. **A `SpriteId` is a namespaced string, parsed once and memoised.** Task 3
+   fixes `draw(ctx, id, sx, sy, zoom)`, which leaves the id as the only channel
+   for anything else the sprite needs, so footprint and height ride on it:
+   `building:power:PP:2x2:3`. That is how an image atlas addresses a cell
+   anyway, so C29 maps the same strings rather than reintroducing parameters.
+   An id that does not parse draws a magenta marker; a missing sprite is a
+   content bug, and one that takes the frame down is a content bug you cannot
+   see the rest of the screen to diagnose.
+5. **`RenderEntity` has no `rotation` field.** Direction is part of the sprite
+   id (`belt:1`), so a separate field would be a second source of truth for the
+   same fact, and the one the atlas ignores.
+6. **The terrain cache is bounded by pixels as well as entries.** "At most ~64
+   world chunks" is the wrong bound alone: a world chunk's bitmap is 512x256 at
+   minimum zoom and 2048x1024 at zoom 1, so 64 entries is 32 MB in one case and
+   512 MB in the other. The count cap is kept as a coarse ceiling (96, since
+   ~55 world chunks are genuinely visible at minimum zoom on a 1080p screen)
+   with a 32M-pixel budget under it. Whichever binds first, binds.
+7. **Above 8M pixels a world chunk is drawn directly rather than cached.** At
+   zoom 2 a world-chunk bitmap is 4096x2048 and a 1080p viewport holds a quarter
+   of one — 32 MB spent to avoid drawing the ~250 tiles actually on screen.
+   Visible tile count scales with `1 / zoom^2`, which is why caching is
+   necessary at the bottom of the zoom range and pointless at the top.
+8. **At most eight bitmaps are built per frame**, with uncached world chunks
+   drawn tile by tile *clipped to the visible bounds* in the meantime. Without
+   the cap, arriving somewhere new at minimum zoom renders fifty-odd world
+   chunks — 56,000 paths — in a single frame. With it, that cost is spread and
+   the fallback is bounded by the viewport rather than by the 1,024 tiles a
+   world chunk holds.
+9. **The cull margin is a constant four tiles on all four sides**, not a
+   per-sprite height. Task 6 says "a margin equal to the tallest sprite"; asking
+   the atlas would mean a method on `SpriteAtlas` that only the culler uses, on
+   an interface whose entire purpose is that C29 can replace the implementation
+   — and a wrong answer from it is an invisible sprite, which is far harder to
+   notice than a few extra tiles of work. §5 hazard 1 puts the tallest v1
+   building at three tiles; four is that plus slack.
+10. **`CanvasRenderer.resize` does not size the canvas.** `CanvasSurface`
+    (C00) already owns the backing store and the device-pixel transform. The
+    renderer keeps the numbers because clearing needs the extent and terrain
+    blits need the ratio, but two owners of `canvas.width` is one too many.
+
+**Two pieces of scaffolding ship with this chunk**, both marked in the source
+and both deleted by the chunk that supersedes them. They are here because C03's
+acceptance criteria are the first in the plan that must be *looked at*, and four
+of the five cannot be looked at without them.
+
+- **Temporary camera controls in `main.ts`** — pointer drag, wheel zoom, hover
+  tracking. C04 owns input and replaces them. Moving the camera is not a
+  command (§7): it changes no authoritative state, so nothing about the command
+  pipeline is being pre-empted, and C00 already set the precedent of a direct
+  listener in the composition root for F3. Without them "no seams at any zoom
+  step" and "panning holds 60 fps" are criteria on a view that cannot move.
+- **`debug/demo-entities.ts`** — eight hand-placed buildings and a belt, in the
+  same spirit as C02's checkerboard generator. C05 and C06 delete it. The
+  arrangement is chosen to break a naive sort rather than to look good: a
+  diagonal of tall buildings, a 3x3 sharing a depth row with the belt running
+  through it, and two buildings whose keys differ only in the entity id.
+
+**Noticed, not fixed.**
+
+- `EntityLayer` recomputes the depth key inside its sort comparator, so the key
+  is computed `O(n log n)` times rather than `O(n)`. The fix — a parallel key
+  array and an index sort — is a real optimisation with a real cost in clarity,
+  and §16 says that decision belongs to C28's profiler.
+- `visibleTileBounds` over-covers by up to a factor of two (C01's closing note),
+  so `forEachChunkInBounds` generates roughly twice the world chunks strictly
+  needed. At 4 KB per world chunk that is under a megabyte at minimum zoom, and
+  the extras are almost always world chunks the player is about to pan into.
+- Per-tile `worldToScreen` and `tileToScreen` calls each allocate a point.
+  `projection.ts` already flags this as C29's to measure.
 
 ---
 

@@ -55,6 +55,19 @@ function at(array: Uint8Array | Uint16Array, index: number): number {
   return value;
 }
 
+/**
+ * Record that a world chunk's contents diverged from generator output.
+ *
+ * Two flags, one event, and they must never be set apart: `dirty` says "this
+ * must be saved" (§14) and latches forever, `revision` says "this changed"
+ * and keeps counting for the renderer's terrain cache. Every mutation below
+ * goes through here so a future one cannot set one and forget the other.
+ */
+function markChanged(chunk: WorldChunk): void {
+  chunk.dirty = true;
+  chunk.revision += 1;
+}
+
 export class World {
   /**
    * World chunks by packed coordinate.
@@ -138,7 +151,7 @@ export class World {
     const index = localIndex(toLocalCoord(x), toLocalCoord(y));
     if (at(chunk.terrain, index) === type) return;
     chunk.terrain[index] = type;
-    chunk.dirty = true;
+    markChanged(chunk);
   }
 
   /** The resource type id at a tile, or `NO_RESOURCE`. */
@@ -182,7 +195,7 @@ export class World {
     if (taken === 0) return 0;
 
     chunk.resourceAmount[index] = remaining - taken;
-    chunk.dirty = true;
+    markChanged(chunk);
     return taken;
   }
 
@@ -204,7 +217,7 @@ export class World {
     if (at(chunk.resource, index) === type && at(chunk.resourceAmount, index) === amount) return;
     chunk.resource[index] = type;
     chunk.resourceAmount[index] = amount;
-    chunk.dirty = true;
+    markChanged(chunk);
   }
 
   /**
