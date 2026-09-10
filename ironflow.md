@@ -2713,6 +2713,22 @@ by eye against the acceptance criteria.
     instruction.
 20. **Profile before optimising** (§16).
 
+**Repository**
+
+21. **Commit directly to `main`.** No feature branches, no pull requests, no
+    branch-per-chunk. This is a solo project and that ceremony does not earn its
+    keep here. *(Decided 2026-09-10; this overrides the usual default of
+    branching before committing.)*
+22. **One commit per chunk**, made once the §20 checklist passes — not a stream
+    of work-in-progress commits.
+23. **Match the existing message style:** an uppercase `ADD:` / `FIX:` /
+    `REWRITE:` prefix, then a subject line. The body explains decisions,
+    deviations from this plan, and anything surprising. It does not restate the
+    list of changed files, which git already knows.
+24. **Record every deviation from this plan in the plan itself**, in the section
+    it deviates from, in the same commit that makes it. A refinement that lives
+    only in a commit message will be "fixed" back by a later chunk.
+
 ---
 
 ## §20 Definition of done
