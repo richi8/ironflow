@@ -64,10 +64,22 @@ export type CommandRejectionReason =
   | 'queue_full'
   /** Well-formed, but no system owns this command type yet. Removed as chunks land. */
   | 'not_implemented'
+  /** Something already stands on at least one tile of the footprint. */
   | 'occupied'
+  /** The player does not hold the build cost. */
   | 'unaffordable'
+  /** Off the edge of the packable world; C10 may also use it for build reach. */
   | 'out_of_range'
-  | 'unknown_recipe';
+  | 'unknown_recipe'
+  /* Added in C06. §7 keeps this list open for the chunk that needs a reason. */
+  /** No building has this id. A stale hotkey or a hand-written command. */
+  | 'unknown_building'
+  /** Water, or terrain this particular building refuses. */
+  | 'bad_terrain'
+  /** A miner with no ore under any tile of its footprint. */
+  | 'no_resource'
+  /** Remove was pointed at empty ground, or at something already demolished. */
+  | 'nothing_there';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {

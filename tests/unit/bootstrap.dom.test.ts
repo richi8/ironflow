@@ -189,7 +189,7 @@ describe('bootstrap wiring', () => {
   it('advances the simulation at TPS and paints every frame', () => {
     vi.stubGlobal('devicePixelRatio', 2);
     const surface = new CanvasSurface(makeCanvas(800, 600));
-    const simulation = new Simulation(new World(createCheckerboardGenerator()));
+    const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
     const scheduler = new FakeScheduler();
 
     let painted = 0;

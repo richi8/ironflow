@@ -1,20 +1,21 @@
 import './styles/main.css';
 
 import { DebugOverlay } from './debug/debug-overlay.js';
-import { DEMO_FOOTPRINTS, seedDemoEntities, toRenderEntities } from './debug/demo-entities.js';
-import { EntityStore } from './game/entities/entity-store.js';
+import { footprintExtent } from './game/entities/entity.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
-import { tileProperties } from './game/world/tile.js';
-import { createCheckerboardGenerator } from './game/world/world-generator.js';
+import { createPlaygroundGenerator } from './game/world/world-generator.js';
 import { World } from './game/world/world.js';
-import { InputManager } from './input/input-manager.js';
+import { InputManager, type BuildTool } from './input/input-manager.js';
+import type { InputAction } from './input/keybindings.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
+import { describeEntities } from './renderer/entity-view.js';
 import { ScenePicker } from './renderer/picker.js';
-import type { RenderState } from './renderer/render-state.js';
+import type { GhostView, RenderState } from './renderer/render-state.js';
+import type { SpriteId } from './renderer/sprite-atlas.js';
 
 /**
  * Composition root. See ironflow.md §4.
@@ -38,11 +39,12 @@ function bootstrap(): void {
   const overlay = new DebugOverlay(uiRoot);
   // C19 replaces the checkerboard with real generation. The world is empty
   // until something asks about a tile — see World.getChunk.
-  const world = new World(createCheckerboardGenerator());
-  // The store is told how big each building type is (C05). C06 replaces the
-  // debug table with the building registry, and this line stops being scaffolding.
-  const entities = new EntityStore({ footprintOf: DEMO_FOOTPRINTS });
-  const simulation = new Simulation(world, entities);
+  // C09 places real resource patches and C19 replaces the generator entirely.
+  // The world is empty until something asks about a tile — see World.getChunk.
+  const world = new World(createPlaygroundGenerator());
+  // The simulation builds its own registry from `data/buildings.ts` and hands
+  // the entity store the footprint lookup that comes with it (C05, C06).
+  const simulation = new Simulation({ world });
   const scheduler = new BrowserFrameScheduler();
 
   const camera = new Camera({ x: 6, y: 6 });
@@ -56,10 +58,17 @@ function bootstrap(): void {
   applySize();
   surface.onResize(applySize);
 
-  // Scaffolding until C06 places buildings from data; see debug/demo-entities.ts.
-  // The entities are real ones in the real store — only the decision of what to
-  // place, and what it looks like, is fake.
-  seedDemoEntities(entities);
+  /**
+   * Starting items, so there is something to build with (C06).
+   *
+   * **Scaffolding.** Nothing produces items until C11 mines and C16 crafts, so
+   * without a stock the first acceptance criterion — place a building — has no
+   * way to be met at all. C10 gives the player a real starting inventory and
+   * this line goes with it.
+   */
+  for (const definition of simulation.buildings.all()) {
+    simulation.items.add(definition.id, 50);
+  }
 
   /**
    * The renderer's view of the entity store, rebuilt at the top of every frame.
@@ -67,7 +76,7 @@ function bootstrap(): void {
    * The picker reads the same array the frame drew, so what the cursor picks is
    * always what is on screen. C07's `GameController` owns this derivation.
    */
-  let renderEntities = toRenderEntities(entities);
+  let renderEntities = describeEntities(simulation.entities, simulation.buildings);
 
   /* ------------------------------------------------------------------ *
    * Input (C04).
@@ -86,10 +95,63 @@ function bootstrap(): void {
     picker,
     commands: simulation.commands,
     onAction: (action, phase) => {
-      if (action === 'debug.toggleOverlay' && phase === 'down') overlay.toggle();
+      if (phase !== 'down') return;
+      if (action === 'debug.toggleOverlay') overlay.toggle();
+      selectBuildSlot(action);
     },
   });
   input.attach();
+
+  /**
+   * Number-row hotkeys, resolved against the content table.
+   *
+   * Slot *n* is the *n*th building in `data/buildings.ts`, so adding a building
+   * there gives it a hotkey and a ghost with no code change anywhere — C06's
+   * last acceptance criterion. C07's build menu replaces the hotkeys with a
+   * panel and sets the same tool.
+   */
+  function selectBuildSlot(action: InputAction): void {
+    const match = /^build\.slot([1-9])$/.exec(action);
+    if (match === null) return;
+
+    const definition = simulation.buildings.all()[Number(match[1]) - 1];
+    if (definition === undefined) return;
+
+    const held = input.buildTool;
+    // The same key twice puts the building down, which is how every toolbar in
+    // the genre behaves and the only way to empty a hand without reaching for
+    // Escape.
+    const tool: BuildTool | null =
+      held?.buildingId === definition.id
+        ? null
+        : { buildingId: definition.id, rotationCount: definition.rotationCount };
+    input.setBuildTool(tool);
+  }
+
+  /**
+   * The placement preview (C06 task 7).
+   *
+   * Validity comes from the simulation's own check, so the red tint and the
+   * rejection notice can never disagree — §7 says the simulation is the
+   * authority and this is the UI asking it rather than guessing. Reading is
+   * not mutating: nothing here changes authoritative state (§4).
+   */
+  function currentGhost(): GhostView | null {
+    const tool = input.buildTool;
+    const tile = input.hover;
+    if (tool === null || tile === null) return null;
+
+    const definition = simulation.buildings.get(tool.buildingId);
+    const extent = footprintExtent(definition.size, input.buildRotation);
+    return {
+      x: tile.x,
+      y: tile.y,
+      width: extent.width,
+      height: extent.height,
+      sprite: definition.sprite as SpriteId,
+      valid: simulation.checkPlacement(tool.buildingId, tile.x, tile.y, input.buildRotation) === null,
+    };
+  }
 
   /** The last command rejection, for the F3 readout until C07 has toasts. */
   let lastRejection = '—';
@@ -98,7 +160,7 @@ function bootstrap(): void {
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
-    renderEntities = toRenderEntities(entities);
+    renderEntities = describeEntities(simulation.entities, simulation.buildings);
 
     const now = scheduler.now();
     const elapsedMs = (now - lastFrameUs) / 1000;
@@ -118,7 +180,7 @@ function bootstrap(): void {
       world: simulation.world,
       entities: renderEntities,
       hover: input.hover,
-      ghost: null,
+      ghost: currentGhost(),
       selected: input.selected,
     };
     renderer.render(state, camera, alpha);
@@ -131,7 +193,7 @@ function bootstrap(): void {
     }
 
     const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
-    const originTile = world.getTile(0, 0);
+    const tool = input.buildTool;
     const stats = renderer.getStats();
     const hover = input.hover;
 
@@ -140,8 +202,11 @@ function bootstrap(): void {
       simulation.getTick(),
       {
         size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
-        world: `${world.chunkCount} chunk(s), (0,0)=${tileProperties(originTile).name}`,
-        entities: `${entities.size} live, next #${entities.nextId}`,
+        world: `${world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
+        build:
+          tool === null
+            ? '— (1-9 to select, R rotates)'
+            : `${tool.buildingId} r${input.buildRotation} x${simulation.items.count(tool.buildingId)}`,
         terrain: `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
         hover:
           hover === null

@@ -1,6 +1,11 @@
 import { CommandProcessor } from './commands/command-processor.js';
 import type { Command, CommandRejectionReason } from './commands/command.js';
+import { BUILDINGS } from './data/buildings.js';
 import { EntityStore } from './entities/entity-store.js';
+import { ItemCounts } from './items/item-stack.js';
+import { BuildingRegistry } from './registries/building-registry.js';
+import { BuildSystem } from './systems/build-system.js';
+import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
 
 /**
@@ -12,6 +17,18 @@ import type { World } from './world/world.js';
  * later chunks fill in, and the order is deliberate — changing it is a decision
  * with a changelog entry, not a tidy-up.
  */
+export interface SimulationOptions {
+  readonly world: World;
+  /**
+   * Content. Defaulted rather than required so a test that cares about ticks
+   * and not about buildings can say `new Simulation({ world })`, and so there
+   * is exactly one place — `data/buildings.ts` — where the shipped set lives.
+   */
+  readonly buildings?: BuildingRegistry;
+  readonly entities?: EntityStore;
+  readonly items?: ItemCounts;
+}
+
 export class Simulation {
   /**
    * The terrain and resources. Authoritative (§10) and owned here, because §4
@@ -21,12 +38,22 @@ export class Simulation {
   readonly world: World;
 
   /**
-   * Everything the player has built. Authoritative (§10), and injected for the
-   * same reason the world is: the store needs to know how big each building
-   * type is, and that answer belongs to C06's building registry. Until that
-   * exists, whoever constructs the simulation says where to ask.
+   * Everything the player has built. Authoritative (§10). Its footprint lookup
+   * comes from the building registry, which is why the two are constructed
+   * together here rather than separately by the caller.
    */
   readonly entities: EntityStore;
+
+  /** The building content table. Frozen; read by systems, the UI and hotkeys. */
+  readonly buildings: BuildingRegistry;
+
+  /**
+   * The player's items. Authoritative (§10). C08 replaces the container and
+   * C10 moves it onto the player; the field stays where the UI can read it.
+   */
+  readonly items: ItemCounts;
+
+  private readonly builder: BuildSystem;
 
   /**
    * The command queue (§7). Owned here because §7 puts validation inside the
@@ -38,9 +65,29 @@ export class Simulation {
 
   private tickCount = 0;
 
-  constructor(world: World, entities: EntityStore = new EntityStore()) {
-    this.world = world;
-    this.entities = entities;
+  constructor(options: SimulationOptions) {
+    this.world = options.world;
+    this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
+    this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
+    this.items = options.items ?? new ItemCounts();
+    this.builder = new BuildSystem({
+      world: this.world,
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+    });
+  }
+
+  /**
+   * Would this placement be accepted? Read-only, and safe to call per frame.
+   *
+   * The ghost preview's whole source of truth (C06 task 7). It is a method on
+   * the simulation rather than a public `BuildSystem` because the UI may ask
+   * questions and may not apply effects — asking is a view, placing is a
+   * command (§7), and C07's controller narrows this to a view model.
+   */
+  checkPlacement(buildingId: string, x: number, y: number, rotation: Rotation): CommandRejectionReason | null {
+    return this.builder.validate(buildingId, x, y, rotation);
   }
 
   /** Ticks elapsed since this world was created. Authoritative; serialized. */
@@ -91,20 +138,25 @@ export class Simulation {
   /**
    * Dispatch one validated command to the system that owns it.
    *
-   * C04 ships the pipeline and none of the effects, so every command is
-   * refused with `'not_implemented'` — which is the honest answer and, more
-   * usefully, a *visible* one: clicking a tile today produces a notification
-   * saying so rather than nothing at all, which is how the whole path gets
-   * verified before there is anything at the end of it.
+   * C06 fills in the first two arms. The rest are still refused with
+   * `'not_implemented'`, which is the honest answer and, more usefully, a
+   * *visible* one: clicking with no build tool held produces a notice saying
+   * so rather than nothing at all.
    *
    * Each later chunk replaces one arm of this with a call into its system —
-   * C06 `build` and `remove`, C10 `movePlayer` and `mineTile`, C15
-   * `setRecipe`, C22 `startResearch`. There is deliberately no handler
-   * registry: a switch is smaller, it is exhaustively checked by the compiler,
-   * and a registry would be an abstraction for a plugin system nobody wants
-   * (§19 rule 10).
+   * C10 `movePlayer` and `mineTile`, C15 `setRecipe`, C22 `startResearch`.
+   * There is deliberately no handler registry: a switch is smaller, it is
+   * exhaustively checked by the compiler, and a registry would be an
+   * abstraction for a plugin system nobody wants (§19 rule 10).
    */
-  private applyCommand(_command: Command): CommandRejectionReason | null {
-    return 'not_implemented';
+  private applyCommand(command: Command): CommandRejectionReason | null {
+    switch (command.type) {
+      case 'build':
+        return this.builder.place(command.buildingId, command.x, command.y, command.rotation);
+      case 'remove':
+        return this.builder.remove(command.x, command.y);
+      default:
+        return 'not_implemented';
+    }
   }
 }

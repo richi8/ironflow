@@ -24,7 +24,7 @@
  */
 
 import type { CommandSink } from '../game/commands/command-processor.js';
-import type { TileCoord } from '../game/world/coordinates.js';
+import { NORTH, isRotation, type Rotation, type TileCoord } from '../game/world/coordinates.js';
 
 import { KeyboardInput } from './keyboard-input.js';
 import { DEFAULT_KEYBINDINGS, type InputAction, type KeyBindings } from './keybindings.js';
@@ -60,6 +60,20 @@ export interface TilePicker {
   pick(screenX: number, screenY: number): ScenePickResult;
 }
 
+/**
+ * A building held over the cursor. See ironflow.md C06 task 4.
+ *
+ * `rotationCount` travels with the tool because `R` has to cycle within it and
+ * this layer may not read content data (§4): a chest has one rotation and a
+ * belt has four, and the composition root — which does know — says which. The
+ * rotation itself is *not* here: the manager owns it, the same way it owns
+ * hover and selection, because it is the thing the key changes.
+ */
+export interface BuildTool {
+  readonly buildingId: string;
+  readonly rotationCount: 1 | 2 | 4;
+}
+
 export interface InputManagerOptions {
   readonly canvas: HTMLCanvasElement;
   /** Where keyboard events are listened for. Usually `document`. */
@@ -91,7 +105,12 @@ const MAX_KEY_STEP_MS = 100;
 /** Set while the camera is being dragged, so the cursor can say so. */
 const DRAGGING_CLASS = 'is-dragging';
 
-type DragKind = 'camera' | 'mine';
+/**
+ * What a left-drag is doing. `tile` covers both mining and placing, because
+ * which of the two it is depends on whether a building is held *at the moment
+ * each tile is crossed*, not on what was true when the button went down.
+ */
+type DragKind = 'camera' | 'tile';
 
 interface Drag {
   readonly pointerId: number;
@@ -115,8 +134,10 @@ export class InputManager {
   private hovered: TileCoord | null = null;
   private hoveredEntity: number | null = null;
   private selectedTile: TileCoord | null = null;
-  /** The tile the current mine-drag last enqueued for. See `mineAt`. */
-  private lastMined: TileCoord | null = null;
+  /** The tile the current drag last enqueued for. See `actOnTile`. */
+  private lastActedTile: TileCoord | null = null;
+  private tool: BuildTool | null = null;
+  private toolRotation: Rotation = NORTH;
 
   constructor(options: InputManagerOptions) {
     this.canvas = options.canvas;
@@ -164,6 +185,39 @@ export class InputManager {
   /** The last tile clicked. Presentation state; C12's inspector reads it. */
   get selected(): TileCoord | null {
     return this.selectedTile;
+  }
+
+  /**
+   * The building held over the cursor, or null for an empty hand.
+   *
+   * Presentation state, like hover and selection: it is not serialized, no
+   * system reads it, and nothing happens until a click turns it into a `build`
+   * command. C07's build menu sets it; C06's composition root does it from the
+   * number-row hotkeys.
+   */
+  get buildTool(): BuildTool | null {
+    return this.tool;
+  }
+
+  /** The rotation the held building would be placed with. */
+  get buildRotation(): Rotation {
+    return this.toolRotation;
+  }
+
+  /**
+   * Hold a building, or `null` to empty the hand.
+   *
+   * Rotation resets to north when the building changes but survives
+   * re-selecting the same one, which is what a player dragging out a row of
+   * east-facing belts expects: picking the belt up again must not turn it.
+   */
+  setBuildTool(tool: BuildTool | null): void {
+    if (tool !== null && this.tool?.buildingId === tool.buildingId) {
+      this.tool = tool;
+      return;
+    }
+    this.tool = tool;
+    this.toolRotation = NORTH;
   }
 
   /** True while the camera is being dragged. For the debug readout. */
@@ -218,15 +272,26 @@ export class InputManager {
     }
 
     if (sample.button === BUTTON_LEFT) {
-      this.beginDrag(sample, 'mine');
-      this.selectedTile = this.hovered;
-      this.lastMined = null;
-      this.mineAt(this.hovered);
+      this.beginDrag(sample, 'tile');
+      // Placing does not move the selection: dragging out a row of chests
+      // should not drag C12's inspector along behind it.
+      if (this.tool === null) this.selectedTile = this.hovered;
+      this.lastActedTile = null;
+      this.actOnTile(this.hovered);
       return;
     }
 
     if (sample.button === BUTTON_RIGHT) {
+      // With a building held, the right button puts it down — the genre's
+      // universal "cancel", and the reason it does not also demolish: the
+      // click that cancels a misplaced ghost must never be the click that
+      // removes the building underneath it.
+      if (this.tool !== null) {
+        this.setBuildTool(null);
+        return;
+      }
       this.selectedTile = null;
+      this.removeAt(this.hovered);
     }
   }
 
@@ -260,7 +325,7 @@ export class InputManager {
     }
 
     this.refreshHover();
-    this.mineAt(this.hovered);
+    this.actOnTile(this.hovered);
   }
 
   private handleUp(sample: PointerSample): void {
@@ -285,7 +350,7 @@ export class InputManager {
     const drag = this.drag;
     if (drag === null) return;
     this.drag = null;
-    this.lastMined = null;
+    this.lastActedTile = null;
     this.mouse.release(drag.pointerId);
     this.canvas.classList.remove(DRAGGING_CLASS);
   }
@@ -295,8 +360,14 @@ export class InputManager {
    * ---------------------------------------------------------------- */
 
   private handleAction(action: InputAction, phase: 'down' | 'up'): void {
-    if (phase === 'down' && action === 'selection.clear') {
-      this.selectedTile = null;
+    if (phase === 'down') {
+      if (action === 'selection.clear') {
+        // One key that means "stop what you are doing": it drops the held
+        // building as well as the selection, so Escape is always the way out.
+        this.selectedTile = null;
+        this.setBuildTool(null);
+      }
+      if (action === 'build.rotate') this.rotateTool();
     }
     this.onAction?.(action, phase);
   }
@@ -349,25 +420,53 @@ export class InputManager {
   }
 
   /**
-   * Ask the simulation to mine a tile, at most once per tile per drag.
+   * Act on a tile, at most once per tile per drag.
    *
-   * The de-duplication is what keeps a drag from enqueueing sixty commands a
+   * With a building held this places it; with an empty hand it mines. The
+   * de-duplication is what keeps a drag from enqueueing sixty commands a
    * second for the tile the cursor is resting on — the queue's per-tick cap
    * (§7) is a backstop, not a plan. Together they are the acceptance criterion
    * "a held-down build drag never enqueues more than 1024 commands per tick":
    * a drag can only produce one command per tile it crosses, and the processor
    * refuses to hand the tick more than 1024 of them however they arrive.
    *
-   * C06 replaces this with the selected build tool's command; until then it is
-   * `mineTile`, which is what the left button does in this genre when no tool
-   * is held. Its effect is C10's. Today the simulation rejects it with
-   * `'not_implemented'` and the rejection is shown — which is exactly the path
-   * this chunk exists to build, end to end, with something visible at the end.
+   * Dragging places one building per tile crossed, which is not C06's
+   * out-of-scope "drag-to-build lines" — that is C13's straight-line snapping
+   * for belts. This is the same one-command-per-tile path mining already used.
+   *
+   * `mineTile` still has no effect until C10; the simulation refuses it with
+   * `'not_implemented'` and the refusal is shown, which is the honest state of
+   * an empty hand in a game that has no player character yet.
    */
-  private mineAt(tile: TileCoord | null): void {
+  private actOnTile(tile: TileCoord | null): void {
     if (tile === null) return;
-    if (this.lastMined !== null && this.lastMined.x === tile.x && this.lastMined.y === tile.y) return;
-    this.lastMined = tile;
-    this.commands.enqueue({ type: 'mineTile', x: tile.x, y: tile.y });
+    if (this.lastActedTile !== null && this.lastActedTile.x === tile.x && this.lastActedTile.y === tile.y) return;
+    this.lastActedTile = tile;
+
+    const tool = this.tool;
+    if (tool === null) {
+      this.commands.enqueue({ type: 'mineTile', x: tile.x, y: tile.y });
+      return;
+    }
+    this.commands.enqueue({
+      type: 'build',
+      buildingId: tool.buildingId,
+      x: tile.x,
+      y: tile.y,
+      rotation: this.toolRotation,
+    });
+  }
+
+  /** Ask the simulation to demolish whatever stands on a tile (C06 task 6). */
+  private removeAt(tile: TileCoord | null): void {
+    if (tile === null) return;
+    this.commands.enqueue({ type: 'remove', x: tile.x, y: tile.y });
+  }
+
+  private rotateTool(): void {
+    const tool = this.tool;
+    if (tool === null) return;
+    const next = (this.toolRotation + 1) % tool.rotationCount;
+    this.toolRotation = isRotation(next) ? next : NORTH;
   }
 }

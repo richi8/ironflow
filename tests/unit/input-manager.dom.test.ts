@@ -307,7 +307,7 @@ describe('commands', () => {
   });
 
   it('never mutates simulation state from a handler: only a tick does that', () => {
-    const simulation = new Simulation(new World(createCheckerboardGenerator()));
+    const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
     input.detach();
     input = new InputManager({
       canvas,
@@ -358,6 +358,150 @@ describe('selection', () => {
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
     document.dispatchEvent(keyEvent('keydown', 'Escape'));
     expect(input.selected).toBeNull();
+  });
+});
+
+describe('the build tool', () => {
+  const BELT = { buildingId: 'belt', rotationCount: 4 } as const;
+
+  /**
+   * A full press. `KeyboardInput` suppresses a second `keydown` without an
+   * intervening `keyup`, because that is what an auto-repeating key looks like
+   * — and a held R must not spin the ghost at the keyboard's repeat rate.
+   */
+  function press(code: string): void {
+    document.dispatchEvent(keyEvent('keydown', code));
+    document.dispatchEvent(keyEvent('keyup', code));
+  }
+
+  /** Every command in the queue, as a short readable string. */
+  function queued(): string[] {
+    return commands.drain().map((c) => {
+      if (c.type === 'build') return `build ${c.buildingId} ${c.x},${c.y} r${c.rotation}`;
+      if (c.type === 'remove') return `remove ${c.x},${c.y}`;
+      return `${c.type} ${c.type === 'mineTile' ? `${c.x},${c.y}` : ''}`.trim();
+    });
+  }
+
+  it('turns the left button into a build command while a building is held', () => {
+    input.setBuildTool(BELT);
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+    expect(queued()).toEqual(['build belt 3,8 r0']);
+  });
+
+  it('leaves the empty hand mining, which is C10s job', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    expect(queued()).toEqual(['mineTile 3,8']);
+  });
+
+  it('places once per tile crossed by a drag, and never twice for one tile', () => {
+    input.setBuildTool(BELT);
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    for (const x of [7, 12, 14, 25]) {
+      canvas.dispatchEvent(pointerEvent('pointermove', { x, y: 5, buttons: BUTTONS_LEFT }));
+    }
+
+    expect(queued()).toEqual(['build belt 0,0 r0', 'build belt 1,0 r0', 'build belt 2,0 r0']);
+  });
+
+  it('cycles rotation with the bound key, within the rotations the building has', () => {
+    input.setBuildTool(BELT);
+    for (const expected of [1, 2, 3, 0]) {
+      press('KeyR');
+      expect(input.buildRotation).toBe(expected);
+    }
+
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+    press('KeyR');
+    expect(input.buildRotation).toBe(0);
+  });
+
+  it('builds with the rotation on screen', () => {
+    input.setBuildTool(BELT);
+    press('KeyR');
+    press('KeyR');
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+    expect(queued()).toEqual(['build belt 0,0 r2']);
+  });
+
+  it('rotates nothing when the hand is empty', () => {
+    press('KeyR');
+    expect(input.buildRotation).toBe(0);
+    expect(input.buildTool).toBeNull();
+  });
+
+  it('keeps the rotation when the same building is re-selected and drops it otherwise', () => {
+    input.setBuildTool(BELT);
+    press('KeyR');
+
+    input.setBuildTool({ ...BELT });
+    expect(input.buildRotation).toBe(1);
+
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+    expect(input.buildRotation).toBe(0);
+  });
+
+  it('puts the building down on the right button instead of demolishing', () => {
+    input.setBuildTool(BELT);
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
+
+    expect(input.buildTool).toBeNull();
+    // Nothing was demolished: the click that cancels a ghost must never be the
+    // click that removes what is underneath it.
+    expect(queued()).toEqual([]);
+  });
+
+  it('demolishes on the right button when the hand is empty', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
+    expect(queued()).toEqual(['remove 3,8']);
+  });
+
+  it('is dropped by the same key that clears a selection', () => {
+    input.setBuildTool(BELT);
+    document.dispatchEvent(keyEvent('keydown', 'Escape'));
+    expect(input.buildTool).toBeNull();
+  });
+
+  it('forwards the slot hotkeys, because only the composition root knows the content', () => {
+    press('Digit1');
+    press('Digit9');
+
+    expect(actions.filter(([, phase]) => phase === 'down').map(([action]) => action)).toEqual([
+      'build.slot1',
+      'build.slot9',
+    ]);
+    // The manager itself holds nothing: what slot 1 means is content.
+    expect(input.buildTool).toBeNull();
+  });
+
+  it('does not move the selection while placing', () => {
+    input.setBuildTool(BELT);
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    expect(input.selected).toBeNull();
+  });
+
+  it('never touches simulation state: a held building still only enqueues', () => {
+    const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
+    simulation.items.add('chest', 1);
+    input.detach();
+    input = new InputManager({
+      canvas,
+      keyTarget: document,
+      camera,
+      picker: new GridPicker(),
+      commands: simulation.commands,
+    });
+    input.attach();
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    expect(simulation.entities.size).toBe(0);
+
+    simulation.tick();
+    expect(simulation.entities.at(3, 8)).toBeDefined();
+    expect(simulation.items.count('chest')).toBe(0);
   });
 });
 

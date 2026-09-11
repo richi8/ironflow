@@ -505,7 +505,7 @@ describe('EntityStore input validation', () => {
 describe('the simulation cleanup phase', () => {
   it('applies deferred removals once per tick, and not before', () => {
     const entities = store();
-    const simulation = new Simulation(new World(createCheckerboardGenerator()), entities);
+    const simulation = new Simulation({ world: new World(createCheckerboardGenerator()), entities });
     const chest = place(entities, EntityType.Chest, 2, 2);
 
     entities.remove(chest.id);
@@ -519,7 +519,7 @@ describe('the simulation cleanup phase', () => {
   });
 
   it('gives a simulation its own store when none is supplied', () => {
-    const simulation = new Simulation(new World(createCheckerboardGenerator()));
+    const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
     expect(simulation.entities.size).toBe(0);
     expect(() => simulation.tick()).not.toThrow();
   });

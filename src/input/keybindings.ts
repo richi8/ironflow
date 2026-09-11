@@ -18,10 +18,17 @@
 /**
  * Something the game can be asked to do with a key.
  *
- * Only actions C04 can actually carry out are listed. Build hotkeys, rotation
- * and the panels get their actions from the chunks that implement them (§19
- * rule 4) — an action with no handler is a keybinding that silently does
- * nothing, which is worse than no keybinding at all.
+ * Only actions some layer actually carries out are listed; the panels get
+ * theirs from the chunks that implement them (§19 rule 4), because an action
+ * with no handler is a keybinding that silently does nothing, which is worse
+ * than no keybinding at all.
+ *
+ * The nine build slots are C06's, and all nine are handled — by the
+ * composition root, which maps slot *n* to the *n*th building in
+ * `data/buildings.ts`. Their meaning is therefore content: a slot past the end
+ * of that table selects nothing today and becomes a real hotkey the moment a
+ * building is added, with no code change anywhere. That is the chunk's last
+ * acceptance criterion, expressed as a keymap.
  *
  * Pan directions are named for the **screen**, not for tile space: this is a
  * view control, the player is pushing the picture around, and nothing here
@@ -37,6 +44,17 @@ export type InputAction =
   /** Held, not tapped: turns a left-drag into a camera drag (C04 task 4). */
   | 'camera.dragModifier'
   | 'selection.clear'
+  /** Cycle the held building's rotation (C06 task 5). */
+  | 'build.rotate'
+  | 'build.slot1'
+  | 'build.slot2'
+  | 'build.slot3'
+  | 'build.slot4'
+  | 'build.slot5'
+  | 'build.slot6'
+  | 'build.slot7'
+  | 'build.slot8'
+  | 'build.slot9'
   | 'debug.toggleOverlay';
 
 /** A map from `KeyboardEvent.code` to the action that key performs. */
@@ -49,7 +67,8 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
  * onwards and a binding that has to be taken away later is worse than one that
  * is never offered. Space is the drag modifier for the same reason it is in
  * every map editor: it is the largest key and it is not a letter anyone needs
- * while dragging.
+ * while dragging. `R` rotates and the number row selects, which is what every
+ * game in this genre has trained the player's left hand to expect.
  */
 export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ArrowUp: 'camera.panUp',
@@ -62,6 +81,16 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   NumpadSubtract: 'camera.zoomOut',
   Space: 'camera.dragModifier',
   Escape: 'selection.clear',
+  KeyR: 'build.rotate',
+  Digit1: 'build.slot1',
+  Digit2: 'build.slot2',
+  Digit3: 'build.slot3',
+  Digit4: 'build.slot4',
+  Digit5: 'build.slot5',
+  Digit6: 'build.slot6',
+  Digit7: 'build.slot7',
+  Digit8: 'build.slot8',
+  Digit9: 'build.slot9',
   F3: 'debug.toggleOverlay',
 });
 

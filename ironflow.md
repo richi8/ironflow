@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C03 complete.** Next: C04 — Input & command pipeline. |
+| **Status** | **C06 complete.** Next: C07 — UI shell & HUD (Milestone A gate). |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C04 — Input & command pipeline** |
+| **First action** | Chunk **C07 — UI shell & HUD** |
 
 ---
 
@@ -1764,6 +1764,110 @@ cost deduction and refund.
 
 **Out of scope.** Build time or construction animation — building is instant in
 v1. Blueprints. Drag-to-build lines (add in C13 for belts, where it matters).
+
+**Decisions made while building this chunk.**
+
+1. **`BuildingDefinition` gained `entityType`.** Task 1 does not list it and
+   something must carry it: entities store a numeric `EntityType` (C05) while
+   commands, content and the UI name buildings by string id. The mapping lives
+   on the definition so the two vocabularies meet in exactly one place, and the
+   registry refuses two definitions that claim the same type.
+2. **Six categories, not four.** The placeholder atlas (C03) already colours
+   `extraction` and `research`, and §15 has buildings in both — a miner is not
+   production and a lab is not storage. Two category vocabularies, one for the
+   build menu and one for the colour, would be a table kept in step by hand.
+3. **`sprite` is typed `string`, not `SpriteId`.** §4 forbids `game/` from
+   importing `renderer/`, and the renderer's `SpriteId` *is* `string`. The
+   field holds a name, not a picture; C29 changes the value, not the type.
+4. **`placement.onTerrain` may only narrow `tile.ts`.** A definition listing
+   water is refused at construction: "water is unbuildable" is a fact about the
+   world (C02) and content data is not where it gets overruled. The shipped
+   definitions use a list derived from `isBuildable`, so a terrain type added
+   in C19 is buildable in one place.
+5. **A rotation a building does not have is normalised, not rejected.** A chest
+   asked to face south is stored facing north. Rejecting would add a reason no
+   player could act on; normalising means a rotation outside `rotationCount`
+   can never reach a save, where it would come back as a footprint nobody can
+   explain. `R` cycles within `rotationCount`, so the ghost never shows one.
+6. **Validation order is the order of the answers a player can use**, not the
+   cheapest order: unknown building, bounds, occupancy, terrain, resource, and
+   affordability **last**. Told that a tile is both water and unaffordable,
+   "water" is what explains the red ghost; "you cannot afford it" would be just
+   as true one tile to the left.
+7. **The ghost asks the simulation, and gets the same answer the command will.**
+   `Simulation.checkPlacement` is one read-only method rather than a public
+   `BuildSystem`, because the UI may ask questions and may not apply effects
+   (§7). It is what keeps a green ghost from being followed by a rejection.
+8. **Four rejection reasons were added** — `unknown_building`, `bad_terrain`,
+   `no_resource`, `nothing_there` — which is what §7's trailing `...` is for.
+   Each is a distinct sentence a player could be shown, which is the chunk's
+   first acceptance criterion.
+9. **Right-click cancels the held building; it only demolishes an empty hand.**
+   The click that cancels a misplaced ghost must never be the click that
+   removes the building underneath it. Escape does both, and is the one key
+   that always means "stop what you are doing".
+10. **Left-drag places one building per tile crossed.** This is the path mining
+    already used (C04) with its one-command-per-tile de-duplication, not the
+    "drag-to-build lines" this chunk puts out of scope — that is C13's
+    straight-line snapping for belts.
+11. **`ItemCounts` is a placeholder for C08's `Inventory`.** The chunk's tests
+    require cost deduction and refunds, and nothing holds items yet. It has no
+    stack limits and no slots — those are precisely what C08 adds — and it
+    lives in `game/items/item-stack.ts` beside `ItemStack`, which *is*
+    permanent: it is how content names a quantity from here on.
+12. **`Simulation` now takes an options object.** Four collaborators (world,
+    registry, entity store, items) is past where positional parameters stay
+    readable, and every one but the world has a default, so a test that cares
+    about ticks still writes `new Simulation({ world })`.
+13. **Build slots are content, not code.** `build.slot1`–`slot9` are bound to
+    the number row, and the composition root resolves slot *n* against
+    `data/buildings.ts`. Adding a building there gives it a hotkey, a ghost and
+    a placement rule with no code change anywhere — the chunk's last acceptance
+    criterion, expressed as a keymap. C07's build menu replaces the hotkeys and
+    sets the same tool.
+14. **A removed building holds its tiles until the tick ends.** C05 defers
+    removal to the cleanup phase, so a `remove` and a `build` on the same tile
+    in the same tick end with the build refused as `'occupied'`. That is the
+    honest answer — the tile is not free until the tick that frees it has
+    finished — and it is the same answer on every machine (§8). A second
+    `remove` on the same tile in the same tick is `'nothing_there'` rather than
+    a second refund.
+
+**Scaffolding shipped with this chunk**, both marked in the source and both
+deleted by the chunk that supersedes them.
+
+- **`createPlaygroundGenerator`** — the checkerboard plus a pond and two ore
+  patches near the origin. Three acceptance criteria are about *visible*
+  rejections, and neither water nor ore existed in the world before this. The
+  patches are stamped onto sand because C09 is what draws ore piles; until then
+  the ground's colour is the only way to see where a miner may stand. C09
+  replaces the patches and C19 replaces the generator.
+- **A starting stock of 50 of every building**, granted in the composition
+  root. Nothing produces items until C11 mines and C16 crafts, so without it
+  the first acceptance criterion could not be met at all. C10 gives the player
+  a real starting inventory.
+
+`debug/demo-entities.ts` is **deleted**, as C03 and C05 said it would be: the
+entities on screen are now placed by the player through the command pipeline.
+The mapping from stored entity to drawable moved to `renderer/entity-view.ts`,
+which C07's `GameController` takes over.
+
+**Noticed, not fixed.**
+
+- The composition root now holds the build tool's hotkey resolution, the ghost
+  assembly and the render-entity derivation. All three are `GameController`'s
+  by §4, and C07 is the chunk that creates it — moving them now would be
+  building that file one chunk early.
+- `ScenePicker` still scans the entity list per pick (noticed in C04, again in
+  C05). The occupancy index could answer it directly now, but the picker needs
+  the drawable behind a *pixel*, not the entity under a tile, and the ray it
+  walks is the part that matters.
+- The ghost is rebuilt and revalidated every frame, which runs the whole
+  placement check at frame rate. It is a handful of tile lookups today; if it
+  ever shows up in a profile it caches on (tile, rotation, tool).
+- Placement does not consider the player's reach, because there is no player
+  until C10. `'out_of_range'` currently means "off the edge of the packable
+  world", and C10 is where it gains its second meaning.
 
 ---
 
