@@ -52,8 +52,9 @@ body {
 }
 
 .debug-overlay {
-  position: absolute;
-  top: 12px;
+  position: fixed;
+  /* Below the HUD bar (C07), which owns the top edge. */
+  top: 56px;
   left: 12px;
   min-width: 190px;
   padding: 8px 10px;
@@ -86,6 +87,343 @@ body {
 
 .debug-overlay__value {
   color: var(--if-text);
+}
+
+
+/* ========================================================================== *
+ * UI shell — ironflow.md C07, §11, §13.
+ *
+ * Every panel is `position: fixed` and lives in `#ui`, never inside the canvas
+ * (task 7). The layout deliberately leaves the middle of the screen empty: at
+ * 1280x720 the HUD takes 44px off the top, the toolbar 56px off the bottom and
+ * the build menu 260px off the right only while it is open, so the build
+ * cursor always has somewhere to be.
+ * ========================================================================== */
+
+.if-icon {
+  display: block;
+  flex: none;
+  /* `currentColor` throughout (§11), so a dimmed tile dims its icon with it. */
+  color: inherit;
+}
+
+/* --- HUD ------------------------------------------------------------------ */
+
+.if-hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--if-stroke);
+  background: color-mix(in srgb, var(--if-panel) 92%, transparent);
+  user-select: none;
+}
+
+.if-hud.is-paused {
+  border-bottom-color: var(--if-accent);
+}
+
+.if-hud__tile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: var(--if-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.if-hud__tile + .if-hud__tile {
+  border-left: 1px solid var(--if-stroke);
+}
+
+.if-hud__tile.is-warning {
+  color: var(--if-warn);
+}
+
+.if-hud__label {
+  color: var(--if-text-dim);
+  letter-spacing: 0.08em;
+}
+
+.if-hud__value {
+  min-width: 3ch;
+  color: var(--if-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.if-hud__pause {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 7px 0 7px auto;
+  padding: 0 12px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.if-hud__pause:hover {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+.if-hud__pause[aria-pressed='true'] {
+  border-color: var(--if-accent);
+  background: var(--if-accent-dim);
+  color: var(--if-text);
+}
+
+/* --- Toolbar -------------------------------------------------------------- */
+
+.if-toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 92%, transparent);
+  user-select: none;
+}
+
+.if-toolbar__menu {
+  padding: 0 12px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.if-toolbar__menu:hover,
+.if-toolbar__menu.is-active {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+.if-toolbar__rotation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  color: var(--if-text-dim);
+  font-size: 13px;
+}
+
+.if-toolbar__rotation.is-active {
+  color: var(--if-accent-high);
+}
+
+.if-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  width: 74px;
+  height: 44px;
+  padding: 4px 6px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-slot:hover:not(:disabled) {
+  border-color: var(--if-blue);
+}
+
+.if-slot.is-selected {
+  border-color: var(--if-accent);
+  background: var(--if-accent-dim);
+}
+
+.if-slot.is-unaffordable .if-slot__count,
+.if-slot.is-unaffordable .if-slot__name {
+  color: var(--if-danger);
+}
+
+.if-slot.is-empty,
+.if-slot:disabled {
+  background: transparent;
+  cursor: default;
+}
+
+.if-slot__key {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  color: var(--if-text-dim);
+  font-size: 10px;
+}
+
+.if-slot__name {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--if-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-slot__count {
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Build menu ----------------------------------------------------------- */
+
+.if-build-menu {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  bottom: 76px;
+  width: 248px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 95%, transparent);
+}
+
+.if-build-menu__title {
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--if-stroke);
+  color: var(--if-accent);
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: 0.12em;
+}
+
+.if-build-menu__group + .if-build-menu__group {
+  margin-top: 12px;
+}
+
+.if-build-menu__heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.if-build-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-build-row + .if-build-row {
+  margin-top: 3px;
+}
+
+.if-build-row:hover:not(:disabled) {
+  border-color: var(--if-blue);
+}
+
+.if-build-row.is-selected {
+  border-color: var(--if-accent);
+  background: var(--if-accent-dim);
+}
+
+.if-build-row.is-unaffordable .if-build-row__cost {
+  color: var(--if-danger);
+}
+
+.if-build-row.is-locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.if-build-row__name {
+  flex: 1;
+}
+
+.if-build-row__cost {
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-build-row__hotkey:not(:empty) {
+  /* A key cap, so the hotkey does not read as another digit of the cost. */
+  min-width: 16px;
+  padding: 1px 0;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  text-align: center;
+}
+
+/* --- Notifications -------------------------------------------------------- */
+
+/* Specificity has to clear `#ui > *`, which opts every panel back in. */
+#ui .if-toasts {
+  position: fixed;
+  left: 12px;
+  /* Clear of the toolbar, which owns the bottom 56px plus its own margin. */
+  bottom: 80px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  max-width: 320px;
+  /* The stack is a gap in the pointer layer; the toasts themselves are inert. */
+  pointer-events: none;
+}
+
+.if-toast {
+  padding: 7px 10px;
+  border: 1px solid var(--if-stroke);
+  border-left-width: 3px;
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel-high) 95%, transparent);
+  color: var(--if-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.if-toast--reject {
+  border-left-color: var(--if-danger);
+}
+
+.if-toast--info {
+  border-left-color: var(--if-blue);
 }
 
 [hidden] {

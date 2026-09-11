@@ -1,12 +1,12 @@
 import './styles/main.css';
 
 import { DebugOverlay } from './debug/debug-overlay.js';
-import { footprintExtent } from './game/entities/entity.js';
+import { GameController } from './game/game-controller.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
 import { createPlaygroundGenerator } from './game/world/world-generator.js';
 import { World } from './game/world/world.js';
-import { InputManager, type BuildTool } from './input/input-manager.js';
+import { InputManager } from './input/input-manager.js';
 import type { InputAction } from './input/keybindings.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
@@ -16,6 +16,7 @@ import { describeEntities } from './renderer/entity-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, RenderState } from './renderer/render-state.js';
 import type { SpriteId } from './renderer/sprite-atlas.js';
+import { GameUI } from './ui/ui.js';
 
 /**
  * Composition root. See ironflow.md §4.
@@ -23,6 +24,12 @@ import type { SpriteId } from './renderer/sprite-atlas.js';
  * This is the only file allowed to know about every layer at once. Its whole
  * job is to construct the pieces and hand them to each other; if logic starts
  * accumulating here, it belongs somewhere else.
+ *
+ * C07 took three things out of it, which is why it is shorter than it was:
+ * hotkey resolution and the placement preview moved into `GameController`, and
+ * the rejection readout became real toasts. What is left is wiring, plus the
+ * one translation §4 will not let the controller do — turning a building's
+ * content id into a sprite id for the ghost.
  */
 
 function requireElement<T extends Element>(selector: string): T {
@@ -37,8 +44,6 @@ function bootstrap(): void {
 
   const surface = new CanvasSurface(canvas);
   const overlay = new DebugOverlay(uiRoot);
-  // C19 replaces the checkerboard with real generation. The world is empty
-  // until something asks about a tile — see World.getChunk.
   // C09 places real resource patches and C19 replaces the generator entirely.
   // The world is empty until something asks about a tile — see World.getChunk.
   const world = new World(createPlaygroundGenerator());
@@ -74,7 +79,9 @@ function bootstrap(): void {
    * The renderer's view of the entity store, rebuilt at the top of every frame.
    *
    * The picker reads the same array the frame drew, so what the cursor picks is
-   * always what is on screen. C07's `GameController` owns this derivation.
+   * always what is on screen. This stayed on the renderer's side of §4 when the
+   * rest of the composition root's derivations moved into `GameController`: a
+   * drawable names a sprite, and `game/**` may not know what a sprite is.
    */
   let renderEntities = describeEntities(simulation.entities, simulation.buildings);
 
@@ -95,67 +102,54 @@ function bootstrap(): void {
     picker,
     commands: simulation.commands,
     onAction: (action, phase) => {
-      if (phase !== 'down') return;
-      if (action === 'debug.toggleOverlay') overlay.toggle();
-      selectBuildSlot(action);
+      if (phase === 'down') handleAction(action);
     },
   });
   input.attach();
 
   /**
-   * Number-row hotkeys, resolved against the content table.
+   * Keyboard actions no layer below owns. See `input/keybindings.ts`.
    *
-   * Slot *n* is the *n*th building in `data/buildings.ts`, so adding a building
-   * there gives it a hotkey and a ghost with no code change anywhere — C06's
-   * last acceptance criterion. C07's build menu replaces the hotkeys with a
-   * panel and sets the same tool.
+   * The number row goes through exactly the call the toolbar's tiles do, so a
+   * hotkey and a click are the same event by construction rather than by two
+   * code paths kept in step.
    */
-  function selectBuildSlot(action: InputAction): void {
-    const match = /^build\.slot([1-9])$/.exec(action);
-    if (match === null) return;
-
-    const definition = simulation.buildings.all()[Number(match[1]) - 1];
-    if (definition === undefined) return;
-
-    const held = input.buildTool;
-    // The same key twice puts the building down, which is how every toolbar in
-    // the genre behaves and the only way to empty a hand without reaching for
-    // Escape.
-    const tool: BuildTool | null =
-      held?.buildingId === definition.id
-        ? null
-        : { buildingId: definition.id, rotationCount: definition.rotationCount };
-    input.setBuildTool(tool);
+  function handleAction(action: InputAction): void {
+    if (action === 'debug.toggleOverlay') {
+      overlay.toggle();
+      return;
+    }
+    if (action === 'ui.toggleBuildMenu') {
+      ui.toggleBuildMenu();
+      return;
+    }
+    if (action === 'game.togglePause') {
+      controller.togglePause();
+      return;
+    }
+    const slot = /^build\.slot([1-9])$/.exec(action);
+    if (slot !== null) controller.selectSlot(Number(slot[1]));
   }
 
   /**
-   * The placement preview (C06 task 7).
+   * The placement preview (C06 task 7), with its sprite attached.
    *
-   * Validity comes from the simulation's own check, so the red tint and the
-   * rejection notice can never disagree — §7 says the simulation is the
-   * authority and this is the UI asking it rather than guessing. Reading is
-   * not mutating: nothing here changes authoritative state (§4).
+   * The controller answers everything except what it looks like: §4 forbids
+   * `game/**` from naming a sprite, so the id-to-sprite step happens here, the
+   * same way `describeEntities` does it for placed buildings.
    */
   function currentGhost(): GhostView | null {
-    const tool = input.buildTool;
-    const tile = input.hover;
-    if (tool === null || tile === null) return null;
-
-    const definition = simulation.buildings.get(tool.buildingId);
-    const extent = footprintExtent(definition.size, input.buildRotation);
+    const placement = controller.getPlacementView();
+    if (placement === null) return null;
     return {
-      x: tile.x,
-      y: tile.y,
-      width: extent.width,
-      height: extent.height,
-      sprite: definition.sprite as SpriteId,
-      valid: simulation.checkPlacement(tool.buildingId, tile.x, tile.y, input.buildRotation) === null,
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      height: placement.height,
+      sprite: simulation.buildings.get(placement.buildingId).sprite as SpriteId,
+      valid: placement.valid,
     };
   }
-
-  /** The last command rejection, for the F3 readout until C07 has toasts. */
-  let lastRejection = '—';
-  let rejectionCount = 0;
 
   let lastFrameUs = scheduler.now();
 
@@ -173,9 +167,7 @@ function bootstrap(): void {
     // under a stationary cursor changes when it does.
     input.update(elapsedMs);
 
-    // The read-only view the renderer is allowed to see (C03 task 2). C07's
-    // GameController takes this job over; until it exists, assembling it is
-    // composition, which is what this file is for.
+    // The read-only view the renderer is allowed to see (C03 task 2).
     const state: RenderState = {
       world: simulation.world,
       entities: renderEntities,
@@ -185,17 +177,15 @@ function bootstrap(): void {
     };
     renderer.render(state, camera, alpha);
 
-    // §13: never from inside a tick. The processor records rejections and the
-    // controller collects them afterwards, which is here until C07 exists.
-    for (const rejection of simulation.commands.takeRejections()) {
-      lastRejection = `${rejection.command.type}: ${rejection.reason}`;
-      rejectionCount += 1;
-    }
+    // §13: never from inside a tick. The simulation records, the frame ends,
+    // and only then does the controller hand anything to the UI.
+    controller.pump();
+    ui.update(elapsedMs);
 
     const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
-    const tool = input.buildTool;
     const stats = renderer.getStats();
     const hover = input.hover;
+    const held = controller.getSelectedBuilding();
 
     overlay.update(
       game.getStats(),
@@ -204,21 +194,26 @@ function bootstrap(): void {
         size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
         world: `${world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
         build:
-          tool === null
-            ? '— (1-9 to select, R rotates)'
-            : `${tool.buildingId} r${input.buildRotation} x${simulation.items.count(tool.buildingId)}`,
+          held === null
+            ? '— (1-9 or B to select, R rotates)'
+            : `${held} r${input.buildRotation} x${simulation.items.count(held)}`,
         terrain: `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
         hover:
           hover === null
             ? '—'
             : `${hover.x},${hover.y}${input.hoverEntity === null ? '' : ` #${input.hoverEntity}`}`,
-        reject: rejectionCount === 0 ? '—' : `${lastRejection} (${rejectionCount})`,
       },
       elapsedMs,
     );
   };
 
   const game = new Game({ simulation, scheduler, render });
+  // `InputManager` satisfies `BuildCursor` structurally and has never heard of
+  // it: what the player holds is pointer state (C04) and the UI has to see it
+  // without importing `input/**` (§4).
+  const controller = new GameController({ game, cursor: input });
+  const ui = new GameUI({ root: uiRoot, controller });
+  ui.mount();
 
   // §8: the game does not run in a background tab. Time away costs nothing and
   // produces nothing, and resyncing on return avoids a pointless catch-up lurch.

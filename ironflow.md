@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C06 complete.** Next: C07 — UI shell & HUD (Milestone A gate). |
+| **Status** | **C07 complete — Milestone A gate passed.** Next: C08 — items & inventories. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C07 — UI shell & HUD** |
+| **First action** | Chunk **C08 — Items & inventories** |
 
 ---
 
@@ -623,6 +623,15 @@ accumulator.
 Also handle `visibilitychange` by resetting `last` on resume, and pause the loop
 outright when a modal save/load dialog is open.
 
+**Implementation note (C07).** "Pause the loop" is now a real control, and it is
+not `stop()`. `GameLoop.setPaused` keeps drawing and stops ticking: a stopped
+loop draws nothing, so the canvas freezes and the camera dies with it, whereas a
+paused game is one the player can still pan around. A paused frame rebases the
+clock rather than advancing it, so a five-minute pause runs exactly zero
+catch-up ticks — the same answer this section gives for a backgrounded tab, for
+the same reason. C25's modal save dialog uses this; C07's HUD gives it a button
+and `P` a keybinding.
+
 **Implementation note (C00).** The accumulator sketched above is a float in
 milliseconds. The shipped `SimulationClock` counts in integer units of
 `microseconds x TPS`, where one tick costs exactly 1,000,000, because 1000/30 is
@@ -931,6 +940,27 @@ The world canvas renders every frame. The DOM does not.
 
 Drive the throttled updates from one `setInterval`-free accumulator inside the
 render loop, so the UI stops updating when the game is paused.
+
+**Implementation note (C07).** Two accumulators, not one — `GameUI` runs a 5 Hz
+`hud` lane and a 10 Hz `live` lane, both fed from the render loop and both
+stopped while paused. Two consequences worth writing down:
+
+- **The 10 Hz lane has a subscriber from the start.** This table names it for
+  the inspector, which is C12's. Leaving it empty would be an abstraction with
+  no implementation (rule 10), so it drives the thing in C07 that genuinely
+  wants a sub-second timer: a toast counting down to its own removal. C12 adds
+  the inspector beside it.
+- **A panel that must repaint while paused does it on an event.** The HUD is the
+  only one: "paused" is what it has to say, and it cannot say it from a lane
+  that pause has stopped. `pauseChanged` is that event, and it is why the word
+  appears on a frame where both lanes are idle.
+
+**A view model carries only what exists.** `HudView` has no power ratio and no
+research progress, because there is no power system until C21 and no research
+until C22; a field that is always `null` is a promise the view cannot keep. The
+HUD still draws both tiles from §11's icon set, dimmed, so the bar does not gain
+two tiles in the middle later — the placeholder is one string in the panel, and
+C21 deletes it by giving the tile something to read.
 
 Never write to the DOM inside a simulation phase. Systems emit events; the
 controller batches them in `cleanup`; the UI consumes them at its own rate.
@@ -1917,6 +1947,99 @@ src/styles/main.css
 (`Object.isFrozen`); a rejected command produces exactly one notification.
 
 **Out of scope.** Inspector (C12), research panel (C22), save menu (C25).
+
+**Decisions made while building this chunk.**
+
+1. **`GameController` lives in `game/`, so it cannot assemble the render state.**
+   C05 and C06 each noted that the composition root's render-entity derivation
+   "belongs to C07's `GameController`". It does not, and §4 is why: a drawable
+   names a `SpriteId`, and `game/**` may not import `renderer/**`. The
+   derivation stayed in `renderer/entity-view.ts`. The two things that *did*
+   move are the ones that were never about pixels — hotbar slot resolution and
+   the placement preview — and the preview stops at a building id, which
+   `main.ts` turns into a sprite. Those earlier notes were optimistic about
+   which side of the boundary the work would land on; this is the answer, and
+   it is the shape every later view model takes.
+2. **The UI reads the held building through an interface the input layer
+   satisfies by accident.** What the player is holding is presentation state
+   owned by `InputManager` (C04): not serialized, read by no system, changing at
+   pointer rate. The UI has to see it and §4 forbids `ui/**` from importing
+   `input/**`, so the controller reads it through `BuildCursor` — four members
+   that `InputManager` already had before this chunk existed, and still has
+   never heard of. This is C04's `CameraControl`/`TilePicker` arrangement
+   pointing the other way, and it is why not one line of `input/` changed.
+   Nothing is cached: every view reads the cursor live, so a rotation pressed
+   between two frames cannot leave the toolbar showing the wrong one.
+3. **`dispatch` never returns the reason a command failed.** §7 puts validation
+   inside the simulation, so the honest answer arrives a tick later. Both halves
+   of that split — the malformed command the processor refuses at `enqueue`
+   (C04 decision 3) and the occupied tile a system refuses in phase 1 — land in
+   one rejection list and reach the UI as one `'rejected'` event. That is what
+   makes "a rejected command produces exactly one notification" true for every
+   reason in the vocabulary rather than for most of them, and `CommandResult` is
+   therefore `{ queued: boolean }` and nothing more.
+4. **Three event types, each with a real producer and a real consumer.**
+   `'rejected'` feeds the toasts, `'buildMenuChanged'` feeds the toolbar and the
+   menu, `'pauseChanged'` feeds the HUD. There is no fourth invented for a panel
+   that does not exist (rule 10). `'buildMenuChanged'` needs something to notice
+   the change, because §13 says that panel updates "on change event only": the
+   controller compares a signature built from stock, affordability and
+   selection — one pass over a table that ends at eleven entries (§15) — and a
+   field added to `BuildMenuEntry` belongs in that signature too.
+5. **`GameLoop` gained a pause.** Recorded in §8 above. It is C07's because the
+   acceptance criterion "both stopping when paused" needs something to pause,
+   and because a HUD with no pause button would be seven of §11's eight icons.
+6. **`ui/icons.ts` is a ninth file beyond the deliverables**, because §11 asks
+   for the eight icons "as inline SVG in `ui/`, one file, with `currentColor`"
+   and that is a file. It holds a ninth glyph, `play`, which is the pause
+   button's other face rather than a new icon: a toggle has to show what the
+   next press does. Every icon is used — the HUD takes inventory, building,
+   map, alert and pause; the build menu's category headings take resource,
+   building, inventory, power and research.
+7. **Power and research have tiles and no view-model fields.** See §13's note.
+8. **A `MachineView` for a chest says `'idle'`, and §13 says never say that.**
+   The rule is that a status must explain a stall — `'no_input'`, not a bare
+   "idle" — and it is about machines that *could* run. Nothing in C07 can: no
+   recipes, no buffers, no power. `'idle'` is the honest answer for a building
+   that has nothing to do, and C11 gives miners `'running'` and `'output_full'`.
+   The view exists now, without its panel, because task 1 names
+   `getBuildingView(id)` and a facade with a hole in it is a facade C12 has to
+   widen.
+9. **`BuildMenuEntry.unlocked` is always true.** §13 lists "locked/unlocked" as
+   part of what the build menu shows, and C22 is what makes it vary. The field
+   and the dimmed style ship now so the menu gains a value rather than a whole
+   visual state later.
+10. **Two files outside the chunk changed, for the same reason C04's decision 9
+    names.** `eslint.config.js` gained the `src/ui/**` boundary block, because
+    §4 says the dependency table "must be enforced" and the new layer was the
+    only one with no rule behind it. `input/keybindings.ts` gained `KeyB` and
+    `KeyP` — an action with no handler is worse than no binding (its own file
+    header), and C07 is the chunk that supplies both handlers.
+11. **The F3 overlay lost its `reject` row.** C04 decision 6 put rejections
+    there "because `ui/notifications.ts` is C07's deliverable". It is now, so
+    they are toasts, and a second copy of the same information in a developer
+    readout would be a second thing to keep in step.
+
+**Noticed, not fixed.**
+
+- Toasts do not expire while the game is paused, because the lane that ages them
+  is one of the two pause stops. That is the deliberate reading — a message that
+  expires behind a pause is a message the player never got to read — but it
+  means a long pause accumulates up to five frozen toasts.
+- `GameController.pump()` rebuilds the build-menu signature every frame. At two
+  buildings it is nothing and at §15's eleven it is still nothing; if it ever
+  shows up in a profile (§16) the registry gains a revision counter and the
+  signature goes away.
+- Ticks per second is measured by the HUD from two tick samples and its own wall
+  clock, because §6 R1 leaves the simulation no clock to derive it from. It is
+  therefore a 5 Hz estimate with 5 Hz granularity, which is right for a readout
+  and would be wrong for anything C28 asserts against.
+- The renderer still rebuilds the whole entity list every frame (noticed in
+  C05). C07 did not change that, and did not move it: it is the renderer's, and
+  C29 is where it becomes incremental.
+- `ScenePicker` still scans the entity list per pick (C04, C05, C06). The
+  controller now exists, and it still is not the answer — the picker needs the
+  drawable behind a pixel, which is renderer geometry.
 
 ---
 
@@ -3284,7 +3407,7 @@ Recommended next chunk
 
 | Gate | Condition |
 |---|---|
-| After C07 | The prototype is navigable and buildings can be placed. |
+| After C07 | The prototype is navigable and buildings can be placed. **Passed.** |
 | After C15 | **The vertical slice runs unattended.** If it does not, nothing after this matters. |
 | After C18 | **Determinism holds.** Do not build worldgen on a nondeterministic simulation. |
 | After C20 | **The game is fun.** Answered honestly, in writing. Failing this means staying in C20. |

@@ -23,12 +23,14 @@
  * with no handler is a keybinding that silently does nothing, which is worse
  * than no keybinding at all.
  *
- * The nine build slots are C06's, and all nine are handled — by the
- * composition root, which maps slot *n* to the *n*th building in
+ * The nine build slots are C06's, and all nine are handled — by
+ * `GameController.selectSlot`, which maps slot *n* to the *n*th building in
  * `data/buildings.ts`. Their meaning is therefore content: a slot past the end
  * of that table selects nothing today and becomes a real hotkey the moment a
- * building is added, with no code change anywhere. That is the chunk's last
- * acceptance criterion, expressed as a keymap.
+ * building is added, with no code change anywhere. That is C06's last
+ * acceptance criterion, expressed as a keymap. (C07 moved that resolution out
+ * of the composition root, where C06 left it, and into the controller §4 puts
+ * it in; the toolbar's nine tiles now go through the same call.)
  *
  * Pan directions are named for the **screen**, not for tile space: this is a
  * view control, the player is pushing the picture around, and nothing here
@@ -55,6 +57,10 @@ export type InputAction =
   | 'build.slot7'
   | 'build.slot8'
   | 'build.slot9'
+  /** Open and close the build menu (C07). */
+  | 'ui.toggleBuildMenu'
+  /** Hold the simulation still while the world keeps being drawn (C07, §8). */
+  | 'game.togglePause'
   | 'debug.toggleOverlay';
 
 /** A map from `KeyboardEvent.code` to the action that key performs. */
@@ -68,7 +74,10 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
  * is never offered. Space is the drag modifier for the same reason it is in
  * every map editor: it is the largest key and it is not a letter anyone needs
  * while dragging. `R` rotates and the number row selects, which is what every
- * game in this genre has trained the player's left hand to expect.
+ * game in this genre has trained the player's left hand to expect. `B` opens
+ * the build menu and `P` pauses, both of which are free: neither is reachable
+ * by the left hand while it is on the number row, so neither can be hit by
+ * accident mid-drag.
  */
 export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ArrowUp: 'camera.panUp',
@@ -82,6 +91,9 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   Space: 'camera.dragModifier',
   Escape: 'selection.clear',
   KeyR: 'build.rotate',
+  KeyB: 'ui.toggleBuildMenu',
+  KeyP: 'game.togglePause',
+  Pause: 'game.togglePause',
   Digit1: 'build.slot1',
   Digit2: 'build.slot2',
   Digit3: 'build.slot3',

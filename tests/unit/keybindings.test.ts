@@ -48,10 +48,10 @@ describe('the default bindings', () => {
 
 describe('rebinding', () => {
   it('returns a new map and leaves the original alone', () => {
-    const next = rebind(DEFAULT_KEYBINDINGS, 'KeyP', 'debug.toggleOverlay');
+    const next = rebind(DEFAULT_KEYBINDINGS, 'KeyQ', 'debug.toggleOverlay');
 
-    expect(actionFor(next, 'KeyP')).toBe('debug.toggleOverlay');
-    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyP')).toBeNull();
+    expect(actionFor(next, 'KeyQ')).toBe('debug.toggleOverlay');
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyQ')).toBeNull();
   });
 
   it('unbinds with null', () => {
@@ -63,11 +63,11 @@ describe('rebinding', () => {
 
   it('lets one action have as many keys as the player likes', () => {
     let bindings = DEFAULT_KEYBINDINGS;
-    for (const code of ['KeyI', 'KeyO', 'KeyP']) {
+    for (const code of ['KeyI', 'KeyO', 'KeyU']) {
       bindings = rebind(bindings, code, 'camera.zoomIn' satisfies InputAction);
     }
 
-    expect(keysFor(bindings, 'camera.zoomIn')).toEqual(['Equal', 'NumpadAdd', 'KeyI', 'KeyO', 'KeyP']);
+    expect(keysFor(bindings, 'camera.zoomIn')).toEqual(['Equal', 'NumpadAdd', 'KeyI', 'KeyO', 'KeyU']);
   });
 
   it('moves a key from one action to another', () => {

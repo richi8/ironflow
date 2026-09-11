@@ -43,6 +43,16 @@ export class Game {
     return this.loop.isRunning();
   }
 
+  /** Is the simulation held still while the world keeps being drawn? See §8. */
+  isPaused(): boolean {
+    return this.loop.isPaused();
+  }
+
+  /** Hold the simulation still, or let it run again. C07's HUD owns the button. */
+  setPaused(paused: boolean): void {
+    this.loop.setPaused(paused);
+  }
+
   /** Resume timing after the page was hidden, without crediting the gap. */
   resync(): void {
     this.loop.resync();

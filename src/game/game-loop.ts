@@ -1,4 +1,4 @@
-import { SimulationClock } from './simulation-clock.js';
+import { SimulationClock, type FrameBudget } from './simulation-clock.js';
 
 /**
  * Drives frames and turns them into simulation ticks. See ironflow.md §8.
@@ -48,6 +48,9 @@ export interface LoopStats {
 /** Exponential smoothing factor for the timing readouts. Display only. */
 const SMOOTHING = 0.1;
 
+/** What a paused frame owes: nothing, and no interpolation into a tick it will not run. */
+const PAUSED_BUDGET: FrameBudget = Object.freeze({ steps: 0, alpha: 0, shed: false });
+
 export class GameLoop {
   private readonly scheduler: FrameScheduler;
   private readonly handlers: GameLoopHandlers;
@@ -55,6 +58,7 @@ export class GameLoop {
 
   private handle: number | null = null;
   private running = false;
+  private paused = false;
 
   private frameMs = 0;
   private simMs = 0;
@@ -74,6 +78,27 @@ export class GameLoop {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * Stop advancing the simulation while continuing to draw. See §8 and C07.
+   *
+   * Pausing is **not** `stop()`. A stopped loop draws nothing, so the canvas
+   * freezes and the camera dies with it; a paused one keeps rendering, so the
+   * player can still pan and zoom around the factory they are looking at, and
+   * the UI still repaints on the events it cares about. §8 asks for this when
+   * a modal save/load dialog is open (C25) and C07's HUD gives it a button.
+   *
+   * No debt accumulates while paused: the clock is rebased every frame, so
+   * unpausing after five minutes runs exactly zero catch-up ticks — the same
+   * answer §8 gives for a backgrounded tab, for the same reason.
+   */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
   }
 
   start(): void {
@@ -127,7 +152,15 @@ export class GameLoop {
     if (!this.running) return;
 
     const frameStart = this.scheduler.now();
-    const budget = this.clock.advance(frameStart);
+    // A paused frame rebases the clock rather than advancing it, which is what
+    // keeps the pause from being credited as simulation debt on resume.
+    let budget: FrameBudget;
+    if (this.paused) {
+      this.clock.reset(frameStart);
+      budget = PAUSED_BUDGET;
+    } else {
+      budget = this.clock.advance(frameStart);
+    }
 
     const simStart = this.scheduler.now();
     for (let i = 0; i < budget.steps; i++) {

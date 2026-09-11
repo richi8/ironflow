@@ -6,7 +6,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 The full plan lives in [`ironflow.md`](./ironflow.md). Read Part I before
 writing any code — those are contracts, not suggestions.
 
-**Status:** C00 complete. Next chunk: **C01 — Tile space, camera, isometric projection.**
+**Status:** C07 complete — Milestone A passed. Next chunk: **C08 — Items & inventories.**
 
 ## Running it
 
@@ -26,13 +26,33 @@ npm run dev        # http://localhost:5173
 | `npm run lint` | ESLint, including the architecture and determinism rules |
 | `npm run check` | typecheck + lint + test. **The gate for "done".** |
 
-Press **F3** in the running app to toggle the debug overlay.
+### Controls
+
+| Key / mouse | What it does |
+|---|---|
+| Arrows | Pan the view |
+| `+` / `-`, wheel | Zoom |
+| Middle-drag, or Space + left-drag | Pan by dragging |
+| `1`–`9`, or the toolbar | Pick a building to place |
+| `B` | Open the build menu |
+| Left click / drag | Place the held building, or mine with an empty hand |
+| `R` | Rotate the held building |
+| Right click | Put the held building down, or demolish with an empty hand |
+| `Esc` | Drop everything: the held building and the selection |
+| `P` | Pause — the simulation stops, the view keeps working |
+| `F3` | Toggle the debug overlay |
+
+Keybindings are data (`src/input/keybindings.ts`); a remapping UI is C30.
 
 ## Layout
 
 ```text
 src/
   game/       simulation core — no DOM, no Canvas, no Vite, ever
+    views/    frozen read-only snapshots the UI is handed
+  renderer/   Canvas 2D, the only place tile space becomes pixels
+  input/      DOM events -> commands; never touches simulation state
+  ui/         DOM panels; talks to game/game-controller and nothing else
   platform/   browser adapters behind interfaces the core defines
   debug/      developer overlay
   styles/     design tokens (§11) and layout

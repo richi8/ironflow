@@ -148,6 +148,63 @@ export default tseslint.config(
     },
   },
 
+  /* ---------------------------------------------------------------------- *
+   * §4 — the UI talks to the controller and reads view models. Nothing else.
+   *
+   * The allowed imports are `game/game-controller`, `game/views/**` and the
+   * plain data a command is made of; everything under `game/` that is state or
+   * behaviour is listed below, which is what turns C07's acceptance criterion
+   * (`grep -r "simulation\." src/ui/` returns nothing) into a build failure
+   * rather than a habit.
+   * ---------------------------------------------------------------------- */
+  {
+    files: ['src/ui/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/renderer',
+                '**/renderer/**',
+                '**/input',
+                '**/input/**',
+                '**/persistence',
+                '**/persistence/**',
+                '**/debug',
+                '**/debug/**',
+                '**/platform',
+                '**/platform/**',
+                '**/main',
+                '**/main.ts',
+              ],
+              message:
+                'ironflow.md §4: src/ui/** may not import the renderer, the input layer, persistence, debug or platform code. ' +
+                'The UI dispatches commands and reads view models; anything else it needs is wired in main.ts.',
+            },
+            {
+              group: [
+                '**/game/simulation*',
+                '**/game/game',
+                '**/game/game.js',
+                '**/game/game-loop*',
+                '**/game/systems/**',
+                '**/game/entities/**',
+                '**/game/world/**',
+                '**/game/data/**',
+                '**/game/commands/command-processor*',
+              ],
+              message:
+                'ironflow.md §4: src/ui/** must not reach simulation internals. ' +
+                'Go through game/game-controller.js and the frozen view models in game/views/**.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   /* Tests and config files legitimately touch everything. */
   {
     files: ['tests/**/*.ts', '*.config.ts', 'eslint.config.js'],
