@@ -234,9 +234,10 @@ export class Camera {
   /**
    * The tile containing a canvas pixel — the *ground* tile.
    *
-   * A tall building drawn over that ground tile is not considered (§5 hazard 2).
-   * Entity picking that respects sprite bounds arrives with C04; until then the
-   * ground tile is the whole answer.
+   * A tall building drawn over that ground tile is not considered (§5 hazard 2)
+   * — that is `picker.ts`'s job, and it is the one to ask when the answer has
+   * to match what the player can see. This is the right answer for everything
+   * that is about the ground itself: cull bounds, terrain, a click on bare map.
    */
   screenToTile(sx: number, sy: number): TileCoord {
     const world = this.screenToWorld(sx, sy);

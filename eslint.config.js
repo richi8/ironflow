@@ -125,6 +125,29 @@ export default tseslint.config(
     },
   },
 
+  /* ---------------------------------------------------------------------- *
+   * §4 — input produces intent. It may name commands and tile space, and it
+   * may not reach into the renderer, the UI or the simulation's internals.
+   * ---------------------------------------------------------------------- */
+  {
+    files: ['src/input/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/renderer', '**/renderer/**', '**/ui', '**/ui/**', '**/persistence', '**/persistence/**', '**/debug', '**/debug/**'],
+              message:
+                'ironflow.md §4: src/input/** must not import renderer, ui, persistence or debug code. ' +
+                'Declare the interface the input layer needs and let main.ts wire an implementation to it.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   /* Tests and config files legitimately touch everything. */
   {
     files: ['tests/**/*.ts', '*.config.ts', 'eslint.config.js'],

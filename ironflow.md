@@ -391,6 +391,13 @@ by the shipped code and pinned by tests:
   `screenToWorld` result. `Math.floor` is not projection arithmetic, and keeping
   it out preserves "exactly these two functions" literally.
 
+**Implementation note (C04).** Hazard 2 is implemented, in
+`renderer/picker.ts`. `Camera.screenToTile` still answers with the ground tile
+and is still the right answer for cull bounds and for terrain; `ScenePicker`
+is the one to ask whenever the answer has to match what the player can see. It
+lives in the renderer because the answer depends on how tall a sprite is drawn
+and §4 forbids `input/**` from knowing that.
+
 The rule itself is now enforced rather than merely stated:
 `tests/unit/projection-boundary.test.ts` scans every file under `src/` except
 `projection.ts` and fails on `TILE_W`/`TILE_H`, on the words "isometric" or
@@ -568,6 +575,11 @@ export type Command =
 - Commands are applied in **queue order at the start of a tick**, never mid-tick.
 - The command queue is drained fully each tick, with a per-tick cap (1024) to
   bound worst-case latency from held-down build-drag.
+- **The queue itself is capped too (C04).** The per-tick cap bounds a tick's
+  work but not memory: a producer faster than the drain grows the queue without
+  limit, and the failure mode is a tab that slows down over minutes with
+  nothing to point at. `MAX_PENDING_COMMANDS` is four ticks' worth, and
+  overflow is a visible `'queue_full'` rejection rather than a silent drop.
 
 ---
 
@@ -1466,6 +1478,84 @@ per-tick cap; that a command object survives `structuredClone` (proving it is
 plain data, which future replay and Web Worker support need).
 
 **Out of scope.** Any command's actual effect. Touch gestures beyond pan/zoom.
+
+**Implementation note (C04).** Nine departures from the tasks above.
+
+1. **`renderer/picker.ts` exists, beyond the listed deliverables.** Task 5 asks
+   for "reverse-depth entity hit testing", which needs to know how tall a
+   sprite is drawn — and §4 forbids `input/**` from importing `renderer/**`.
+   Putting the picker in the renderer, where sprite geometry already lives, and
+   naming the interface in `input/` is the only arrangement that satisfies both.
+   The alternative — teaching the input layer about rise units — would put a
+   second copy of the sprite geometry one layer away from the first.
+2. **The hit test is tile-space arithmetic, not polygon clipping.** A prism is
+   its ground face swept up the screen, so a pixel is on it exactly when that
+   pixel slid *down* the screen by somewhere between zero and the lift lands in
+   the footprint — and sliding down the screen is a step along the `(1, 1)`
+   tile diagonal. Picking is therefore a ray against an axis-aligned rectangle,
+   which is exact at every zoom (both sides scale with it) and needs no
+   projection arithmetic of its own. The surface the player sees is the **far**
+   end of that ray, not the near one: §5 fixes that larger `x + y` draws in
+   front, so larger is nearer the camera. Taking the near end looks correct on
+   a 1x1 building and is silently wrong on every larger one — which is what the
+   multi-tile test in `tests/unit/entity-picking.test.ts` caught.
+3. **Validation is split in two, and only one half is C04's.** `command.ts`
+   owns *shape* validation — integer tiles inside the packable range, positive
+   amounts, non-empty registry ids — and it runs inside `enqueue`, so a
+   malformed command never occupies a queue slot. §7's "validation lives with
+   each system" is about the other half (`'occupied'`, `'unaffordable'`), which
+   stays with the systems. The split is not tidiness: the input layer derives
+   tile coordinates from floating-point screen arithmetic, and one `NaN` client
+   coordinate would otherwise reach `tileKey`, which throws — turning a stray
+   pointer event into a dead tick instead of a notification.
+4. **`MAX_PENDING_COMMANDS` is a second cap, beyond §7's per-tick 1024.** The
+   drain cap bounds a tick's work; it does not bound memory, and a producer
+   faster than 1024 per tick grows the queue forever. Four ticks' worth is far
+   past any real input burst, and overflow is a visible `'queue_full'`
+   rejection rather than a silent drop. Recorded in §7's rules.
+5. **`'not_implemented'` is a rejection reason, and left-click uses it.** C04
+   ships the pipeline and none of the effects, so `Simulation.applyCommand`
+   refuses everything with that reason. Left-click (and left-drag, one command
+   per tile crossed) enqueues `mineTile`, which is what the left button does in
+   this genre with no build tool held; C06 replaces it with the selected tool's
+   command and C10 gives it an effect. Enqueuing it now is not implementing a
+   future chunk — it is the only way to exercise input → command → tick →
+   typed rejection → visible notice end to end, which is the whole chunk.
+6. **Rejections are pulled, not pushed, and land in the F3 readout.** A
+   callback from inside a tick into a toast would be a DOM write in a
+   simulation phase, which §13 forbids; the processor records rejections and
+   the composition root collects them after the frame. They are shown as a
+   `reject` row rather than a toast because `ui/notifications.ts` is C07's
+   deliverable and §19 rule 4 says not to build it early.
+7. **`EntityId` is declared in `command.ts`.** §7's union names it and C05 owns
+   it. C05 moves the declaration to `entities/entity.ts` and this file imports
+   it from there; a chunk-shaped hole in the middle of the contract would be
+   worse than one line that moves one chunk later.
+8. **Edge-scrolling is not implemented at all**, rather than implemented and
+   defaulted off — there is no options UI to turn it back on, and a setting
+   nothing can reach is §19 rule 10 in miniature. Keyboard panning on the arrow
+   keys was added instead, which is the same need with a control that exists.
+   WASD is deliberately left unbound: it moves the *player* from C10, and a
+   binding that has to be taken away later is worse than one never offered.
+9. **Two files outside the chunk changed.** `eslint.config.js` gained the
+   `src/input/**` boundary rule, because §4 says the dependency table "must be
+   enforced" and the new layer was the only one with no rule behind it.
+   `DebugOverlay.update` now takes a bag of label/value rows instead of
+   positional strings: every chunk since C00 has added one, C04 adds two more,
+   and an eighth positional string is a call site nobody can read.
+
+**Noticed, not fixed.**
+
+- `ScenePicker` scans the whole entity list per pick. That is the right shape
+  at a pick a frame and the wrong one at §12's 20,000 entities; C06 gives the
+  world an occupancy map and this becomes a lookup in the few tiles the ray
+  crosses. No profile says it matters yet (§16).
+- `RenderState.hover` is a single tile, so hovering a multi-tile building
+  outlines the tile under the cursor rather than the whole footprint. The
+  picker already knows which entity was hit; C06 is where the overlay gains a
+  footprint to draw.
+- Hover and selection are held by `InputManager` and read by the composition
+  root. C07's `GameController` is where they belong once it exists.
 
 ---
 

@@ -35,6 +35,11 @@ body {
   cursor: crosshair;
 }
 
+/* Set by the input manager for the duration of a camera drag (C04). */
+#game.is-dragging {
+  cursor: grabbing;
+}
+
 /* UI layer: transparent to pointer events except where a panel opts back in. */
 #ui {
   position: fixed;

@@ -79,7 +79,7 @@ export const TILE_HALF_HEIGHT = EAST_STEP.y;
  * One tile-height, so a `rise` of 3 on a power plant is about as tall as three
  * tiles are deep — the proportion the reference sheet's buildings use.
  */
-const RISE_UNIT = TILE_HALF_HEIGHT * 2;
+export const RISE_UNIT = TILE_HALF_HEIGHT * 2;
 
 /**
  * Trace the ground face of a `width` x `height` footprint centred on `(sx, sy)`.

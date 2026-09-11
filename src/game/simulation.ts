@@ -1,3 +1,5 @@
+import { CommandProcessor } from './commands/command-processor.js';
+import type { Command, CommandRejectionReason } from './commands/command.js';
 import type { World } from './world/world.js';
 
 /**
@@ -16,6 +18,14 @@ export class Simulation {
    * the UI reach it through a view, never by holding their own reference.
    */
   readonly world: World;
+
+  /**
+   * The command queue (§7). Owned here because §7 puts validation inside the
+   * simulation: the input layer holds this object only as a `CommandSink`, so
+   * it can ask for something to happen but cannot decide when — or whether —
+   * it does.
+   */
+  readonly commands = new CommandProcessor();
 
   private tickCount = 0;
 
@@ -51,5 +61,35 @@ export class Simulation {
    */
   tick(): void {
     this.tickCount += 1;
+
+    // Phase 1 — commands. Drained fully, in queue order, capped per tick (§7).
+    // Applying them here and nowhere else is what makes a command stream a
+    // replay: no other entry point can change authoritative state.
+    for (const command of this.commands.drain()) {
+      const reason = this.applyCommand(command);
+      if (reason !== null) this.commands.reject(command, reason);
+    }
+
+    // Phases 2-9 arrive with the chunks listed above.
+  }
+
+  /**
+   * Dispatch one validated command to the system that owns it.
+   *
+   * C04 ships the pipeline and none of the effects, so every command is
+   * refused with `'not_implemented'` — which is the honest answer and, more
+   * usefully, a *visible* one: clicking a tile today produces a notification
+   * saying so rather than nothing at all, which is how the whole path gets
+   * verified before there is anything at the end of it.
+   *
+   * Each later chunk replaces one arm of this with a call into its system —
+   * C06 `build` and `remove`, C10 `movePlayer` and `mineTile`, C15
+   * `setRecipe`, C22 `startResearch`. There is deliberately no handler
+   * registry: a switch is smaller, it is exhaustively checked by the compiler,
+   * and a registry would be an abstraction for a plugin system nobody wants
+   * (§19 rule 10).
+   */
+  private applyCommand(_command: Command): CommandRejectionReason | null {
+    return 'not_implemented';
   }
 }

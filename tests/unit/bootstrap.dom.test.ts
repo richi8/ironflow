@@ -143,11 +143,14 @@ describe('DebugOverlay', () => {
     const rowCount = node?.childElementCount ?? 0;
     const firstValue = node?.querySelector('.debug-overlay__value');
 
-    overlay.update(stats, 123, '800x600 @2x', '1 chunk(s)', '4 cached', 200);
-    overlay.update({ ...stats, fps: 30 }, 456, '800x600 @2x', '1 chunk(s)', '4 cached', 200);
+    const rows = { size: '800x600 @2x', world: '1 chunk(s)', terrain: '4 cached' };
+    overlay.update(stats, 123, rows, 200);
+    overlay.update({ ...stats, fps: 30 }, 456, rows, 200);
 
-    // §13: no panel rebuilds its subtree on update.
-    expect(node?.childElementCount).toBe(rowCount);
+    // §13: no panel rebuilds its subtree on update. The extra rows are added
+    // the first time they are seen, so the count is compared after that.
+    const grownCount = node?.childElementCount ?? 0;
+    expect(grownCount).toBe(rowCount + Object.keys(rows).length);
     expect(node?.querySelector('.debug-overlay__value')).toBe(firstValue);
     expect(node?.textContent).toContain('456');
     expect(node?.textContent).toContain('1 chunk(s)');
@@ -161,10 +164,10 @@ describe('DebugOverlay', () => {
     document.body.append(root);
     const overlay = new DebugOverlay(root);
 
-    overlay.update(stats, 1, 'x', 'w', 't', 200); // crosses the interval
+    overlay.update(stats, 1, { size: 'x' }, 200); // crosses the interval
     const after = root.textContent ?? '';
 
-    overlay.update(stats, 999, 'x', 'w', 't', 5); // well inside the interval: ignored
+    overlay.update(stats, 999, { size: 'x' }, 5); // well inside the interval: ignored
     expect(root.textContent).toBe(after);
     expect(root.textContent).not.toContain('999');
   });
@@ -177,7 +180,7 @@ describe('DebugOverlay', () => {
     overlay.toggle();
     expect(overlay.isVisible()).toBe(false);
 
-    overlay.update(stats, 777, 'x', 'w', 't', 500);
+    overlay.update(stats, 777, { size: 'x' }, 500);
     expect(root.textContent).not.toContain('777');
   });
 });

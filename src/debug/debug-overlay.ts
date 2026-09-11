@@ -31,19 +31,7 @@ export class DebugOverlay {
     title.textContent = 'IRONFLOW — F3';
     this.root.append(title);
 
-    for (const label of [
-      'fps',
-      'frame',
-      'sim',
-      'render',
-      'tick',
-      'steps',
-      'alpha',
-      'shed',
-      'size',
-      'world',
-      'terrain',
-    ]) {
+    for (const label of ['fps', 'frame', 'sim', 'render', 'tick', 'steps', 'alpha', 'shed']) {
       this.addRow(label);
     }
 
@@ -60,18 +48,13 @@ export class DebugOverlay {
   }
 
   /**
-   * @param worldLabel world-chunk residency, per C02.
-   * @param terrainLabel terrain-cache residency and entity count, per C03.
+   * @param rows extra label/value pairs appended after the loop numbers, in
+   * the order they are first seen. A bag rather than a parameter each: every
+   * chunk since C00 has added one, and an eighth positional string is a line
+   * nobody can read at the call site.
    * @param frameMs real time since the previous call, used only for throttling.
    */
-  update(
-    stats: LoopStats,
-    tick: number,
-    sizeLabel: string,
-    worldLabel: string,
-    terrainLabel: string,
-    frameMs: number,
-  ): void {
+  update(stats: LoopStats, tick: number, rows: Readonly<Record<string, string>>, frameMs: number): void {
     if (!this.visible) return;
 
     this.msSinceUpdate += frameMs;
@@ -86,9 +69,9 @@ export class DebugOverlay {
     this.setRow('steps', String(stats.steps));
     this.setRow('alpha', stats.alpha.toFixed(3));
     this.setRow('shed', String(stats.shedCount));
-    this.setRow('size', sizeLabel);
-    this.setRow('world', worldLabel);
-    this.setRow('terrain', terrainLabel);
+    for (const [label, value] of Object.entries(rows)) {
+      this.setRow(label, value);
+    }
   }
 
   destroy(): void {
@@ -114,8 +97,12 @@ export class DebugOverlay {
   }
 
   private setRow(label: string, value: string): void {
-    const row = this.rows.get(label);
-    if (row === undefined) return;
+    let row = this.rows.get(label);
+    if (row === undefined) {
+      this.addRow(label);
+      row = this.rows.get(label);
+      if (row === undefined) return;
+    }
     // Assign only on change: the DOM is slower than the comparison.
     if (row.value.textContent !== value) row.value.textContent = value;
   }
