@@ -25,6 +25,11 @@ export interface TileCoord {
  */
 export type Rotation = 0 | 1 | 2 | 3;
 
+/** Is `value` one of the four quarter-turns? */
+export function isRotation(value: number): value is Rotation {
+  return value === 0 || value === 1 || value === 2 || value === 3;
+}
+
 export const NORTH = 0 satisfies Rotation;
 export const EAST = 1 satisfies Rotation;
 export const SOUTH = 2 satisfies Rotation;

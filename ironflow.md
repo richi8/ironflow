@@ -1614,6 +1614,102 @@ removal semantics; the clone round-trip.
 
 **Out of scope.** ECS. Component storage. Archetypes. Optimise after C28 says to.
 
+**Decisions made while building this chunk.**
+
+1. **Ids start at 1, and `0` means `NO_ENTITY`.** §6 R5 asks only that ids be
+   monotonic and never reused; it says nothing about where they start. Giving
+   up one id buys immunity from a whole family of bugs, because `if
+   (belt.inputId)` reads correctly and silently skips entity 0. *Consequence
+   outside this chunk:* `validateCommandShape` now rejects `entityId: 0` as
+   malformed, where C04 accepted it. It shares `isEntityId` with the store, so
+   the two can never disagree about what an id is.
+2. **The five base entity fields are `readonly`.** `id`, `type`, `x`, `y` and
+   `rotation` are the keys of the occupancy index. A system that assigned
+   `entity.x = 5` would move a building and leave the index pointing at its old
+   tiles — a corruption that surfaces much later as a building that cannot be
+   removed standing on a tile that cannot be built on. Readonly means the only
+   way to change one is through a store method that re-indexes; subtype fields
+   (progress, buffers, item positions) stay mutable, which is what systems are
+   for. C06 adds `setRotation` when the `rotate` command needs it; adding it
+   here would have been §19 rule 4.
+3. **Footprint size is not stored on the entity.** §10 puts content on the
+   derived side: a miner is 2×2 because `data/buildings.ts` says so, and
+   writing that into every miner would persist the same fact twenty thousand
+   times and let a save disagree with the content it was made from. The store
+   is instead constructed with a `FootprintLookup`, exactly as `World` is
+   constructed with a `ChunkGenerator`, and C06's registry becomes its real
+   implementation. Implementations must be **pure**: the store asks once at
+   creation and again at removal, and a lookup that changed its mind between
+   the two would free the wrong tiles.
+4. **A rotated footprint keeps its north-west anchor and swaps its extent.** A
+   3×2 at `(10, 4)` covers `x 10..12, y 4..5` facing north and `x 10..11,
+   y 4..6` facing east. Rotating about the centre instead lands the corners of
+   an even-by-odd footprint on half-tiles, and every rounding rule that fixes
+   that is a rule the ghost preview, the occupancy index and the renderer must
+   all agree on. This is C06 task 5's "footprint dimensions swap for odd
+   rotations", stated as geometry; `forEachFootprintTile` takes loose
+   coordinates so C06's ghost walks the same tiles the placement will claim.
+5. **`create` asserts serializability on every entity.** The entity shape is
+   what makes C24 cheap, and nothing about TypeScript stops a `Map` field from
+   reaching a save. `assertSerializable` refuses `undefined` (dropped by
+   `JSON.stringify`), non-finite numbers and `-0` (§6 R7), `Map`, `Set`, `Date`,
+   typed arrays, class instances and reference cycles — every one of which
+   survives `structuredClone` and is silently altered by a JSON round trip, so
+   the save loads into a subtly different world. It runs always, for the same
+   reason `tileKey` validates always: `game/` has no build-mode flag to branch
+   on (§4), and the cost is a walk over an object that is being allocated
+   anyway. C28's profiler is what would justify gating it (§16).
+6. **`create` throws on an occupied tile** rather than returning `null`.
+   Placement validation is C06's, and it tells the player `'occupied'` before
+   ever calling the store; arriving here with a taken tile is a caller bug, and
+   a store that quietly declined would leave a building the player paid for
+   nowhere at all. Both the range check and the occupancy check run over the
+   whole footprint before a single tile is claimed, so a rejected create leaves
+   the store byte-identical — it does not even consume an id.
+7. **`cleanup()` returns the removed ids; there is no event bus.** §8 phase 9
+   says "process removals, compact stores, emit events", and an event system
+   with one publisher and no subscribers would be §19 rule 10. An ascending
+   array of ids is what C13's belts and C14's inserters will actually want.
+8. **Deferred removal is a `Set` that is never iterated.** `remove()` marks;
+   `cleanup()` walks the *dense array* and asks the set `has`, which keeps the
+   removal list and the compaction both in id order without a sort (§6 R4).
+   Which type buckets need compacting is tracked in a flag array indexed by
+   `EntityType`, not a `Set` of types, so every loop in the file walks an array
+   — a rule that can be checked by reading rather than by reasoning.
+9. **`Simulation` takes the store as a constructor parameter**, defaulted, for
+   the same reason it takes the world: the footprint source belongs to C06's
+   registry, and until that exists whoever composes the game says where to ask.
+   Phase 9 calls `cleanup()` and nothing else does.
+10. **Two files outside the chunk changed.** `command.ts` now imports `EntityId`
+    and `isEntityId` from `entities/entity.ts` and re-exports the type, which is
+    the move C04's decision 7 promised. `coordinates.ts` gained `isRotation`,
+    which `command.ts` had as a private copy and the store needed as a second
+    one.
+
+**The scaffolding shipped with C03 is now half real.** `debug/demo-entities.ts`
+no longer builds render entities directly: it seeds the actual `EntityStore`,
+and the renderer draws a view derived from it every frame. Only the two tables
+in that file are still fake — the sizes (§15's building table) and the
+placeholder looks, which is precisely what C06's `BuildingDefinition` replaces
+when it deletes the file. The scene gained a 1×2 splitter turned east, so the
+rotated-footprint rule is visible in the running game and not only in a test.
+
+**Noticed, not fixed.**
+
+- `byType` returns the store's own array rather than a copy. Systems call it
+  every tick and copying twenty thousand belts per tick to guard against a
+  caller that should not be writing is the wrong trade — but a caller that
+  *retains* the array across a `cleanup` holds a compacted one. Documented on
+  the method; C28 is where a cheaper guarantee would be measured.
+- The composition root rebuilds the whole render-entity list every frame, one
+  object per entity. Right for 26 demo entities, wrong for §12's 20,000; C07's
+  `GameController` owns that derivation and C29 owns making it incremental.
+- `ScenePicker` still scans the entity list per pick (C04 noticed it). The
+  occupancy index that fixes it now exists, but the picker needs the *render*
+  entity behind a tile, and that path belongs to C06 and C07.
+- Nothing benchmarks the store. The 20,000-create test asserts ordering, not
+  time; per-system tick cost against a committed baseline is C28's deliverable.
+
 ---
 
 ## C06 — Data-driven buildings & placement

@@ -1,5 +1,6 @@
 import { CommandProcessor } from './commands/command-processor.js';
 import type { Command, CommandRejectionReason } from './commands/command.js';
+import { EntityStore } from './entities/entity-store.js';
 import type { World } from './world/world.js';
 
 /**
@@ -7,9 +8,9 @@ import type { World } from './world/world.js';
  * See ironflow.md §8 (phase order) and §6 (determinism contract).
  *
  * In C00 this was a skeleton owning only the tick counter. C02 gives it the
- * world; the phase block below is the contract that later chunks fill in, and
- * the order is deliberate — changing it is a decision with a changelog entry,
- * not a tidy-up.
+ * world and C05 the entity store; the phase block below is the contract that
+ * later chunks fill in, and the order is deliberate — changing it is a decision
+ * with a changelog entry, not a tidy-up.
  */
 export class Simulation {
   /**
@@ -18,6 +19,14 @@ export class Simulation {
    * the UI reach it through a view, never by holding their own reference.
    */
   readonly world: World;
+
+  /**
+   * Everything the player has built. Authoritative (§10), and injected for the
+   * same reason the world is: the store needs to know how big each building
+   * type is, and that answer belongs to C06's building registry. Until that
+   * exists, whoever constructs the simulation says where to ask.
+   */
+  readonly entities: EntityStore;
 
   /**
    * The command queue (§7). Owned here because §7 puts validation inside the
@@ -29,8 +38,9 @@ export class Simulation {
 
   private tickCount = 0;
 
-  constructor(world: World) {
+  constructor(world: World, entities: EntityStore = new EntityStore()) {
     this.world = world;
+    this.entities = entities;
   }
 
   /** Ticks elapsed since this world was created. Authoritative; serialized. */
@@ -70,7 +80,12 @@ export class Simulation {
       if (reason !== null) this.commands.reject(command, reason);
     }
 
-    // Phases 2-9 arrive with the chunks listed above.
+    // Phases 2-8 arrive with the chunks listed above.
+
+    // Phase 9 — cleanup. Deferred removals are applied here and nowhere else,
+    // which is what makes "a system never sees a half-removed entity" a
+    // property of the phase order rather than of every system's care.
+    this.entities.cleanup();
   }
 
   /**

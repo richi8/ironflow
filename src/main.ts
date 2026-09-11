@@ -1,7 +1,8 @@
 import './styles/main.css';
 
 import { DebugOverlay } from './debug/debug-overlay.js';
-import { createDemoEntities } from './debug/demo-entities.js';
+import { DEMO_FOOTPRINTS, seedDemoEntities, toRenderEntities } from './debug/demo-entities.js';
+import { EntityStore } from './game/entities/entity-store.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
 import { tileProperties } from './game/world/tile.js';
@@ -38,7 +39,10 @@ function bootstrap(): void {
   // C19 replaces the checkerboard with real generation. The world is empty
   // until something asks about a tile — see World.getChunk.
   const world = new World(createCheckerboardGenerator());
-  const simulation = new Simulation(world);
+  // The store is told how big each building type is (C05). C06 replaces the
+  // debug table with the building registry, and this line stops being scaffolding.
+  const entities = new EntityStore({ footprintOf: DEMO_FOOTPRINTS });
+  const simulation = new Simulation(world, entities);
   const scheduler = new BrowserFrameScheduler();
 
   const camera = new Camera({ x: 6, y: 6 });
@@ -52,8 +56,18 @@ function bootstrap(): void {
   applySize();
   surface.onResize(applySize);
 
-  // Scaffolding until C05 owns entities; see debug/demo-entities.ts.
-  const demoEntities = createDemoEntities();
+  // Scaffolding until C06 places buildings from data; see debug/demo-entities.ts.
+  // The entities are real ones in the real store — only the decision of what to
+  // place, and what it looks like, is fake.
+  seedDemoEntities(entities);
+
+  /**
+   * The renderer's view of the entity store, rebuilt at the top of every frame.
+   *
+   * The picker reads the same array the frame drew, so what the cursor picks is
+   * always what is on screen. C07's `GameController` owns this derivation.
+   */
+  let renderEntities = toRenderEntities(entities);
 
   /* ------------------------------------------------------------------ *
    * Input (C04).
@@ -64,7 +78,7 @@ function bootstrap(): void {
    * rather than as a comment asking people to be careful. `Camera` and
    * `ScenePicker` satisfy theirs structurally; neither knows this layer exists.
    * ------------------------------------------------------------------ */
-  const picker = new ScenePicker(camera, () => demoEntities);
+  const picker = new ScenePicker(camera, () => renderEntities);
   const input = new InputManager({
     canvas,
     keyTarget: document,
@@ -84,6 +98,8 @@ function bootstrap(): void {
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
+    renderEntities = toRenderEntities(entities);
+
     const now = scheduler.now();
     const elapsedMs = (now - lastFrameUs) / 1000;
     lastFrameUs = now;
@@ -100,7 +116,7 @@ function bootstrap(): void {
     // composition, which is what this file is for.
     const state: RenderState = {
       world: simulation.world,
-      entities: demoEntities,
+      entities: renderEntities,
       hover: input.hover,
       ghost: null,
       selected: input.selected,
@@ -125,6 +141,7 @@ function bootstrap(): void {
       {
         size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
         world: `${world.chunkCount} chunk(s), (0,0)=${tileProperties(originTile).name}`,
+        entities: `${entities.size} live, next #${entities.nextId}`,
         terrain: `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
         hover:
           hover === null

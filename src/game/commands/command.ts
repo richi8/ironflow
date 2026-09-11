@@ -22,18 +22,17 @@
  *   genre (§7).
  */
 
-import { TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
+import { isEntityId, type EntityId } from '../entities/entity.js';
+import { TILE_MAX, TILE_MIN, isRotation, type Rotation } from '../world/coordinates.js';
 
 /**
  * A stable handle to an entity.
  *
- * C05 owns the entity store and will move this declaration to
- * `entities/entity.ts`; this file will import it from there. It is defined
- * here because §7's union names it and C04 ships that union — a chunk-shaped
- * hole in the middle of the contract would be worse than a declaration that
- * moves one chunk later.
+ * Declared in `entities/entity.ts` since C05, which owns the store that hands
+ * these out. Re-exported here because the command union names it and the input
+ * layer may import command types but not entity internals (§4).
  */
-export type EntityId = number;
+export type { EntityId };
 
 /** The discriminated union of everything a player can ask the game to do. */
 export type Command =
@@ -141,10 +140,6 @@ function isTile(x: number, y: number): boolean {
   );
 }
 
-function isEntityId(id: EntityId): boolean {
-  return Number.isInteger(id) && id >= 0;
-}
-
 /** A registry key: non-empty, and not whitespace someone will never find. */
 function isName(value: string): boolean {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
@@ -152,8 +147,4 @@ function isName(value: string): boolean {
 
 function isCount(value: number): boolean {
   return Number.isInteger(value) && value > 0;
-}
-
-function isRotation(value: Rotation): boolean {
-  return value === 0 || value === 1 || value === 2 || value === 3;
 }
