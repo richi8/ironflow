@@ -18,8 +18,9 @@
  */
 
 import { CHUNK_SIZE, createChunk, localIndex, type WorldChunk } from './chunk.js';
-import type { ChunkGenerator } from './world.js';
+import { NOMINAL_RESOURCE_AMOUNT, ResourceType } from './resource.js';
 import { TileType } from './tile.js';
+import type { ChunkGenerator } from './world.js';
 
 /** Edge of one square of the checkerboard, in tiles. */
 const CHECKER_SIZE = 8;
@@ -64,19 +65,6 @@ function checker(x: number, y: number): TileType {
  * The playground
  * -------------------------------------------------------------------------- */
 
-/**
- * Resource ids for the playground below.
- *
- * C09 owns the real ones and the item registry behind them; a world chunk
- * stores a byte per tile and `NO_RESOURCE` is 0, so any non-zero number works
- * until then. Named rather than inlined so C09 has one place to correct.
- */
-const PLAYGROUND_IRON = 1;
-const PLAYGROUND_COPPER = 2;
-
-/** Units of ore on every tile of a playground patch. */
-const PLAYGROUND_PATCH_AMOUNT = 2000;
-
 interface Disc {
   readonly x: number;
   readonly y: number;
@@ -86,10 +74,50 @@ interface Disc {
 /** Somewhere to sail a miner into. */
 const POND: Disc = { x: 14, y: 3, radius: 3.2 };
 
-const PATCHES: readonly (Disc & { readonly resource: number })[] = Object.freeze([
-  { x: 3, y: 13, radius: 3, resource: PLAYGROUND_IRON },
-  { x: 13, y: 14, radius: 2.4, resource: PLAYGROUND_COPPER },
+/**
+ * The hand-placed patches C09 task 4 asks for: one of each resource, near the
+ * origin, close enough together that a starting factory can reach all four.
+ *
+ * Their arrangement is a **test fixture**, not level design — C19 generates
+ * the real map and deletes this. What it is arranged for is the chunk's
+ * acceptance criteria: all four resource types on screen at once so the §11
+ * tints can be told apart, and radii large enough that a patch shows every
+ * fullness bucket at the same time (see `patchAmount`).
+ */
+const PATCHES: readonly (Disc & { readonly resource: ResourceType })[] = Object.freeze([
+  { x: 3, y: 13, radius: 3.6, resource: ResourceType.Iron },
+  { x: 13, y: 15, radius: 3, resource: ResourceType.Copper },
+  { x: -6, y: 4, radius: 3, resource: ResourceType.Coal },
+  { x: 6, y: -6, radius: 2.6, resource: ResourceType.Stone },
 ]);
+
+/**
+ * How much ore sits on a patch tile: full at the centre, thin at the rim.
+ *
+ * A flat patch would be one colour until the moment a miner emptied a tile,
+ * which makes C09 acceptance 1 — "a patch depletes tile by tile and visibly
+ * thins as it does" — impossible to see until it is nearly over. A linear
+ * falloff puts all four fullness buckets on screen as concentric rings from the
+ * first frame, so a wrong bucket boundary is visible rather than inferred.
+ *
+ * The rim keeps a tenth of a full tile rather than dropping to zero: a tile
+ * inside a patch outline with nothing on it reads as a rendering bug, and it
+ * would also make the miner's "needs >=1 resource tile" rule depend on where
+ * the disc's edge landed.
+ */
+function patchAmount(distance: number, radius: number): number {
+  const t = radius <= 0 ? 0 : Math.min(1, distance / radius);
+  return Math.max(RIM_AMOUNT, Math.round(NOMINAL_RESOURCE_AMOUNT * (1 - t)));
+}
+
+/** What a patch tile holds at its outermost ring. A tenth of a full tile. */
+const RIM_AMOUNT = Math.round(NOMINAL_RESOURCE_AMOUNT / 10);
+
+function distanceTo(disc: Disc, x: number, y: number): number {
+  const dx = x - disc.x;
+  const dy = y - disc.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
 
 function inside(disc: Disc, x: number, y: number): boolean {
   const dx = x - disc.x;
@@ -98,20 +126,22 @@ function inside(disc: Disc, x: number, y: number): boolean {
 }
 
 /**
- * The checkerboard, plus a pond and two ore patches near the origin.
+ * The checkerboard, plus a pond and one patch of each resource near the origin.
  *
  * **Scaffolding**, in the same spirit as C02's checkerboard and deleted by the
- * same chunks: C09 places real patches and C19 generates the world. It exists
- * because three of C06's acceptance criteria — "placing on water, on an
- * occupied tile, or without resources is rejected with a distinct, visible
- * reason" — cannot be *looked at* in a world with neither water nor ore in it,
- * and §20 asks for every criterion to be verified in the running application
- * and not only in a test.
+ * same chunk: C19 generates the world. It exists because three of C06's
+ * acceptance criteria — "placing on water, on an occupied tile, or without
+ * resources is rejected with a distinct, visible reason" — cannot be *looked
+ * at* in a world with neither water nor ore in it, and §20 asks for every
+ * criterion to be verified in the running application and not only in a test.
  *
- * The patches are stamped onto sand because C09 is what draws ore piles: until
- * then the only way to see where a miner may go is for the ground under it to
- * look different. Pure and positional like its base, so a world chunk visited
- * twice is identical both times.
+ * C09 replaced its two placeholder patches with real ones. The sand it used to
+ * stamp under them went with the change: sand was standing in for an ore
+ * sprite that did not exist yet, and now that the tint and the piles draw, a
+ * second cue would only hide whether the first one works.
+ *
+ * Pure and positional like its base, so a world chunk visited twice is
+ * identical both times.
  */
 export function createPlaygroundGenerator(): ChunkGenerator {
   const base = createCheckerboardGenerator();
@@ -133,10 +163,10 @@ export function createPlaygroundGenerator(): ChunkGenerator {
         }
 
         for (const patch of PATCHES) {
-          if (!inside(patch, x, y)) continue;
-          chunk.terrain[index] = TileType.Sand;
+          const distance = distanceTo(patch, x, y);
+          if (distance > patch.radius) continue;
           chunk.resource[index] = patch.resource;
-          chunk.resourceAmount[index] = PLAYGROUND_PATCH_AMOUNT;
+          chunk.resourceAmount[index] = patchAmount(distance, patch.radius);
           break;
         }
       }

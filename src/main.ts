@@ -4,7 +4,9 @@ import { DebugOverlay } from './debug/debug-overlay.js';
 import { GameController } from './game/game-controller.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
+import { ResourceType, resourceName } from './game/world/resource.js';
 import { createPlaygroundGenerator } from './game/world/world-generator.js';
+import { toChunkCoord, toLocalCoord, localIndex } from './game/world/chunk.js';
 import { World } from './game/world/world.js';
 import { InputManager } from './input/input-manager.js';
 import type { InputAction } from './input/keybindings.js';
@@ -36,6 +38,24 @@ function requireElement<T extends Element>(selector: string): T {
   const el = document.querySelector<T>(selector);
   if (el === null) throw new Error(`IronFlow: missing required element "${selector}".`);
   return el;
+}
+
+/**
+ * The resource on a tile, for the debug overlay.
+ *
+ * `peekChunk` rather than `World.getResource`, because this runs every frame on
+ * whatever the cursor is over: the accessor generates a world chunk on a miss,
+ * and a debug readout must not be the thing that decides how much of the map
+ * exists. A tile the player can point at has been drawn, so its world chunk is
+ * already there; a miss means the cursor is off the rendered world entirely.
+ */
+function describeOre(world: World, x: number, y: number): string {
+  const chunk = world.peekChunk(toChunkCoord(x), toChunkCoord(y));
+  if (chunk === undefined) return '—';
+  const index = localIndex(toLocalCoord(x), toLocalCoord(y));
+  const type = chunk.resource[index] ?? ResourceType.None;
+  if (type === ResourceType.None) return 'none';
+  return `${resourceName(type)} ${chunk.resourceAmount[index] ?? 0}`;
 }
 
 function bootstrap(): void {
@@ -202,6 +222,11 @@ function bootstrap(): void {
           hover === null
             ? '—'
             : `${hover.x},${hover.y}${input.hoverEntity === null ? '' : ` #${input.hoverEntity}`}`,
+        // C09's readout: the number behind the tint and the pile. The
+        // inspector (C12) is where this becomes a player-facing panel; until
+        // then it is the only way to check that what depleted on screen is
+        // what depleted in the arrays.
+        ore: hover === null ? '—' : describeOre(world, hover.x, hover.y),
       },
       elapsedMs,
     );

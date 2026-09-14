@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CHUNK_SIZE } from '../../src/game/world/chunk.js';
+import { CHUNK_SIZE, createChunk } from '../../src/game/world/chunk.js';
+import { NOMINAL_RESOURCE_AMOUNT, ResourceType } from '../../src/game/world/resource.js';
 import { TileType } from '../../src/game/world/tile.js';
 import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
 import { World } from '../../src/game/world/world.js';
@@ -44,7 +45,7 @@ function countingAtlas(): SpriteAtlas & { calls: SpriteId[] } {
   };
 }
 
-function setup(zoom: number) {
+function setup(zoom: number, generator = createCheckerboardGenerator()) {
   const atlas = countingAtlas();
   const surfaces: { width: number; height: number }[] = [];
   const layer = new TerrainLayer({
@@ -54,11 +55,23 @@ function setup(zoom: number) {
       return fakeSurface(w, h);
     },
   });
-  const world = new World(createCheckerboardGenerator());
+  const world = new World(generator);
   const camera = new Camera({ x: 0, y: 0, zoom, viewportWidth: VIEWPORT, viewportHeight: VIEWPORT });
   const ctx = { drawImage: vi.fn() } as unknown as CanvasRenderingContext2D;
   const bounds = camera.visibleTileBounds();
   return { atlas, surfaces, layer, world, camera, ctx, bounds };
+}
+
+/** One tile of ore at the origin, on an otherwise bare world. */
+function oreAtOrigin(amount: number) {
+  return (cx: number, cy: number) => {
+    const chunk = createChunk(cx, cy);
+    if (cx === 0 && cy === 0) {
+      chunk.resource[0] = ResourceType.Iron;
+      chunk.resourceAmount[0] = amount;
+    }
+    return chunk;
+  };
 }
 
 describe('TerrainLayer', () => {
@@ -175,5 +188,62 @@ describe('TerrainLayer', () => {
 
     expect(released).toHaveLength(held);
     expect(layer.getStats().cached).toBe(0);
+  });
+});
+
+/**
+ * C09 task 3 — ore drawn over the terrain it sits on.
+ *
+ * It lives in this layer rather than the entity layer because a resource patch
+ * is not an entity, and the interesting consequence is the cache: the bitmap
+ * that holds the terrain holds the ore too, so a patch that thins as it is
+ * mined has to invalidate the same entry a changed tile does. A layer that
+ * drew ore correctly but never rebuilt would show a full patch over an empty
+ * one for as long as the world chunk stayed on screen.
+ */
+describe('TerrainLayer resources', () => {
+  it('draws an ore pile over the tile it sits on, and only there', () => {
+    const { atlas, layer, world, camera, ctx, bounds } = setup(1, oreAtOrigin(NOMINAL_RESOURCE_AMOUNT));
+    layer.draw(ctx, world, camera, bounds, 1);
+
+    const ore = atlas.calls.filter((id) => id.startsWith('resource:'));
+    expect(ore).toEqual(['resource:iron:3']);
+  });
+
+  it('draws nothing on a world with no ore in it', () => {
+    const { atlas, layer, world, camera, ctx, bounds } = setup(1);
+    layer.draw(ctx, world, camera, bounds, 1);
+
+    expect(atlas.calls.some((id) => id.startsWith('resource:'))).toBe(false);
+  });
+
+  it('thins the pile as the tile is mined, and stops drawing it at zero', () => {
+    // C09 acceptance 1 and 2, through the cache: `consumeResource` bumps the
+    // world chunk's revision, which is the only reason the bitmap is rebuilt.
+    const { atlas, layer, world, camera, ctx, bounds } = setup(1, oreAtOrigin(NOMINAL_RESOURCE_AMOUNT));
+    layer.draw(ctx, world, camera, bounds, 1);
+
+    atlas.calls.length = 0;
+    world.consumeResource(0, 0, NOMINAL_RESOURCE_AMOUNT - 1);
+    layer.draw(ctx, world, camera, bounds, 1);
+    expect(layer.getStats().built).toBe(1);
+    expect(atlas.calls.filter((id) => id.startsWith('resource:'))).toEqual(['resource:iron:0']);
+
+    atlas.calls.length = 0;
+    world.consumeResource(0, 0, 1);
+    layer.draw(ctx, world, camera, bounds, 1);
+    expect(layer.getStats().built).toBe(1);
+    expect(atlas.calls.some((id) => id.startsWith('resource:'))).toBe(false);
+  });
+
+  it('draws ore on the uncached path too', () => {
+    // At maximum zoom no bitmap is built at all (see above). A layer that only
+    // drew ore into the cache would show bare ground when zoomed right in —
+    // which is exactly when a player is looking at a patch.
+    const { atlas, layer, world, camera, ctx } = setup(4, oreAtOrigin(NOMINAL_RESOURCE_AMOUNT));
+    layer.draw(ctx, world, camera, camera.visibleTileBounds(), 1);
+
+    expect(layer.getStats().direct).toBeGreaterThan(0);
+    expect(atlas.calls).toContain('resource:iron:3');
   });
 });

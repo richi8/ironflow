@@ -18,9 +18,6 @@ export const CHUNK_SIZE = 32;
 /** Tiles in a world chunk. The length of every one of its arrays. */
 export const CHUNK_AREA = CHUNK_SIZE * CHUNK_SIZE;
 
-/** The `resource` value meaning "this tile holds no ore". */
-export const NO_RESOURCE = 0;
-
 /** Largest remaining amount a resource tile can hold, from `Uint16Array`. */
 export const MAX_RESOURCE_AMOUNT = 65535;
 
@@ -36,7 +33,7 @@ export interface WorldChunk {
   readonly cy: number;
   /** `TileType` per tile, row-major. `CHUNK_AREA` bytes. */
   readonly terrain: Uint8Array;
-  /** Resource type id per tile, `NO_RESOURCE` for none. `CHUNK_AREA` bytes. */
+  /** `ResourceType` per tile, `ResourceType.None` for bare ground. `CHUNK_AREA` bytes. */
   readonly resource: Uint8Array;
   /** Remaining units on each resource tile. `CHUNK_AREA` entries. */
   readonly resourceAmount: Uint16Array;
@@ -133,7 +130,7 @@ export function chunkKey(cx: number, cy: number): number {
  *
  * Generators build on this rather than allocating their own arrays, so the
  * array lengths are stated in exactly one place. Zero-filled is meaningful
- * here — `TileType.Grass` and `NO_RESOURCE` are both `0`.
+ * here — `TileType.Grass` and `ResourceType.None` are both `0`.
  */
 export function createChunk(cx: number, cy: number): WorldChunk {
   chunkKey(cx, cy); // range check; the key itself is the caller's business

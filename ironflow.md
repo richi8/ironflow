@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C08 complete.** Milestone B in progress. Next: C09 — resource patches. |
+| **Status** | **C09 complete.** Milestone B in progress. Next: C10 — player character & manual gathering. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C09 — Resource patches** |
+| **First action** | Chunk **C10 — Player character & manual gathering** |
 
 ---
 
@@ -2178,6 +2178,77 @@ stability, buffer-vs-slot semantics.
 `resourceAmount` never goes negative or exceeds `Uint16` range.
 
 **Out of scope.** Infinite patches, richness scaling, ore quality tiers.
+
+**Decisions taken while implementing this chunk.**
+
+- **`ResourceType` lives in `world/resource.ts`, not in `data/`.** It is the
+  byte stored in `WorldChunk.resource` and persisted inside world-chunk deltas
+  (§14), so it is storage vocabulary before it is content — the same thing
+  `TileType` is, in the same directory, with the same "existing numbers may
+  never be reassigned" rule. The file carries the two facts the table needs
+  (`name`, `itemId`) rather than splitting a five-line properties table across
+  `data/` and `world/`.
+- **A resource's `name` is one word with three jobs**, exactly as
+  `tileProperties.name` is: the §11 palette token (`--if-iron`), the sprite id
+  the renderer builds (`resource:iron:2`), and the word a readout prints. There
+  is no lookup table between a resource and its colour, and there is a test that
+  fails if C19 adds a resource §11 never gave a tint.
+- **`resourceItemId` ships unused.** C10 and C11 are its callers. A resource
+  that does not say what it yields is an incomplete definition rather than a
+  field held back, and a test checks every entry against `data/items.ts`, which
+  is what keeps it from rotting before its callers arrive.
+- **Fullness buckets are absolute, against `NOMINAL_RESOURCE_AMOUNT`**, not
+  relative to what the tile started with. Relative would need a second
+  `Uint16Array` per world chunk recording the original amount — 2 KB per world
+  chunk and another field in every save — to answer a question only ever asked
+  about a pixel. The cost: a tile richer than nominal sits in the fullest bucket
+  until it drops below a full tile's worth. **C19 should revisit this** if patch
+  richness ends up varying by more than about 2x; until then a patch is at most
+  one full tile per square and the scale is exact.
+- **Ore is drawn by the terrain layer, into the same cached bitmap.** A patch is
+  not an entity (task 1), so it has no business in the entity layer, and caching
+  it costs nothing extra: `consumeResource` bumps the world chunk's `revision`,
+  which is already what invalidates a terrain bitmap, so a depleting patch
+  redraws itself for free. Both draw paths — cached and direct — draw ore, since
+  the direct path is the one used at high zoom, which is exactly when a player
+  is looking at a patch.
+- **Tint *and* piles, not one or the other.** The tint deepens with fullness and
+  survives to the far end of the zoom-out range, where a lump is a fraction of a
+  pixel and a patch has to read as a coloured region; the piles are what
+  distinguish a half-mined tile from a full one up close. Task 3 asks for a
+  patch legible "at a glance without a number" at every zoom, and neither cue
+  does that alone.
+- **`NOMINAL_RESOURCE_AMOUNT` is 500** — a thousand seconds of one miner at
+  §15's 0.5 items/s, so a 2x2 miner on four full tiles runs about an hour before
+  it must move. It is a balance number and belongs to C20's pass; it is named
+  in one place so that pass is a one-line change.
+
+**Deviations.**
+
+- **Task 2's "clears the resource type at zero" is not implemented, and will
+  not be.** C02 already built `consumeResource` and decided the opposite, with
+  a reason that still holds: §14 stores changed amounts as a world-chunk delta,
+  and a restored zero must not need a second field to say what kind of nothing
+  it is. The type stays, the amount goes to zero, and "is this tile mineable?"
+  is `getResourceAmount(x, y) > 0` everywhere. Every acceptance criterion in
+  this chunk is met by that reading — a depleted tile produces nothing and draws
+  no pile, because the *renderer* keys on the amount.
+- **`NO_RESOURCE` was removed from `chunk.ts`** in favour of
+  `ResourceType.None`. C02 needed a name for the byte before there was an enum
+  to put it in; two names for zero is one more than the number of things zero
+  means.
+- **The playground generator's ore no longer stamps sand under itself.** C02's
+  scaffolding used a terrain change to show where ore was, explicitly "because
+  C09 is what draws ore piles". C09 draws them, so the stand-in went: a second
+  cue would only hide whether the first one works. The patches themselves are
+  now one per resource, with a linear falloff from centre to rim so that all
+  four fullness buckets are on screen from the first frame — a wrong bucket
+  boundary is then visible rather than inferred.
+- **A hovered tile's resource was added to the debug overlay.** Not in the
+  task list; C12's inspector is where it becomes player-facing. It is here
+  because §20 asks for every acceptance criterion to be verified in the running
+  application, and "the patch depleted on screen" is only half of that without
+  the number behind it.
 
 ---
 

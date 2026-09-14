@@ -13,13 +13,13 @@ import type { TileBounds } from './coordinates.js';
 import {
   CHUNK_AREA,
   MAX_RESOURCE_AMOUNT,
-  NO_RESOURCE,
   chunkKey,
   localIndex,
   toChunkCoord,
   toLocalCoord,
   type WorldChunk,
 } from './chunk.js';
+import { ResourceType, isResourceType } from './resource.js';
 import { TileType, isTileType } from './tile.js';
 
 /**
@@ -154,8 +154,8 @@ export class World {
     markChanged(chunk);
   }
 
-  /** The resource type id at a tile, or `NO_RESOURCE`. */
-  getResource(x: number, y: number): number {
+  /** The resource type at a tile, or `ResourceType.None`. */
+  getResource(x: number, y: number): ResourceType {
     const chunk = this.getChunk(toChunkCoord(x), toChunkCoord(y));
     return at(chunk.resource, localIndex(toLocalCoord(x), toLocalCoord(y)));
   }
@@ -188,7 +188,7 @@ export class World {
     const chunk = this.getChunk(toChunkCoord(x), toChunkCoord(y));
     const index = localIndex(toLocalCoord(x), toLocalCoord(y));
 
-    if (at(chunk.resource, index) === NO_RESOURCE) return 0;
+    if (at(chunk.resource, index) === ResourceType.None) return 0;
 
     const remaining = at(chunk.resourceAmount, index);
     const taken = Math.min(remaining, amount);
@@ -203,9 +203,9 @@ export class World {
    * Place a resource patch tile. Used by generators through `World` and by the
    * save loader when replaying deltas.
    */
-  setResource(x: number, y: number, type: number, amount: number): void {
-    if (!Number.isInteger(type) || type < 0 || type > 255) {
-      throw new RangeError(`World.setResource: type must be a byte, got ${type}.`);
+  setResource(x: number, y: number, type: ResourceType, amount: number): void {
+    if (!isResourceType(type)) {
+      throw new RangeError(`World.setResource: ${type} is not a ResourceType.`);
     }
     if (!Number.isInteger(amount) || amount < 0 || amount > MAX_RESOURCE_AMOUNT) {
       throw new RangeError(

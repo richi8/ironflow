@@ -5,7 +5,6 @@ import {
   CHUNK_MAX,
   CHUNK_MIN,
   CHUNK_SIZE,
-  NO_RESOURCE,
   chunkKey,
   createChunk,
   localIndex,
@@ -14,6 +13,7 @@ import {
   type WorldChunk,
 } from '../../src/game/world/chunk.js';
 import type { TileBounds } from '../../src/game/world/coordinates.js';
+import { ResourceType } from '../../src/game/world/resource.js';
 import {
   TILE_TYPE_COUNT,
   TileType,
@@ -35,8 +35,8 @@ import { World, type ChunkGenerator } from '../../src/game/world/world.js';
  * suspects an integer division.
  */
 
-/** An iron-ish resource id. C08/C09 give resources real ids; C02 needs a byte. */
-const ORE = 1;
+/** The resource these tests mine. C09 gave the byte a name; the value is the same. */
+const ORE = ResourceType.Iron;
 
 /** A generator that counts its calls, so lazy creation is observable. */
 function countingGenerator(): ChunkGenerator & { calls: () => number } {
@@ -420,9 +420,9 @@ describe('World resources', () => {
     expect(world.getResourceAmount(-77, 42)).toBe(500);
   });
 
-  it('reports NO_RESOURCE on bare terrain', () => {
+  it('reports ResourceType.None on bare terrain', () => {
     const world = new World(createChunk);
-    expect(world.getResource(0, 0)).toBe(NO_RESOURCE);
+    expect(world.getResource(0, 0)).toBe(ResourceType.None);
     expect(world.getResourceAmount(0, 0)).toBe(0);
   });
 
@@ -470,7 +470,7 @@ describe('World resources', () => {
     expect(world.getResourceAmount(-9, -9)).toBe(250);
     expect(world.peekChunk(-1, -1)?.dirty).toBe(true);
 
-    expect(() => world.setResource(0, 0, 256, 1)).toThrow(RangeError);
+    expect(() => world.setResource(0, 0, 256 as ResourceType, 1)).toThrow(RangeError);
     expect(() => world.setResource(0, 0, ORE, 65_536)).toThrow(RangeError);
     expect(() => world.setResource(0, 0, ORE, -1)).toThrow(RangeError);
   });
@@ -631,7 +631,7 @@ describe('createCheckerboardGenerator', () => {
   it('produces buildable terrain everywhere, since C02 places no water', () => {
     const chunk = createCheckerboardGenerator()(2, -2);
     expect(chunk.terrain.every((t) => isBuildable(t))).toBe(true);
-    expect(chunk.resource.every((r) => r === NO_RESOURCE)).toBe(true);
+    expect(chunk.resource.every((r) => r === ResourceType.None)).toBe(true);
     expect(chunk.dirty).toBe(false);
   });
 });

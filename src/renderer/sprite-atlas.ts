@@ -14,6 +14,7 @@
  *
  * ```text
  * terrain:<name>                              terrain:grass
+ * resource:<name>:<fullness 0-3>              resource:iron:2
  * belt:<rotation 0-3>                         belt:1
  * building:<category>:<CODE>[:<w>x<h>[:<rise>]]
  *                                             building:extraction:MI
@@ -37,6 +38,14 @@
  */
 
 import { DIRECTION_OFFSETS, type Rotation } from '../game/world/coordinates.js';
+import {
+  NO_BUCKET,
+  RESOURCE_BUCKET_COUNT,
+  RESOURCE_TYPE_COUNT,
+  ResourceType,
+  resourceBucket,
+  resourceName,
+} from '../game/world/resource.js';
 import { TILE_TYPE_COUNT, type TileType, tileProperties } from '../game/world/tile.js';
 
 import { FONT_STACK, PALETTE, color, shade, type ColorToken } from './palette.js';
@@ -136,6 +145,42 @@ export function terrainSprite(type: TileType): SpriteId {
 /** The id that draws the "no such sprite" marker. */
 export const MISSING_SPRITE: SpriteId = 'missing';
 
+/**
+ * The sprite for each resource type at each fullness bucket, `[type][bucket]`.
+ *
+ * Built from `resourceName` for the reason `TERRAIN_SPRITES` is built from
+ * `tileProperties`: the resource added in C19 gets a sprite id that cannot
+ * disagree with its name, and the id it gets names the §11 palette token that
+ * colours it.
+ */
+export const RESOURCE_SPRITES: readonly (readonly SpriteId[])[] = Object.freeze(
+  Array.from({ length: RESOURCE_TYPE_COUNT }, (_unused, type) =>
+    Object.freeze(
+      Array.from({ length: RESOURCE_BUCKET_COUNT }, (_unusedBucket, bucket) =>
+        // Row 0 is the *absence* of a resource, which has no picture. It is
+        // filled with the marker rather than left as a hole so that a tile
+        // carrying an amount but no type — a corrupt world chunk, or a save
+        // read wrongly — draws magenta instead of being quietly absorbed.
+        type === ResourceType.None ? MISSING_SPRITE : `resource:${resourceName(type)}:${bucket}`,
+      ),
+    ),
+  ),
+);
+
+/**
+ * What to draw on a resource tile, or `null` for nothing at all.
+ *
+ * Two tiles draw no ore: bare ground, and a patch mined out (C09 acceptance 2).
+ * Returning `null` rather than an empty sprite keeps that decision here, where
+ * the fullness scale already lives, instead of in every layer that draws a
+ * tile.
+ */
+export function resourceSprite(type: ResourceType, amount: number): SpriteId | null {
+  const bucket = resourceBucket(amount);
+  if (bucket === NO_BUCKET) return null;
+  return RESOURCE_SPRITES[type]?.[bucket] ?? MISSING_SPRITE;
+}
+
 /* -------------------------------------------------------------------------- *
  * Parsing
  * -------------------------------------------------------------------------- */
@@ -143,6 +188,7 @@ export const MISSING_SPRITE: SpriteId = 'missing';
 /** A parsed sprite id: what the procedural atlas actually draws. */
 export type SpriteDescriptor =
   | { readonly kind: 'face'; readonly fill: string }
+  | { readonly kind: 'resource'; readonly fill: string; readonly bucket: number }
   | {
       readonly kind: 'prism';
       readonly fill: string;
@@ -203,6 +249,18 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     const token = `terrain-${parts[1] ?? ''}`;
     if (!isColorToken(token)) return MISSING;
     return Object.freeze({ kind: 'face' as const, fill: color(token) });
+  }
+
+  if (namespace === 'resource' && parts.length === 3) {
+    // The resource's name *is* its palette token (`--if-iron`), which is why
+    // there is no lookup table between the two — see `ResourceProperties.name`.
+    const token = parts[1] ?? '';
+    if (!isColorToken(token)) return MISSING;
+    // Matched as text for the reason the belt rotation below is: `Number('')`
+    // is 0, so `resource:iron:` would otherwise parse as an empty pile.
+    const text = parts[2] ?? '';
+    if (!/^[0-3]$/.test(text)) return MISSING;
+    return Object.freeze({ kind: 'resource' as const, fill: color(token), bucket: Number(text) });
   }
 
   if (namespace === 'belt' && parts.length === 2) {
@@ -267,6 +325,34 @@ const OUTLINE_TONE = 0.4;
 /** Below this many pixels a two-letter code is a smudge, so it is skipped. */
 const MIN_LABEL_PX = 7;
 
+/** Ground tint opacity per fullness bucket, thinnest first. */
+const TINT_ALPHA: readonly number[] = Object.freeze([0.3, 0.45, 0.6, 0.78]);
+
+/** An ore lump's footprint, as a fraction of a tile. */
+const LUMP_SCALE = 0.3;
+
+/** Below this many pixels wide, lumps are skipped and the tint carries alone. */
+const MIN_LUMP_PX = 2;
+
+/** Lumps are lighter than the tint so they read as objects sitting on it. */
+const LUMP_TOP_TONE = 1.35;
+
+/**
+ * Where each lump sits, in tile fractions from the tile centre, back to front.
+ *
+ * Four positions for four buckets: a fuller tile shows more of them. They are
+ * inside a ±0.3 tile box so a lump never crosses into the neighbouring tile —
+ * ore is drawn into the terrain layer's per-world-chunk bitmap, whose edges are
+ * the world chunk's own diamond, and anything overhanging would be clipped at
+ * the seam.
+ */
+const LUMP_OFFSETS: readonly { readonly u: number; readonly v: number }[] = Object.freeze([
+  Object.freeze({ u: -0.18, v: -0.2 }),
+  Object.freeze({ u: 0.24, v: -0.1 }),
+  Object.freeze({ u: -0.24, v: 0.16 }),
+  Object.freeze({ u: 0.12, v: 0.26 }),
+]);
+
 /**
  * Everything drawn by code, no image assets. See §11's placeholder-first
  * pipeline: this is the implementation C29 replaces, and the only reason the
@@ -280,6 +366,9 @@ export class ProceduralAtlas implements SpriteAtlas {
     switch (sprite.kind) {
       case 'face':
         fillFace(ctx, sx, sy, 1, 1, zoom, sprite.fill);
+        return;
+      case 'resource':
+        drawResource(ctx, sx, sy, zoom, sprite.fill, sprite.bucket);
         return;
       case 'prism':
         drawPrism(ctx, sx, sy, zoom, sprite);
@@ -362,6 +451,64 @@ function drawPrism(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: 
   paint(ctx, shade(prism.fill, TOP_TONE), outline);
 
   drawCode(ctx, prism.code, sx, sy - lift, zoom * Math.min(prism.width, prism.height));
+}
+
+/**
+ * Ore on a tile: a tint over the ground, plus one lump per unit of fullness.
+ *
+ * Two readings of the same number, because C09 task 3 asks for a patch that is
+ * legible "at a glance without a number" and the two carry at different zooms.
+ * The tint survives to the far end of the zoom range, where a lump is a
+ * fraction of a pixel and a patch has to read as a coloured region; the lumps
+ * are what make a half-mined tile distinguishable from a full one when the
+ * player is standing over it. Neither alone does both.
+ *
+ * The tint deepens with fullness rather than being constant, so a patch thins
+ * visibly as it is worked even at the zoom where the lumps have vanished.
+ */
+function drawResource(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  fill: string,
+  bucket: number,
+): void {
+  const alpha = TINT_ALPHA[bucket] ?? TINT_ALPHA[TINT_ALPHA.length - 1] ?? 1;
+
+  // Saved and restored rather than reset to 1: this runs inside the terrain
+  // layer's draw loop, and a layer that leaves the context changed is the kind
+  // of bug that shows up three sprites later in something unrelated.
+  const previousAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = previousAlpha * alpha;
+  fillFace(ctx, sx, sy, 1, 1, zoom, fill);
+  ctx.globalAlpha = previousAlpha;
+
+  // Below a pixel or so a lump is a smudge that costs a path to draw. The tint
+  // is still carrying the information at that size.
+  const lumpSize = LUMP_SCALE * TILE_HALF_WIDTH * zoom;
+  if (lumpSize < MIN_LUMP_PX) return;
+
+  const top = shade(fill, LUMP_TOP_TONE);
+  const outline = shade(fill, OUTLINE_TONE);
+
+  // Back to front, so a lump nearer the viewer overlaps the one behind it. The
+  // offsets are fractions of a tile, so the pile reads the same at every zoom,
+  // and they are a fixed table rather than anything seeded — two tiles of the
+  // same fullness must be the same picture (§6 is about the simulation, but a
+  // renderer that invents per-tile noise makes a screenshot untestable too).
+  for (let i = 0; i <= bucket; i++) {
+    const lump = LUMP_OFFSETS[i];
+    if (lump === undefined) continue;
+    const lx = sx + (lump.u * EAST_STEP.x + lump.v * SOUTH_STEP.x) * zoom;
+    const ly = sy + (lump.u * EAST_STEP.y + lump.v * SOUTH_STEP.y) * zoom;
+    groundFacePath(ctx, lx, ly, LUMP_SCALE, LUMP_SCALE, zoom);
+    ctx.fillStyle = top;
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 }
 
 function drawBelt(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: number, rotation: Rotation): void {

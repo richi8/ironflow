@@ -3,9 +3,22 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  NOMINAL_RESOURCE_AMOUNT,
+  RESOURCE_BUCKET_COUNT,
+  RESOURCE_TYPES,
+  ResourceType,
+  resourceName,
+} from '../../src/game/world/resource.js';
 import { TILE_TYPE_COUNT, TileType, tileProperties } from '../../src/game/world/tile.js';
 import { PALETTE, color, shade } from '../../src/renderer/palette.js';
-import { TERRAIN_SPRITES, describeSprite, terrainSprite } from '../../src/renderer/sprite-atlas.js';
+import {
+  RESOURCE_SPRITES,
+  TERRAIN_SPRITES,
+  describeSprite,
+  resourceSprite,
+  terrainSprite,
+} from '../../src/renderer/sprite-atlas.js';
 
 /**
  * C03 — the placeholder atlas. See ironflow.md C03 task 3 and §11.
@@ -35,6 +48,51 @@ describe('sprite ids', () => {
   it('resolves terrain to its palette colour', () => {
     const grass = describeSprite(terrainSprite(TileType.Grass));
     expect(grass).toEqual({ kind: 'face', fill: color('terrain-grass') });
+  });
+
+  it('gives every resource a sprite per fullness bucket, named after the resource', () => {
+    for (const type of RESOURCE_TYPES) {
+      const sprites = RESOURCE_SPRITES[type];
+      expect(sprites, resourceName(type)).toHaveLength(RESOURCE_BUCKET_COUNT);
+      for (let bucket = 0; bucket < RESOURCE_BUCKET_COUNT; bucket++) {
+        expect(sprites?.[bucket]).toBe(`resource:${resourceName(type)}:${bucket}`);
+      }
+    }
+  });
+
+  it('gives every resource a colour, so none can draw as missing', () => {
+    // §11 names one tint token per resource. The failure this catches is C19
+    // adding a resource and a whole ore field turning magenta at the far edge
+    // of the map, months later.
+    for (const type of RESOURCE_TYPES) {
+      for (let bucket = 0; bucket < RESOURCE_BUCKET_COUNT; bucket++) {
+        expect(describeSprite(RESOURCE_SPRITES[type]?.[bucket] ?? '').kind, resourceName(type)).toBe('resource');
+      }
+    }
+  });
+
+  it('resolves ore to its palette tint and its fullness', () => {
+    expect(describeSprite('resource:copper:2')).toEqual({ kind: 'resource', fill: color('copper'), bucket: 2 });
+  });
+
+  it('draws nothing at all on bare or exhausted ground', () => {
+    // C09 acceptance 2 and 3, as one string-level fact: an exhausted tile is
+    // not a thin pile, it is no pile.
+    expect(resourceSprite(ResourceType.Iron, 0)).toBeNull();
+    expect(resourceSprite(ResourceType.None, 0)).toBeNull();
+  });
+
+  it('picks a thinner pile as a tile is worked out', () => {
+    const full = resourceSprite(ResourceType.Iron, NOMINAL_RESOURCE_AMOUNT);
+    const nearlyGone = resourceSprite(ResourceType.Iron, 1);
+    expect(full).toBe('resource:iron:3');
+    expect(nearlyGone).toBe('resource:iron:0');
+  });
+
+  it('marks ore with a type nothing defines rather than drawing it as plain ground', () => {
+    // A tile carrying an amount but no type is a corrupt world chunk, and a
+    // magenta tile is how a save bug gets noticed instead of absorbed.
+    expect(resourceSprite(ResourceType.None, 100)).toBe('missing');
   });
 
   it('resolves a building with its category colour and code', () => {
@@ -73,7 +131,19 @@ describe('sprite ids', () => {
   it('draws a marker rather than throwing on an id it cannot parse', () => {
     // A missing sprite is a content bug. One that takes the frame down with it
     // is a content bug you cannot see the rest of the screen to diagnose.
-    for (const id of ['', 'nonsense', 'terrain:lava', 'belt:9', 'belt:', 'building:power', 'building::PP']) {
+    for (const id of [
+      '',
+      'nonsense',
+      'terrain:lava',
+      'belt:9',
+      'belt:',
+      'building:power',
+      'building::PP',
+      'resource:iron',
+      'resource:iron:',
+      'resource:iron:4',
+      'resource:unobtanium:1',
+    ]) {
       expect(describeSprite(id), id).toEqual({ kind: 'missing' });
     }
   });

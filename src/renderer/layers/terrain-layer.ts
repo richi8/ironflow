@@ -19,14 +19,29 @@
  * 3. **Cold world chunks are drawn directly, clipped to the viewport.** Only a
  *    few bitmaps are built per frame, so arriving somewhere new costs a few
  *    hundred extra paths rather than a fifty-world-chunk stall.
+ *
+ * Ore is drawn here too, over the terrain face and into the same bitmap (C09
+ * task 3). It belongs in this layer and not in the entity layer because a
+ * resource patch is not an entity — it is two arrays inside the world chunk
+ * (C09 task 1) — and caching it costs nothing extra: mining bumps the world
+ * chunk's `revision`, which is already the cache's staleness signal, so a
+ * depleting patch redraws itself for free.
  */
 
 import { CHUNK_SIZE, chunkKey } from '../../game/world/chunk.js';
 import type { TileBounds } from '../../game/world/coordinates.js';
+import { ResourceType } from '../../game/world/resource.js';
 import { ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, type Camera } from '../camera.js';
 import { tileToScreen } from '../projection.js';
 import type { ReadonlyWorldChunk, WorldView } from '../render-state.js';
-import { TILE_HALF_HEIGHT, TILE_HALF_WIDTH, terrainSprite, type SpriteAtlas } from '../sprite-atlas.js';
+import {
+  TILE_HALF_HEIGHT,
+  TILE_HALF_WIDTH,
+  resourceSprite,
+  terrainSprite,
+  type SpriteAtlas,
+  type SpriteId,
+} from '../sprite-atlas.js';
 
 /* -------------------------------------------------------------------------- *
  * Zoom buckets
@@ -355,16 +370,16 @@ export class TerrainLayer {
 
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-        const terrain = chunk.terrain[ly * CHUNK_SIZE + lx];
+        const index = ly * CHUNK_SIZE + lx;
+        const terrain = chunk.terrain[index];
         if (terrain === undefined) continue;
         const centre = tileToScreen(tileX0 + lx + 0.5, tileY0 + ly + 0.5);
-        this.atlas.draw(
-          surface.ctx,
-          terrainSprite(terrain),
-          (centre.x - originX) * scale + SURFACE_PAD,
-          (centre.y - originY) * scale + SURFACE_PAD,
-          scale,
-        );
+        const sx = (centre.x - originX) * scale + SURFACE_PAD;
+        const sy = (centre.y - originY) * scale + SURFACE_PAD;
+        this.atlas.draw(surface.ctx, terrainSprite(terrain), sx, sy, scale);
+
+        const ore = oreSprite(chunk, index);
+        if (ore !== null) this.atlas.draw(surface.ctx, ore, sx, sy, scale);
       }
     }
 
@@ -424,15 +439,36 @@ export class TerrainLayer {
 
     for (let ty = minY; ty <= maxY; ty++) {
       for (let tx = minX; tx <= maxX; tx++) {
-        const terrain = chunk.terrain[(ty - tileY0) * CHUNK_SIZE + (tx - tileX0)];
+        const index = (ty - tileY0) * CHUNK_SIZE + (tx - tileX0);
+        const terrain = chunk.terrain[index];
         if (terrain === undefined) continue;
         const centre = camera.worldToScreen(tx + 0.5, ty + 0.5);
         this.atlas.draw(ctx, terrainSprite(terrain), centre.x, centre.y, zoom);
+
+        const ore = oreSprite(chunk, index);
+        if (ore !== null) this.atlas.draw(ctx, ore, centre.x, centre.y, zoom);
       }
     }
 
     this.direct += 1;
   }
+}
+
+/**
+ * What to draw on one tile's ore, or `null` for bare or exhausted ground.
+ *
+ * Read straight out of the world chunk's arrays rather than through
+ * `World.getResource`: this runs 1,024 times per bitmap, and the accessor would
+ * redo the world-chunk lookup and the local-index arithmetic the caller has
+ * already done. Both halves are checked, because a missing entry means the
+ * arrays disagree in length, which is a bug that should draw nothing rather
+ * than throw inside a draw loop.
+ */
+function oreSprite(chunk: ReadonlyWorldChunk, index: number): SpriteId | null {
+  const resource = chunk.resource[index];
+  const amount = chunk.resourceAmount[index];
+  if (resource === undefined || amount === undefined || resource === ResourceType.None) return null;
+  return resourceSprite(resource, amount);
 }
 
 /** Backing-store pixels one world-chunk bitmap costs at a given scale. */
