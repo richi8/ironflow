@@ -26,9 +26,18 @@ describe('the default bindings', () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it('leaves WASD unbound, because C10 gives it to the player', () => {
-    for (const code of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) {
-      expect(actionFor(DEFAULT_KEYBINDINGS, code), code).toBeNull();
+  it('gives WASD to the player, which is what C04 reserved it for', () => {
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyW')).toBe('player.moveUp');
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyA')).toBe('player.moveLeft');
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyS')).toBe('player.moveDown');
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyD')).toBe('player.moveRight');
+  });
+
+  it('keeps walking and panning on separate keys, so one never does both', () => {
+    for (const action of ['player.moveUp', 'player.moveDown', 'player.moveLeft', 'player.moveRight'] as const) {
+      for (const code of keysFor(DEFAULT_KEYBINDINGS, action)) {
+        expect(code.startsWith('Arrow'), code).toBe(false);
+      }
     }
   });
 

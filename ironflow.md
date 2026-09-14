@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C09 complete.** Milestone B in progress. Next: C10 — player character & manual gathering. |
+| **Status** | **C10 complete.** Milestone B in progress. Next: C11 — miner. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C10 — Player character & manual gathering** |
+| **First action** | Chunk **C11 — Miner** |
 
 ---
 
@@ -558,8 +558,28 @@ export type Command =
   | { type: 'takeItems';  entityId: EntityId; itemId: string; amount: number }
   | { type: 'startResearch'; technologyId: string }
   | { type: 'movePlayer'; dx: number; dy: number }
-  | { type: 'mineTile';   x: number; y: number };
+  | { type: 'mineTile';   x: number; y: number }
+  | { type: 'stopMining' };                      // added in C10, see below
 ```
+
+**Implementation note (C10).** Two refinements, both forced by the fact that
+commands arrive at *frame* rate and take effect at *tick* rate.
+
+- **`stopMining` was added.** This union was written out complete on day one
+  and this is the one member it did not predict. `mineTile` starts a *held*
+  action — C10 task 4 says "hold left-click" — and a held action needs a
+  release. Encoding release as the *absence* of a command would mean the
+  simulation inferring it from how long it had been since the last `mineTile`,
+  which makes mining depend on how often the input layer happens to send one,
+  which is frame rate.
+- **`movePlayer` sets a direction that persists across ticks**, rather than
+  moving the player one step. Only the *sign* of each component is read: the
+  command carries a direction and never a distance, because speed belongs to
+  the simulation. A 144 Hz browser enqueues the same vector about five times
+  per tick and a 20 Hz one leaves a third of the ticks with none; under
+  "one command, one step" the first would walk five times as fast and the
+  second two thirds as fast. Under "one tick, one step" both are identical,
+  which is C10's fourth acceptance criterion.
 
 ### Rules
 
@@ -2289,6 +2309,111 @@ rate in ticks; build-range validation; frame-rate independence of movement.
 
 **Out of scope.** Player health, combat, equipment, inventory sorting.
 
+**Decisions taken while implementing this chunk.**
+
+- **Position is fixed-point, not a float.** §6 R3 forbids accumulating floats,
+  and a walking player is the purest accumulator there is: `x += speed * dt`,
+  thirty times a second, forever. §9 already sanctions fixed-point integers for
+  belt item positions, and this takes the same bargain — the player's position
+  is an integer count of **subtiles** and every step is an exact integer
+  addition. No drift, no rounding that depends on where the player started, and
+  a save that reloads bit-identical.
+- **240 subtiles per tile, because 240 / TPS is exactly 8.** Any speed that is a
+  whole number of eighths of a tile per second is then an exact integer number
+  of subtiles per tick. A power of two would make 30 ticks per second a
+  repeating fraction and the step would have to be rounded, which is the float
+  problem again wearing a hat. The walking speed is **4 tiles/s** — 32 subtiles
+  per tick — and the diagonal step is `round(32 / sqrt(2)) = 23`, so a diagonal
+  covers the same ground per second as a cardinal one. The rounding leaves a
+  diagonal 1.6% fast, which is invisible and, more to the point, *the same 1.6%
+  on every machine*: computing the true length per step would put a square root
+  on the movement path, and `Math.hypot` is not required to be correctly
+  rounded (§6 R1).
+- **WASD is named for the screen, and the camera translates.** The keys are a
+  direction on the *picture*, a `movePlayer` command carries tile space, and §5
+  forbids the input layer from owning the projection — so `InputManager` asks
+  the camera, exactly as it already asks the picker what is under a pixel.
+  `Camera.screenDirectionToWorld` is that question. Because the projection
+  turns the grid 45°, **W alone is a diagonal tile move and W+D is a cardinal
+  one**, and the quantisation to the nearest of the eight tile directions is a
+  threshold on the scaled components (`tan 22.5°`), not a sign test — a sign
+  test calls screen-up-right "north-west".
+- **Build reach lives on the simulation, not in `BuildSystem`.** "May a
+  building stand on this tile?" is a property of terrain, occupancy and cost,
+  and it is the same question C11's miner asks about itself, which has no arms.
+  "Can *the player* reach it?" is a property of the player.
+  `Simulation.checkPlacement` composes the two, so the ghost and the command
+  still ask one question, and `BuildSystem` keeps no dependency on where anyone
+  is standing. Reach is measured to the **nearest tile of the footprint**, so a
+  2x2 miner is not refused for a far corner a tile past a circle the player can
+  see drawn around themselves, and it is checked **first**, because it is the
+  answer the player can act on by walking.
+- **`out_of_reach` is its own rejection reason.** `command.ts` predicted that
+  C10 would reuse `out_of_range`; it does not. "That is outside the world" and
+  "walk closer" are different instructions, and collapsing them would leave the
+  most common rejection in the game explained by a sentence about the edge of
+  the map (§7, pillar 3). `inventory_full` was added for the same reason.
+- **The player carries two containers for one more chunk.** A `SlotInventory`
+  of real items and the C06 `ItemCounts` bag of building materials. That is not
+  a design, it is C08's recorded deviation arriving on schedule: a build cost is
+  paid in `miner` and `chest`, which are not registered items until C16 gives
+  them recipes. **C16 merges them.** `Simulation.inventory` is now an alias for
+  the bag on the player, so the one name survives the move.
+- **A player standing somewhere invalid may move anywhere.** Three lines against
+  a soft-lock: a building placed on top of the player, or a save whose terrain
+  changed, would otherwise refuse every candidate position forever. Movement
+  also resolves one axis at a time, so walking diagonally into a wall slides
+  along it rather than stopping dead.
+- **Collision generates the world.** `World.getTile` creates a world chunk on a
+  miss, so the collision test is what pulls the map into existence ahead of the
+  player — which is the acceptance criterion about the ungenerated void, met by
+  construction rather than by a separate check.
+- **Mining progress is discarded when it stops, not banked.** Half a lump of
+  iron is not something the player can be given, and keeping it would make
+  walking away and back a way to mine in instalments that no readout can
+  explain. The stop conditions are checked *before* progress is added, so a
+  player who fills their bag stops that tick rather than one item later.
+- **The player is drawn into the depth-sorted pass but kept out of
+  `RenderState.entities`.** Sorted in, so walking behind a miner puts the miner
+  in front (§5); out of that array, because it is also what `ScenePicker`
+  searches, and a player in there would answer for every pixel of their own
+  sprite — reporting their own tile instead of the ground behind them, and an
+  `entityId` of `NO_ENTITY`, which means "nothing" everywhere else. The depth
+  key takes the player's fractional position without complaint: it is
+  arithmetic, not an index.
+- **Every balance number is named once.** Walking speed, bag size (30 slots),
+  the starting stock and both ranges belong to C20's tuning pass, and each is a
+  single named constant so that pass is a one-line change.
+
+**Deviations.**
+
+- **`stopMining` was added to §7's command union**, and `movePlayer` now sets a
+  *persistent direction* rather than moving one step. Both are recorded in §7
+  with the reasoning; the short version is that a command stream arrives at
+  frame rate and the acceptance criterion is about tick rate.
+- **Task 2's "one command per tick" is not what the input layer does**, because
+  it cannot: it runs at frame rate and has no way to see a tick boundary. It
+  sends the walk vector **when it changes**, and the simulation steps once per
+  tick. That is the same intent and it is the version that is actually
+  frame-rate independent.
+- **A follow camera was added, which is not in the task list.** A 50% deadzone,
+  in the composition root, panning only when the player leaves it. C10 is the
+  chunk that first lets the player walk out of the viewport, and a game where
+  the character can be lost off-screen with no way to find them is not one the
+  acceptance criteria can be checked in. It is presentation only — it pans the
+  camera, which §6 already permits to smooth against wall-clock time — and it
+  is deliberately not a follow-cam: inside the box the camera does not move, so
+  the arrow keys still put the view where the player wants it.
+- **C06's "fifty of everything" starting stock is gone**, as `main.ts` predicted.
+  The player now starts with 5 miners and 10 chests at tile (6, 6), which is on
+  grass and within build range of the playground's iron patch but a walk away
+  from its copper — so expansion means travelling from the first minute, which
+  is what task 5 is for.
+- **No inventory panel.** §13 lists one and C10 does not schedule it; the HUD's
+  ITEMS tile counts what the player carries, both containers, and the debug
+  overlay prints position, facing, bag usage and mining progress. C12's
+  inspector is where this becomes a real panel.
+
 ---
 
 ## C11 — Miner
@@ -3173,7 +3298,11 @@ TPS               = 30 ticks/second
 belt tier 1       = 8.0 items/s        belt tier 2 = 16.0 items/s
 inserter std      = 1.0 items/s        inserter fast = 2.5 items/s
 miner tier 1      = 0.5 items/s
+manual mining     = 0.5 items/s        (C10; 60 ticks per item)
 assembler tier 1  = crafting speed 0.5
+player walk       = 4.0 tiles/s        (C10; 32 subtiles/tick of 240)
+player mine reach = 6 tiles            player build reach = 8 tiles
+player bag        = 30 slots
 ```
 
 ### Items

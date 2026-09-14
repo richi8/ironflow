@@ -44,7 +44,20 @@ export type Command =
   | { readonly type: 'takeItems'; readonly entityId: EntityId; readonly itemId: string; readonly amount: number }
   | { readonly type: 'startResearch'; readonly technologyId: string }
   | { readonly type: 'movePlayer'; readonly dx: number; readonly dy: number }
-  | { readonly type: 'mineTile'; readonly x: number; readonly y: number };
+  | { readonly type: 'mineTile'; readonly x: number; readonly y: number }
+  /**
+   * Stop mining, whatever was being mined. Added in C10; see the note below.
+   *
+   * §7's union was written out complete on day one and this is the one member
+   * it did not predict. `mineTile` starts a *held* action — task 4 says "hold
+   * left-click" — and a held action needs a release. Encoding release as the
+   * absence of a command would mean the simulation guessing from how long it
+   * had been since the last `mineTile`, which makes mining depend on how often
+   * the input layer happens to send one, which is frame rate. One empty
+   * command is cheaper than that, and it is recorded as a deviation in the
+   * plan's §7.
+   */
+  | { readonly type: 'stopMining' };
 
 export type CommandType = Command['type'];
 
@@ -68,7 +81,7 @@ export type CommandRejectionReason =
   | 'occupied'
   /** The player does not hold the build cost. */
   | 'unaffordable'
-  /** Off the edge of the packable world; C10 may also use it for build reach. */
+  /** Off the edge of the packable world. Build and mine reach is `out_of_reach`. */
   | 'out_of_range'
   | 'unknown_recipe'
   /* Added in C06. §7 keeps this list open for the chunk that needs a reason. */
@@ -79,7 +92,19 @@ export type CommandRejectionReason =
   /** A miner with no ore under any tile of its footprint. */
   | 'no_resource'
   /** Remove was pointed at empty ground, or at something already demolished. */
-  | 'nothing_there';
+  | 'nothing_there'
+  /* Added in C10. */
+  /**
+   * Inside the world, but too far from the player (C10 tasks 4 and 5).
+   *
+   * Separate from `out_of_range` on purpose. "That is outside the world" and
+   * "walk closer" are different instructions, and collapsing them would leave
+   * the most common rejection in the game — pointing at a tile eleven tiles
+   * away — explained by a sentence about the edge of the map.
+   */
+  | 'out_of_reach'
+  /** The player is carrying all they can of what that tile yields. */
+  | 'inventory_full';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {
@@ -119,6 +144,10 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
     case 'remove':
     case 'mineTile':
       return isTile(command.x, command.y) ? null : 'malformed';
+    case 'stopMining':
+      // No payload, so nothing to be malformed. Stopping something that was
+      // not running is a no-op, not an error — see the simulation's arm.
+      return null;
     case 'rotate':
       return isEntityId(command.entityId) ? null : 'malformed';
     case 'setRecipe':
@@ -134,9 +163,10 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
     case 'startResearch':
       return isName(command.technologyId) ? null : 'malformed';
     case 'movePlayer':
-      // Deliberately only "is a number". Whether movement is a unit direction
-      // or a tile step is C10's decision, and guessing it here would either be
-      // wrong or would quietly become the decision.
+      // Deliberately only "is a number", which C10 kept: only the *sign* of
+      // each component is read, because the command carries a direction and
+      // never a distance. Speed belongs to the simulation (§7), so there is
+      // nothing here for a magnitude to be wrong about.
       return Number.isFinite(command.dx) && Number.isFinite(command.dy) ? null : 'malformed';
     default:
       // Unreachable through the type system, reachable from untyped JavaScript

@@ -236,8 +236,64 @@ describe('placement validation', () => {
       [20, 5],
       [10, 10],
     ] as const) {
+      // Standing on the tile under test, so the one rule the simulation adds on
+      // top of the build system — C10's build range — is satisfied and what is
+      // left to compare is the placement answer itself. The three tiles are
+      // twenty apart, so no single vantage point reaches them all; that is the
+      // range doing its job rather than a limitation of the test.
+      simulation.player.setTilePosition(x, y);
       expect(simulation.checkPlacement('miner', x, y, NORTH)).toBe(h.system.validate('miner', x, y, NORTH));
     }
+  });
+
+  /**
+   * Build range (C10 task 5). It lives on the simulation rather than in
+   * `BuildSystem`, because "may a building stand here" is a fact about the
+   * world and "can the player reach it" is a fact about the player — so these
+   * go through `checkPlacement` and the ones above do not.
+   */
+  it('refuses a placement the player cannot reach, and says which it is', () => {
+    const simulation = new Simulation({ world: testWorld() });
+    simulation.inventory.add('chest', 5);
+    simulation.player.setTilePosition(0, 0);
+
+    // Eight tiles is the range, measured to the centre of the target tile.
+    expect(simulation.checkPlacement('chest', 8, 0, NORTH)).toBeNull();
+    expect(simulation.checkPlacement('chest', 9, 0, NORTH)).toBe('out_of_reach');
+    // ...and it is `out_of_reach`, not `out_of_range`: the edge of the world
+    // and "walk closer" are different instructions (§7).
+    expect(simulation.checkPlacement('chest', TILE_MAX, 0, NORTH)).toBe('out_of_reach');
+
+    simulation.player.setTilePosition(9, 0);
+    expect(simulation.checkPlacement('chest', 9, 0, NORTH)).toBeNull();
+  });
+
+  it('measures reach to the nearest tile of a footprint, not to its anchor', () => {
+    const simulation = new Simulation({ world: testWorld() });
+    simulation.player.setTilePosition(0, 0);
+
+    // A 2x2 miner anchored eight tiles east covers x 8..9. Its far corner is a
+    // tile past the range and its near one is exactly on it, and the near one
+    // is what counts — anchor it one tile further and nothing is in reach.
+    expect(simulation.checkPlacement('miner', 8, 0, NORTH)).not.toBe('out_of_reach');
+    expect(simulation.checkPlacement('miner', 9, 0, NORTH)).toBe('out_of_reach');
+  });
+
+  it('lets the player walk into range of a placement that was refused', () => {
+    const simulation = new Simulation({ world: testWorld() });
+    simulation.inventory.add('chest', 1);
+    simulation.player.setTilePosition(0, 0);
+
+    simulation.commands.enqueue({ type: 'build', buildingId: 'chest', x: 12, y: 0, rotation: NORTH });
+    simulation.tick();
+    expect(simulation.commands.takeRejections().map((r) => r.reason)).toEqual(['out_of_reach']);
+    expect(simulation.entities.size).toBe(0);
+
+    simulation.player.setTilePosition(12, 0);
+    simulation.commands.enqueue({ type: 'build', buildingId: 'chest', x: 12, y: 0, rotation: NORTH });
+    simulation.tick();
+    expect(simulation.commands.takeRejections()).toEqual([]);
+    expect(simulation.entities.at(12, 0)).toBeDefined();
   });
 });
 
@@ -368,6 +424,7 @@ describe('the command path', () => {
   it('builds and removes through the queue, and nowhere else', () => {
     const simulation = new Simulation({ world: testWorld() });
     simulation.inventory.add('chest', 5);
+    simulation.player.setTilePosition(10, 10);
 
     run(simulation, [{ type: 'build', buildingId: 'chest', x: 10, y: 10, rotation: NORTH }]);
     expect(simulation.entities.at(10, 10)).toBeDefined();
@@ -381,6 +438,9 @@ describe('the command path', () => {
 
   it('rejects with a reason the player can be shown', () => {
     const simulation = new Simulation({ world: testWorld() });
+    // Within reach of all three tiles, so each rejection is the one the rule
+    // under test produces rather than C10's range check shadowing it.
+    simulation.player.setTilePosition(16, 9);
 
     run(simulation, [
       { type: 'build', buildingId: 'chest', x: 20, y: 5, rotation: NORTH },
@@ -399,6 +459,7 @@ describe('the command path', () => {
   it('holds a removed buildings tiles until the tick that removed it ends', () => {
     const simulation = new Simulation({ world: testWorld() });
     simulation.inventory.add('chest', 5);
+    simulation.player.setTilePosition(10, 10);
     run(simulation, [{ type: 'build', buildingId: 'chest', x: 10, y: 10, rotation: NORTH }]);
 
     // Both in one tick: the remove is applied in the command phase, the tiles

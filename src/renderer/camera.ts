@@ -232,6 +232,25 @@ export class Camera {
   }
 
   /**
+   * Which way a screen direction points in tile space.
+   *
+   * The input layer needs this and may not have it: WASD is a direction on the
+   * *picture* (`keybindings.ts` says so), the simulation only speaks tile
+   * space, and §4 forbids `input/**` from importing the projection. So the
+   * question is asked of the camera, exactly as "what tile is under this pixel"
+   * already is.
+   *
+   * The answer does not depend on where the camera is or how far it is zoomed
+   * in: the projection is linear, so unprojecting a displacement is the
+   * displacement of the unprojection, and zoom scales both sides equally. Only
+   * the *direction* of the result is meaningful — its length is in whatever
+   * units the caller passed in.
+   */
+  screenDirectionToWorld(dxPx: number, dyPx: number): WorldPoint {
+    return screenToTile(dxPx, dyPx);
+  }
+
+  /**
    * The tile containing a canvas pixel — the *ground* tile.
    *
    * A tall building drawn over that ground tile is not considered (§5 hazard 2)

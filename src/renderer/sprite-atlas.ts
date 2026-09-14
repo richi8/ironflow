@@ -16,6 +16,7 @@
  * terrain:<name>                              terrain:grass
  * resource:<name>:<fullness 0-3>              resource:iron:2
  * belt:<rotation 0-3>                         belt:1
+ * player:<idle|walk|work>:<facing 0-3>        player:walk:1
  * building:<category>:<CODE>[:<w>x<h>[:<rise>]]
  *                                             building:extraction:MI
  *                                             building:power:PP:2x2:3
@@ -198,7 +199,18 @@ export type SpriteDescriptor =
       readonly rise: number;
     }
   | { readonly kind: 'belt'; readonly rotation: Rotation }
+  | { readonly kind: 'player'; readonly activity: PlayerActivity; readonly facing: Rotation }
   | { readonly kind: 'missing' };
+
+/** The three states C10 task 6 asks for. Real animation is C29's. */
+export type PlayerActivity = 'idle' | 'walk' | 'work';
+
+const PLAYER_ACTIVITIES: readonly PlayerActivity[] = Object.freeze(['idle', 'walk', 'work']);
+
+/** The sprite for a player in a given state, facing a given way. */
+export function playerSprite(activity: PlayerActivity, facing: Rotation): SpriteId {
+  return `player:${activity}:${facing}`;
+}
 
 const MISSING: SpriteDescriptor = Object.freeze({ kind: 'missing' });
 
@@ -271,6 +283,16 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     return Object.freeze({ kind: 'belt' as const, rotation: Number(text) as Rotation });
   }
 
+  if (namespace === 'player' && parts.length === 3) {
+    const activity = parts[1] ?? '';
+    if (!isPlayerActivity(activity)) return MISSING;
+    // Matched as text for the same reason the belt rotation is: `Number('')`
+    // is 0, and a facing of "north" is not the right answer to a typo.
+    const text = parts[2] ?? '';
+    if (!/^[0-3]$/.test(text)) return MISSING;
+    return Object.freeze({ kind: 'player' as const, activity, facing: Number(text) as Rotation });
+  }
+
   if (namespace === 'building' && parts.length >= 3 && parts.length <= 5) {
     const category = parts[1] ?? '';
     const code = (parts[2] ?? '').slice(0, 2).toUpperCase();
@@ -306,6 +328,10 @@ function parseFootprint(text: string | undefined): { width: number; height: numb
   const height = Number(h);
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) return null;
   return { width, height };
+}
+
+function isPlayerActivity(value: string): value is PlayerActivity {
+  return (PLAYER_ACTIVITIES as readonly string[]).includes(value);
 }
 
 function isColorToken(token: string): token is ColorToken {
@@ -375,6 +401,9 @@ export class ProceduralAtlas implements SpriteAtlas {
         return;
       case 'belt':
         drawBelt(ctx, sx, sy, zoom, sprite.rotation);
+        return;
+      case 'player':
+        drawPlayer(ctx, sx, sy, zoom, sprite.activity, sprite.facing);
         return;
       case 'missing':
         drawMissing(ctx, sx, sy, zoom);
@@ -537,6 +566,90 @@ function drawBelt(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: n
     ctx.lineTo(sx + fx * along + gx * 0.26, sy + fy * along + gy * 0.26);
     ctx.stroke();
   }
+}
+
+/** How tall the placeholder figure stands, in rise units. Shorter than a chest. */
+const PLAYER_RISE = 0.75;
+
+/** Half the width of the figure's body, as a fraction of a tile. */
+const PLAYER_HALF_WIDTH = 0.17;
+
+/** Colour per activity, so "walking" and "mining" are told apart at a glance. */
+const PLAYER_TONE: Readonly<Record<PlayerActivity, ColorToken>> = Object.freeze({
+  idle: 'blue-high',
+  walk: 'accent-high',
+  work: 'warn',
+});
+
+/**
+ * The player: a shadow, a body, a head and a nose pointing where they face.
+ *
+ * §11's placeholder-first pipeline in its purest form — C10 task 6 asks for
+ * three states from the reference sheet and says in as many words that real
+ * animation is C29's. What this has to get right is only what the *mechanics*
+ * need to be verifiable by eye: which way the player is facing, whether they
+ * are working, and where their feet are, because that last one is what the
+ * build-range circle is drawn around.
+ */
+function drawPlayer(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  activity: PlayerActivity,
+  facing: Rotation,
+): void {
+  const fill = color(PLAYER_TONE[activity]);
+  const outline = shade(fill, OUTLINE_TONE);
+
+  // A shadow on the ground, so the figure reads as standing on a tile rather
+  // than floating over the one behind it.
+  groundFacePath(ctx, sx, sy, 0.42, 0.42, zoom);
+  ctx.fillStyle = color('bg-deep');
+  ctx.globalAlpha *= 0.45;
+  ctx.fill();
+  ctx.globalAlpha /= 0.45;
+
+  const lift = PLAYER_RISE * RISE_UNIT * zoom;
+  const half = PLAYER_HALF_WIDTH * TILE_HALF_WIDTH * zoom;
+  // Mining crouches: the same figure, shorter, which reads at any zoom and
+  // needs no second sprite.
+  const height = activity === 'work' ? lift * 0.72 : lift;
+
+  ctx.lineWidth = 1;
+  ctx.lineJoin = 'round';
+
+  quad(
+    ctx,
+    { x: sx - half, y: sy },
+    { x: sx + half, y: sy },
+    { x: sx + half, y: sy - height },
+    { x: sx - half, y: sy - height },
+  );
+  paint(ctx, fill, outline);
+
+  const headRadius = half * 1.15;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - height - headRadius * 0.7, headRadius, headRadius * 0.85, 0, 0, Math.PI * 2);
+  ctx.fillStyle = shade(fill, TOP_TONE);
+  ctx.fill();
+  ctx.strokeStyle = outline;
+  ctx.stroke();
+
+  // Which way they are looking, in tile space, projected the same way
+  // everything else is — so "north" points wherever north points on screen.
+  const forward = DIRECTION_OFFSETS[facing];
+  if (forward === undefined) return;
+  const fx = (forward.x * EAST_STEP.x + forward.y * SOUTH_STEP.x) * zoom * 0.42;
+  const fy = (forward.x * EAST_STEP.y + forward.y * SOUTH_STEP.y) * zoom * 0.42;
+
+  ctx.beginPath();
+  ctx.moveTo(sx, sy - height * 0.55);
+  ctx.lineTo(sx + fx, sy - height * 0.55 + fy);
+  ctx.strokeStyle = color('text');
+  ctx.lineWidth = Math.max(1, 1.5 * zoom);
+  ctx.lineCap = 'round';
+  ctx.stroke();
 }
 
 function drawMissing(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: number): void {

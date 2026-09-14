@@ -48,6 +48,15 @@ import {
 export interface CameraControl {
   pan(dxPx: number, dyPx: number): void;
   zoomAt(screenX: number, screenY: number, steps: number): void;
+  /**
+   * Which way a screen direction points in tile space (C10 task 2).
+   *
+   * WASD is a direction on the picture and a `movePlayer` command carries a
+   * tile-space one, so something has to translate — and §5 puts the projection
+   * in one file that §4 forbids this layer from importing. Asking the camera is
+   * the same arrangement `TilePicker` already is, in the same direction.
+   */
+  screenDirectionToWorld(dxPx: number, dyPx: number): { readonly x: number; readonly y: number };
 }
 
 /** What is under a pixel. Satisfied by `renderer/picker.ts`'s `ScenePicker`. */
@@ -102,6 +111,40 @@ const KEY_ZOOM_STEPS_PER_SECOND = 3;
 /** Longest frame a held key is credited with, so an alt-tab does not lurch. */
 const MAX_KEY_STEP_MS = 100;
 
+/**
+ * How far off an axis a walk direction may be before it stops counting.
+ *
+ * `tan(22.5°)`. A screen direction unprojects into a tile vector whose
+ * components are not comparable by sign — screen up-right unprojects to
+ * something like `(-0.016, -0.047)`, and taking the sign of each would call
+ * that "north-west" when what the player pressed is plainly north. Scaling by
+ * the larger component and snapping anything under this threshold to zero picks
+ * the nearest of the eight tile directions instead, which is what the keys mean.
+ */
+const DIRECTION_SNAP = Math.SQRT2 - 1;
+
+/** A direction of "not walking". Shared so the no-op comparison never allocates. */
+const STILL = Object.freeze({ x: 0, y: 0 });
+
+/**
+ * The nearest of the eight tile directions to a tile-space vector.
+ *
+ * Scaled by the larger component so the test is about the *shape* of the
+ * vector rather than its length — the unprojected screen directions are tiny —
+ * and each axis is then kept or dropped against `DIRECTION_SNAP`. The result is
+ * always one of the nine vectors with components in `{-1, 0, 1}`.
+ */
+function snapToTileDirection(vector: { readonly x: number; readonly y: number }): { x: number; y: number } {
+  const scale = Math.max(Math.abs(vector.x), Math.abs(vector.y));
+  if (scale === 0) return { x: 0, y: 0 };
+  return { x: axisStep(vector.x / scale), y: axisStep(vector.y / scale) };
+}
+
+function axisStep(value: number): -1 | 0 | 1 {
+  if (Math.abs(value) < DIRECTION_SNAP) return 0;
+  return value > 0 ? 1 : -1;
+}
+
 /** Set while the camera is being dragged, so the cursor can say so. */
 const DRAGGING_CLASS = 'is-dragging';
 
@@ -138,6 +181,18 @@ export class InputManager {
   private lastActedTile: TileCoord | null = null;
   private tool: BuildTool | null = null;
   private toolRotation: Rotation = NORTH;
+  /**
+   * The last walk direction sent to the simulation.
+   *
+   * Commands go out **on change**, not every frame. The simulation holds the
+   * direction and steps once per tick (see `player/player-state.ts`), so
+   * re-sending the same vector sixty times a second would fill the queue to say
+   * nothing — and sending one per frame in the first place is what would make
+   * walking speed depend on frame rate.
+   */
+  private sentMove: { x: number; y: number } = { x: 0, y: 0 };
+  /** True while the left button is held over a tile with an empty hand. */
+  private mining = false;
 
   constructor(options: InputManagerOptions) {
     this.canvas = options.canvas;
@@ -245,7 +300,34 @@ export class InputManager {
     if (step > 0) {
       this.applyHeldKeys(step);
     }
+    this.updateWalk();
     this.refreshHover();
+  }
+
+  /**
+   * Turn the held WASD keys into at most one `movePlayer` command.
+   *
+   * Read every frame and sent only when it changes. A key released while the
+   * window is not focused never sends its keyup, which is why `KeyboardInput`
+   * clears everything on blur — without that the player would keep walking off
+   * the map behind a switched-away tab.
+   */
+  private updateWalk(): void {
+    let screenX = 0;
+    let screenY = 0;
+    if (this.keyboard.isHeld('player.moveLeft')) screenX -= 1;
+    if (this.keyboard.isHeld('player.moveRight')) screenX += 1;
+    if (this.keyboard.isHeld('player.moveUp')) screenY -= 1;
+    if (this.keyboard.isHeld('player.moveDown')) screenY += 1;
+
+    const direction =
+      screenX === 0 && screenY === 0
+        ? STILL
+        : snapToTileDirection(this.camera.screenDirectionToWorld(screenX, screenY));
+
+    if (direction.x === this.sentMove.x && direction.y === this.sentMove.y) return;
+    this.sentMove = direction;
+    this.commands.enqueue({ type: 'movePlayer', dx: direction.x, dy: direction.y });
   }
 
   /* ---------------------------------------------------------------- *
@@ -353,6 +435,20 @@ export class InputManager {
     this.lastActedTile = null;
     this.mouse.release(drag.pointerId);
     this.canvas.classList.remove(DRAGGING_CLASS);
+    this.stopMining();
+  }
+
+  /**
+   * Tell the simulation the button is up, if it was ever told it was down.
+   *
+   * Guarded by `this.mining` so that letting go of a camera drag, or of a
+   * build drag, does not enqueue a command to stop something that was never
+   * started — one command per press, one per release, and none otherwise.
+   */
+  private stopMining(): void {
+    if (!this.mining) return;
+    this.mining = false;
+    this.commands.enqueue({ type: 'stopMining' });
   }
 
   /* ---------------------------------------------------------------- *
@@ -368,6 +464,10 @@ export class InputManager {
         this.setBuildTool(null);
       }
       if (action === 'build.rotate') this.rotateTool();
+      // Picking up a building while mining stops the mining: the two gestures
+      // share the left button, and a held-over mining target would keep ticking
+      // under a ghost the player is now placing.
+      if (action === 'selection.clear') this.stopMining();
     }
     this.onAction?.(action, phase);
   }
@@ -445,9 +545,14 @@ export class InputManager {
 
     const tool = this.tool;
     if (tool === null) {
+      this.mining = true;
       this.commands.enqueue({ type: 'mineTile', x: tile.x, y: tile.y });
       return;
     }
+    // Dragging from bare ground onto a building's tile with something in hand
+    // switches from mining to placing, so the mining that was running has to
+    // be told to stop.
+    this.stopMining();
     this.commands.enqueue({
       type: 'build',
       buildingId: tool.buildingId,

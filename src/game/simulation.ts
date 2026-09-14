@@ -2,11 +2,14 @@ import { CommandProcessor } from './commands/command-processor.js';
 import type { Command, CommandRejectionReason } from './commands/command.js';
 import { BUILDINGS } from './data/buildings.js';
 import { EntityStore } from './entities/entity-store.js';
-import { ItemCounts } from './items/item-stack.js';
+import { forEachFootprintTile } from './entities/entity.js';
+import type { ItemCounts } from './items/item-stack.js';
+import { BUILD_RANGE_TILES, PlayerState } from './player/player-state.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
 import { BuildSystem } from './systems/build-system.js';
+import { PlayerSystem } from './systems/player-system.js';
 import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
 
@@ -30,6 +33,19 @@ export interface SimulationOptions {
   readonly entities?: EntityStore;
   /** The item content table (C08). Defaulted from `data/items.ts`, like buildings. */
   readonly items?: ItemRegistry;
+  /**
+   * The player (C10). Defaulted to one standing at the origin, so a test that
+   * cares about ticks and not about walking can still say `new Simulation({
+   * world })` — and so there is exactly one place that decides how big a bag
+   * the player starts with.
+   */
+  readonly player?: PlayerState;
+  /**
+   * The player's build-materials bag. Kept as a `Simulation` option after C10
+   * moved the bag onto the player, because it is how a test hands the game a
+   * stock without building a `PlayerState` to do it. Ignored when `player` is
+   * given — a player brought their own.
+   */
   readonly inventory?: ItemCounts;
 }
 
@@ -60,13 +76,24 @@ export class Simulation {
   readonly items: ItemRegistry;
 
   /**
-   * The player's items. Authoritative (§10). Still a string-keyed `ItemCounts`
-   * bag of building items; C10 turns it into the player's real `SlotInventory`
-   * once C16 makes buildings craftable. The field stays where the UI can read it.
+   * The player character. Authoritative (§10), and the reason build range and
+   * mining reach can be rules rather than suggestions (C10).
    */
-  readonly inventory: ItemCounts;
+  readonly player: PlayerState;
+
+  /**
+   * The player's build materials. Still the string-keyed `ItemCounts` bag,
+   * which now lives on the player; this is an alias so the build system, the
+   * controller and C06's tests keep one name for it. C16 replaces both with
+   * the player's `SlotInventory` when building items become real items.
+   */
+  get inventory(): ItemCounts {
+    return this.player.materials;
+  }
 
   private readonly builder: BuildSystem;
+
+  private readonly playerSystem: PlayerSystem;
 
   /**
    * The command queue (§7). Owned here because §7 puts validation inside the
@@ -83,12 +110,23 @@ export class Simulation {
     this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
     this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
     this.items = options.items ?? new ItemRegistry(ITEMS);
-    this.inventory = options.inventory ?? new ItemCounts();
+    this.player =
+      options.player ??
+      new PlayerState({
+        stackSizeOf: this.items.stackSizeOf,
+        ...(options.inventory === undefined ? {} : { materials: options.inventory }),
+      });
     this.builder = new BuildSystem({
       world: this.world,
       entities: this.entities,
       buildings: this.buildings,
-      inventory: this.inventory,
+      inventory: this.player.materials,
+    });
+    this.playerSystem = new PlayerSystem({
+      world: this.world,
+      entities: this.entities,
+      player: this.player,
+      items: this.items,
     });
   }
 
@@ -101,7 +139,43 @@ export class Simulation {
    * command (§7), and C07's controller narrows this to a view model.
    */
   checkPlacement(buildingId: string, x: number, y: number, rotation: Rotation): CommandRejectionReason | null {
-    return this.builder.validate(buildingId, x, y, rotation);
+    return this.checkBuildReach(buildingId, x, y, rotation) ?? this.builder.validate(buildingId, x, y, rotation);
+  }
+
+  /**
+   * Is this placement close enough to the player to reach? C10 task 5.
+   *
+   * It is asked here rather than inside `BuildSystem` because it is not a fact
+   * about the world. "May a building stand on this tile?" is a property of
+   * terrain, occupancy and cost, and it is the same question C11's miner asks
+   * about itself, which has no arms. "Can *the player* reach it?" is a property
+   * of the player, and composing the two here keeps `BuildSystem` free of a
+   * dependency on where someone happens to be standing.
+   *
+   * Reach is measured to the **nearest tile of the footprint**, so a 2x2 miner
+   * is not refused because its far corner is a tile past the edge of a circle
+   * the player can see drawn around themselves.
+   *
+   * It is checked *first*, before terrain or cost, because it is the answer
+   * that explains the red ghost when the cursor is halfway across the screen —
+   * and, unlike "that ground will not take a building", it is one the player
+   * can act on by walking.
+   */
+  private checkBuildReach(
+    buildingId: string,
+    x: number,
+    y: number,
+    rotation: Rotation,
+  ): CommandRejectionReason | null {
+    if (!this.buildings.has(buildingId)) return null; // `validate` says which id is wrong
+    const definition = this.buildings.get(buildingId);
+    const facing = BuildingRegistry.normalizeRotation(definition, rotation);
+
+    let reachable = false;
+    forEachFootprintTile(x, y, definition.size, facing, (tileX, tileY) => {
+      if (this.player.isWithinRange(tileX, tileY, BUILD_RANGE_TILES)) reachable = true;
+    });
+    return reachable ? null : 'out_of_reach';
   }
 
   /** Ticks elapsed since this world was created. Authoritative; serialized. */
@@ -141,7 +215,12 @@ export class Simulation {
       if (reason !== null) this.commands.reject(command, reason);
     }
 
-    // Phases 2-8 arrive with the chunks listed above.
+    // Phases 2-7 arrive with the chunks listed above.
+
+    // Phase 8 — player. Movement and manual mining (C10). It runs after every
+    // machine so that the world a step of walking is judged against is the one
+    // the tick settled on, not a half-updated one.
+    this.playerSystem.tick();
 
     // Phase 9 — cleanup. Deferred removals are applied here and nowhere else,
     // which is what makes "a system never sees a half-removed entity" a
@@ -166,9 +245,29 @@ export class Simulation {
   private applyCommand(command: Command): CommandRejectionReason | null {
     switch (command.type) {
       case 'build':
-        return this.builder.place(command.buildingId, command.x, command.y, command.rotation);
+        return (
+          this.checkBuildReach(command.buildingId, command.x, command.y, command.rotation) ??
+          this.builder.place(command.buildingId, command.x, command.y, command.rotation)
+        );
       case 'remove':
         return this.builder.remove(command.x, command.y);
+      case 'movePlayer':
+        // Never refused: the worst a bad direction can be is "stand still",
+        // and a walk command that produces a toast would produce one per key.
+        this.player.setMoveIntent(command.dx, command.dy);
+        return null;
+      case 'mineTile': {
+        const reason = this.playerSystem.checkMineable(command.x, command.y);
+        if (reason !== null) return reason;
+        this.player.startMining(command.x, command.y);
+        return null;
+      }
+      case 'stopMining':
+        // A no-op when nothing is being mined. Releasing the button over empty
+        // ground is not a mistake, and telling the player it was would put a
+        // toast on screen every time they finished doing something else.
+        this.player.stopMining();
+        return null;
       default:
         return 'not_implemented';
     }

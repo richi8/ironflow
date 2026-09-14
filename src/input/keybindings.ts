@@ -46,6 +46,16 @@ export type InputAction =
   /** Held, not tapped: turns a left-drag into a camera drag (C04 task 4). */
   | 'camera.dragModifier'
   | 'selection.clear'
+  /**
+   * Walk. Named for the **screen**, like the pan actions above and for the same
+   * reason: the player pushes a direction on the picture, and which tile
+   * direction that is depends on the projection, which §5 keeps out of here.
+   * `InputManager` asks the camera to translate (C10 task 2).
+   */
+  | 'player.moveUp'
+  | 'player.moveDown'
+  | 'player.moveLeft'
+  | 'player.moveRight'
   /** Cycle the held building's rotation (C06 task 5). */
   | 'build.rotate'
   | 'build.slot1'
@@ -69,9 +79,9 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
 /**
  * The shipped defaults.
  *
- * Arrows pan and WASD does not, because WASD moves the *player* from C10
- * onwards and a binding that has to be taken away later is worse than one that
- * is never offered. Space is the drag modifier for the same reason it is in
+ * Arrows pan and WASD walks. C04 reserved WASD for exactly this, rather than
+ * binding it to the camera and taking it away here — a binding that has to be
+ * withdrawn is worse than one that was never offered. Space is the drag modifier for the same reason it is in
  * every map editor: it is the largest key and it is not a letter anyone needs
  * while dragging. `R` rotates and the number row selects, which is what every
  * game in this genre has trained the player's left hand to expect. `B` opens
@@ -89,6 +99,10 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   Minus: 'camera.zoomOut',
   NumpadSubtract: 'camera.zoomOut',
   Space: 'camera.dragModifier',
+  KeyW: 'player.moveUp',
+  KeyA: 'player.moveLeft',
+  KeyS: 'player.moveDown',
+  KeyD: 'player.moveRight',
   Escape: 'selection.clear',
   KeyR: 'build.rotate',
   KeyB: 'ui.toggleBuildMenu',

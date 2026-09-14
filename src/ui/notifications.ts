@@ -41,6 +41,8 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   bad_terrain: 'That ground will not take a building.',
   no_resource: 'There is no ore under that.',
   nothing_there: 'There is nothing there to remove.',
+  out_of_reach: 'Too far away — walk closer.',
+  inventory_full: 'You cannot carry any more of that.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {

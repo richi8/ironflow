@@ -19,8 +19,10 @@ import { footprintExtent } from '../game/entities/entity.js';
 import { EntityType } from '../game/entities/entity-types.js';
 import type { BuildingRegistry } from '../game/registries/building-registry.js';
 
-import { RenderLayer, type RenderEntity } from './render-state.js';
-import type { SpriteId } from './sprite-atlas.js';
+import type { PlayerView } from '../game/views/player-view.js';
+
+import { RenderLayer, type PlayerRenderView, type RenderEntity } from './render-state.js';
+import { playerSprite, type SpriteId } from './sprite-atlas.js';
 
 /**
  * Which layer a kind of entity draws in.
@@ -58,4 +60,23 @@ export function describeEntities(store: EntityStore, buildings: BuildingRegistry
     });
   });
   return out;
+}
+
+/**
+ * The player's view model as something the renderer can draw.
+ *
+ * The same translation `describeEntities` performs, for the same reason: the
+ * controller answers where the player is and what they are doing, and naming
+ * the picture is this side of §4. Two facts become one sprite id here —
+ * activity and facing — which is the grammar an image atlas addresses a cell
+ * with, so C29's swap changes nothing above this line.
+ */
+export function describePlayer(view: PlayerView): PlayerRenderView {
+  return {
+    x: view.x,
+    y: view.y,
+    sprite: playerSprite(view.activity, view.facing),
+    buildRange: view.buildRange,
+    mining: view.mining,
+  };
 }

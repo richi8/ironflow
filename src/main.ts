@@ -14,7 +14,8 @@ import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
-import { describeEntities } from './renderer/entity-view.js';
+import { describeEntities, describePlayer } from './renderer/entity-view.js';
+import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, RenderState } from './renderer/render-state.js';
 import type { SpriteId } from './renderer/sprite-atlas.js';
@@ -58,6 +59,30 @@ function describeOre(world: World, x: number, y: number): string {
   return `${resourceName(type)} ${chunk.resourceAmount[index] ?? 0}`;
 }
 
+/** Where a new game starts. On grass, within reach of the playground's iron. */
+const START_TILE = Object.freeze({ x: 6, y: 6 });
+
+/** What the player starts carrying. See the note at the assignment below. */
+const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({ miner: 5, chest: 10 });
+
+/** Fraction of the viewport the player may roam before the camera follows. */
+const FOLLOW_DEADZONE = 0.5;
+
+/** How far `value` is outside `[min, max]`, signed. Zero when it is inside. */
+function overflow(value: number, min: number, max: number): number {
+  if (value < min) return value - min;
+  if (value > max) return value - max;
+  return 0;
+}
+
+/** The player, for the debug overlay. See the row it fills in. */
+function describePlayerState(view: PlayerView): string {
+  const where = `${view.x.toFixed(2)},${view.y.toFixed(2)} r${view.facing} ${view.activity}`;
+  const bag = `bag ${view.usedSlots}/${view.slots}`;
+  if (view.mining === null) return `${where}, ${bag}`;
+  return `${where}, ${bag}, mining ${view.mining.x},${view.mining.y} ${Math.round(view.mining.progress * 100)}%`;
+}
+
 function bootstrap(): void {
   const canvas = requireElement<HTMLCanvasElement>('#game');
   const uiRoot = requireElement<HTMLElement>('#ui');
@@ -70,9 +95,10 @@ function bootstrap(): void {
   // The simulation builds its own registry from `data/buildings.ts` and hands
   // the entity store the footprint lookup that comes with it (C05, C06).
   const simulation = new Simulation({ world });
+  simulation.player.setTilePosition(START_TILE.x, START_TILE.y);
   const scheduler = new BrowserFrameScheduler();
 
-  const camera = new Camera({ x: 6, y: 6 });
+  const camera = new Camera({ x: START_TILE.x, y: START_TILE.y });
   const renderer = new CanvasRenderer(surface.ctx);
 
   const applySize = (): void => {
@@ -84,15 +110,18 @@ function bootstrap(): void {
   surface.onResize(applySize);
 
   /**
-   * Starting items, so there is something to build with (C06).
+   * What the player starts with (C10).
    *
-   * **Scaffolding.** Nothing produces items until C11 mines and C16 crafts, so
-   * without a stock the first acceptance criterion — place a building — has no
-   * way to be met at all. C10 gives the player a real starting inventory and
-   * this line goes with it.
+   * C06 handed out fifty of everything, which was scaffolding to make "place a
+   * building" reachable at all. This is the real thing: enough to get a first
+   * miner onto ore and a chest beside it, and not enough to cover the map
+   * without ever mining. It is still a **balance number** and still temporary
+   * in one respect — C16 makes buildings craftable, and a starting stock then
+   * becomes a decision about the first five minutes rather than about whether
+   * the game can be played at all.
    */
-  for (const definition of simulation.buildings.all()) {
-    simulation.inventory.add(definition.id, 50);
+  for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
+    simulation.inventory.add(buildingId, count);
   }
 
   /**
@@ -171,6 +200,30 @@ function bootstrap(): void {
     };
   }
 
+  /**
+   * Keep the player on screen by nudging the camera when they leave a deadzone.
+   *
+   * Presentation only — it pans the camera, which is not simulation state (§6)
+   * — and deliberately not a follow-cam: inside the box the camera does not
+   * move at all, so the arrow keys still put the view where the player wants it
+   * and looking around does not fight with walking. It exists because C10 is
+   * the chunk that lets the player walk out of the viewport, and a game where
+   * the character can be lost off-screen with no way to find them is not one
+   * the acceptance criteria can be checked in.
+   */
+  function followPlayer(tileX: number, tileY: number): void {
+    const { cssWidth, cssHeight } = surface.getSize();
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+
+    const screen = camera.worldToScreen(tileX, tileY);
+    const marginX = (cssWidth * (1 - FOLLOW_DEADZONE)) / 2;
+    const marginY = (cssHeight * (1 - FOLLOW_DEADZONE)) / 2;
+
+    const overX = overflow(screen.x, marginX, cssWidth - marginX);
+    const overY = overflow(screen.y, marginY, cssHeight - marginY);
+    if (overX !== 0 || overY !== 0) camera.pan(0 - overX, 0 - overY);
+  }
+
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
@@ -187,10 +240,14 @@ function bootstrap(): void {
     // under a stationary cursor changes when it does.
     input.update(elapsedMs);
 
+    const player = describePlayer(controller.getPlayerView());
+    followPlayer(player.x, player.y);
+
     // The read-only view the renderer is allowed to see (C03 task 2).
     const state: RenderState = {
       world: simulation.world,
       entities: renderEntities,
+      player,
       hover: input.hover,
       ghost: currentGhost(),
       selected: input.selected,
@@ -227,6 +284,11 @@ function bootstrap(): void {
         // then it is the only way to check that what depleted on screen is
         // what depleted in the arrays.
         ore: hover === null ? '—' : describeOre(world, hover.x, hover.y),
+        // C10's readout: where the player is between tiles, which way they
+        // face and how far into the current lump they are. The inspector
+        // (C12) and an inventory panel are where this becomes player-facing;
+        // until then it is how the subtile arithmetic is checked by eye.
+        player: describePlayerState(controller.getPlayerView()),
       },
       elapsedMs,
     );

@@ -16,6 +16,7 @@ import {
   RESOURCE_SPRITES,
   TERRAIN_SPRITES,
   describeSprite,
+  playerSprite,
   resourceSprite,
   terrainSprite,
 } from '../../src/renderer/sprite-atlas.js';
@@ -156,6 +157,29 @@ describe('sprite ids', () => {
 
   it('memoises, so the draw path parses each id once', () => {
     expect(describeSprite('building:storage:CH')).toBe(describeSprite('building:storage:CH'));
+  });
+});
+
+describe('the player sprite (C10)', () => {
+  it('names the state and the facing, which is how an atlas cell is addressed', () => {
+    expect(playerSprite('walk', 1)).toBe('player:walk:1');
+    expect(describeSprite(playerSprite('work', 3))).toEqual({ kind: 'player', activity: 'work', facing: 3 });
+  });
+
+  it('resolves all three states at all four facings', () => {
+    for (const activity of ['idle', 'walk', 'work'] as const) {
+      for (const facing of [0, 1, 2, 3] as const) {
+        expect(describeSprite(playerSprite(activity, facing)).kind, `${activity}:${facing}`).toBe('player');
+      }
+    }
+  });
+
+  it('refuses a state or a facing it does not have, rather than inventing one', () => {
+    expect(describeSprite('player:sprint:0').kind).toBe('missing');
+    expect(describeSprite('player:idle:4').kind).toBe('missing');
+    // `Number('')` is 0, so an empty facing must not parse as north.
+    expect(describeSprite('player:idle:').kind).toBe('missing');
+    expect(describeSprite('player:idle').kind).toBe('missing');
   });
 });
 

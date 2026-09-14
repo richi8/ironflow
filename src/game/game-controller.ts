@@ -50,6 +50,8 @@ import type { MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudView } from './views/hud-view.js';
 import type { PlacementView } from './views/placement-view.js';
+import type { PlayerActivity, PlayerView } from './views/player-view.js';
+import { BUILD_RANGE_TILES, MINE_RANGE_TILES } from './player/player-state.js';
 import { NORTH, type Rotation, type TileCoord } from './world/coordinates.js';
 
 /** Hotbar slots the number row reaches. §13's toolbar, C07 task 3. */
@@ -184,13 +186,22 @@ export class GameController {
   getHudView(): HudView {
     const stats = this.game.getStats();
     const tick = this.simulation.getTick();
-    const counts = this.simulation.inventory.toJSON();
 
     let itemTotal = 0;
     const items: HudItemCount[] = [];
+
+    // Everything the player is carrying, in two passes because they carry it
+    // in two containers — see `player/player-state.ts` on why, and C16 on when
+    // that stops being true. Real items first, in content order, so the row a
+    // player watches while mining does not move when a building is bought.
+    for (const [itemId, count] of this.simulation.player.inventory.toJSON()) {
+      const definition = this.simulation.items.byId(itemId);
+      itemTotal += count;
+      items.push(freeze({ itemId: definition.id, name: definition.name, count }));
+    }
     // `toJSON` is sorted by item id, so the HUD's rows never reorder under the
     // player's cursor as counts change.
-    for (const [itemId, count] of Object.entries(counts)) {
+    for (const [itemId, count] of Object.entries(this.simulation.inventory.toJSON())) {
       itemTotal += count;
       items.push(freeze({ itemId, name: this.itemName(itemId), count }));
     }
@@ -207,6 +218,38 @@ export class GameController {
       items: freeze(items),
       itemTotal,
       alerts: this.alerts,
+    });
+  }
+
+  /**
+   * Where the player is, what they are doing, and how far they can reach.
+   *
+   * Read every frame by the composition root, which turns `activity` and
+   * `facing` into a sprite id on the renderer's side of §4. `activity` is
+   * derived here rather than stored on the player because it is exactly the
+   * two booleans the player already carries: a field would be a third copy of
+   * the same fact, kept in step by hand and serialized for no reason (§10).
+   */
+  getPlayerView(): PlayerView {
+    const player = this.simulation.player;
+    const target = player.miningTarget;
+
+    let activity: PlayerActivity = 'idle';
+    if (target !== null) activity = 'work';
+    else if (player.isMoving) activity = 'walk';
+
+    return freeze({
+      x: player.x,
+      y: player.y,
+      tileX: player.tileX,
+      tileY: player.tileY,
+      facing: player.facing,
+      activity,
+      buildRange: BUILD_RANGE_TILES,
+      mineRange: MINE_RANGE_TILES,
+      mining: target === null ? null : freeze({ x: target.x, y: target.y, progress: player.miningProgress }),
+      usedSlots: player.inventory.usedSlots,
+      slots: player.inventory.slots,
     });
   }
 

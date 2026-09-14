@@ -5,6 +5,7 @@ import { Simulation } from '../../src/game/simulation.js';
 import type { TileCoord } from '../../src/game/world/coordinates.js';
 import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
 import { World } from '../../src/game/world/world.js';
+import { Camera } from '../../src/renderer/camera.js';
 import { InputManager, type CameraControl, type TilePicker } from '../../src/input/input-manager.js';
 import { DEFAULT_KEYBINDINGS, rebind, type InputAction } from '../../src/input/keybindings.js';
 import { BUTTONS_LEFT, BUTTONS_MIDDLE, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT } from '../../src/input/mouse-input.js';
@@ -44,6 +45,20 @@ class FakeCamera implements CameraControl {
 
   zoomAt(x: number, y: number, steps: number): void {
     this.zooms.push({ x, y, steps });
+  }
+
+  /**
+   * A stand-in for the projection (C10 task 2).
+   *
+   * The real camera unprojects, which rotates screen directions 45 degrees
+   * into tile space. This one is deliberately the identity: what these tests
+   * check is that WASD becomes exactly one command when the direction changes,
+   * not what the projection does to it — that belongs to the projection's own
+   * tests, and baking a rotation in here would make every expectation below a
+   * puzzle.
+   */
+  screenDirectionToWorld(dxPx: number, dyPx: number): { x: number; y: number } {
+    return { x: dxPx, y: dyPx };
   }
 }
 
@@ -275,7 +290,9 @@ describe('commands', () => {
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
     canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 82, button: BUTTON_LEFT }));
 
-    expect(queuedTiles()).toEqual(['3,8']);
+    // The release is a command too: mining is a *held* action, so the
+    // simulation has to be told the button came up (C10 task 4).
+    expect(queuedTiles()).toEqual(['3,8', 'stopMining']);
   });
 
   it('enqueues once per tile crossed by a drag, however many events arrive', () => {
@@ -287,7 +304,7 @@ describe('commands', () => {
     }
     canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 5, button: BUTTON_LEFT }));
 
-    expect(queuedTiles()).toEqual(['0,0', '1,0', '2,0', '3,0']);
+    expect(queuedTiles()).toEqual(['0,0', '1,0', '2,0', '3,0', 'stopMining']);
   });
 
   it('stops the drag when the button is no longer down', () => {
@@ -295,7 +312,7 @@ describe('commands', () => {
     canvas.dispatchEvent(pointerEvent('pointermove', { x: 15, y: 5, buttons: 0 }));
     canvas.dispatchEvent(pointerEvent('pointermove', { x: 25, y: 5, buttons: 0 }));
 
-    expect(queuedTiles()).toEqual(['0,0']);
+    expect(queuedTiles()).toEqual(['0,0', 'stopMining']);
   });
 
   it('enqueues nothing at all for a camera drag', () => {
@@ -329,9 +346,11 @@ describe('commands', () => {
     simulation.tick();
 
     expect(simulation.commands.pending).toBe(0);
-    // C04 ships no effects, so the honest outcome is a visible refusal.
+    // Refused because the default player stands at the origin and (3, 8) is
+    // nine tiles away (C10 task 4). The point of the assertion is unchanged
+    // from C04: the outcome exists only after the tick, and it is visible.
     expect(simulation.commands.takeRejections()).toEqual([
-      { command: { type: 'mineTile', x: 3, y: 8 }, reason: 'not_implemented' },
+      { command: { type: 'mineTile', x: 3, y: 8 }, reason: 'out_of_reach' },
     ]);
   });
 });
@@ -485,6 +504,9 @@ describe('the build tool', () => {
   it('never touches simulation state: a held building still only enqueues', () => {
     const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
     simulation.inventory.add('chest', 1);
+    // Build range is eight tiles from the player (C10 task 5), and this test is
+    // about the command path rather than about reach.
+    simulation.player.setTilePosition(3, 8);
     input.detach();
     input = new InputManager({
       canvas,
@@ -502,6 +524,116 @@ describe('the build tool', () => {
     simulation.tick();
     expect(simulation.entities.at(3, 8)).toBeDefined();
     expect(simulation.inventory.count('chest')).toBe(0);
+  });
+});
+
+/**
+ * Walking (C10 task 2).
+ *
+ * Two properties, and they are the reason the input layer does not simply send
+ * a step per frame:
+ *
+ * - **One command per change of direction.** The simulation holds the
+ *   direction and steps once per tick, so re-sending it every frame would fill
+ *   the queue to say nothing.
+ * - **The keys mean a direction on the screen.** WASD is named for the
+ *   picture; the command carries tile space; the camera translates. Because the
+ *   projection turns the grid 45 degrees, W alone is a *diagonal* tile move and
+ *   W+D is a cardinal one — which is the part that is easy to get backwards, so
+ *   `ProjectedCamera` below uses the real transform rather than the identity.
+ */
+describe('walking', () => {
+  /** A camera double that unprojects the way the real one does. */
+  class ProjectedCamera extends FakeCamera {
+    private readonly real = new Camera({ viewportWidth: 100, viewportHeight: 100 });
+
+    override screenDirectionToWorld(dxPx: number, dyPx: number): { x: number; y: number } {
+      return this.real.screenDirectionToWorld(dxPx, dyPx);
+    }
+  }
+
+  function walkCommands(): { dx: number; dy: number }[] {
+    return commands
+      .drain()
+      .filter((c) => c.type === 'movePlayer')
+      .map((c) => ({ dx: c.dx, dy: c.dy }));
+  }
+
+  it('sends one command when a key goes down and one when it comes up', () => {
+    document.dispatchEvent(keyEvent('keydown', 'KeyS'));
+    input.update(16);
+    input.update(16);
+    input.update(16);
+    expect(walkCommands()).toEqual([{ dx: 0, dy: 1 }]);
+
+    document.dispatchEvent(keyEvent('keyup', 'KeyS'));
+    input.update(16);
+    input.update(16);
+    expect(walkCommands()).toEqual([{ dx: 0, dy: 0 }]);
+  });
+
+  it('sends nothing at all while no walk key is held', () => {
+    input.update(16);
+    input.update(16);
+    expect(walkCommands()).toEqual([]);
+  });
+
+  it('stops walking when the window takes the keys away', () => {
+    document.dispatchEvent(keyEvent('keydown', 'KeyD'));
+    input.update(16);
+    // The fixture's camera is the identity, so this is screen-right verbatim;
+    // what the projection makes of it is the case below.
+    expect(walkCommands()).toEqual([{ dx: 1, dy: 0 }]);
+
+    globalThis.dispatchEvent(new Event('blur'));
+    input.update(16);
+    expect(walkCommands()).toEqual([{ dx: 0, dy: 0 }]);
+  });
+
+  it('turns screen directions into the nearest of the eight tile directions', () => {
+    mount();
+    input.detach();
+    input = new InputManager({
+      canvas,
+      keyTarget: document,
+      camera: new ProjectedCamera(),
+      picker: new GridPicker(),
+      commands,
+    });
+    input.attach();
+
+    const cases: [readonly string[], { dx: number; dy: number }][] = [
+      // Screen up is the tile diagonal toward the top of the diamond...
+      [['KeyW'], { dx: -1, dy: -1 }],
+      [['KeyS'], { dx: 1, dy: 1 }],
+      [['KeyD'], { dx: 1, dy: -1 }],
+      [['KeyA'], { dx: -1, dy: 1 }],
+      // ...and two keys together are a cardinal tile direction, which is the
+      // half that a naive sign test gets wrong.
+      [['KeyW', 'KeyD'], { dx: 0, dy: -1 }],
+      [['KeyW', 'KeyA'], { dx: -1, dy: 0 }],
+      [['KeyS', 'KeyD'], { dx: 1, dy: 0 }],
+      [['KeyS', 'KeyA'], { dx: 0, dy: 1 }],
+    ];
+
+    for (const [keys, expected] of cases) {
+      for (const code of keys) document.dispatchEvent(keyEvent('keydown', code));
+      input.update(16);
+      expect(walkCommands(), keys.join('+')).toEqual([expected]);
+      for (const code of keys) document.dispatchEvent(keyEvent('keyup', code));
+      input.update(16);
+      commands.drain();
+    }
+  });
+
+  it('cancels out when opposite keys are held, rather than picking one', () => {
+    document.dispatchEvent(keyEvent('keydown', 'KeyW'));
+    input.update(16);
+    commands.drain();
+
+    document.dispatchEvent(keyEvent('keydown', 'KeyS'));
+    input.update(16);
+    expect(walkCommands()).toEqual([{ dx: 0, dy: 0 }]);
   });
 });
 

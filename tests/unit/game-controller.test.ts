@@ -212,6 +212,10 @@ describe('GameController build tool', () => {
     controller.selectBuilding('miner');
     cursor.buildRotation = EAST;
     cursor.hover = { x: 40, y: 40 };
+    // Standing there, so the answer is about the ground rather than about
+    // C10's build range — which the preview also asks, and which would
+    // otherwise be the first thing wrong with a tile forty tiles away.
+    simulation.player.setTilePosition(40, 40);
 
     const preview = controller.getPlacementView();
     expect(Object.isFrozen(preview)).toBe(true);

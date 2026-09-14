@@ -77,6 +77,11 @@ export const RENDER_LAYER_COUNT = 8;
  * `(x, y)` is the footprint's north-west tile and `(width, height)` its size in
  * tiles — a multi-tile building is one `RenderEntity`, not one per tile, so it
  * sorts and draws as a single unit (§5).
+ *
+ * Positions are integers for everything in the entity store. The player (C10)
+ * is drawn through this same shape with a fractional position, which the depth
+ * key handles because it is arithmetic rather than indexing — see
+ * `entity-layer.ts`.
  */
 export interface RenderEntity {
   /** Stable, unique, and the deterministic tie-break in the depth key (§5). */
@@ -92,6 +97,28 @@ export interface RenderEntity {
    */
   readonly sprite: SpriteId;
   readonly layer: RenderLayer;
+}
+
+/**
+ * The player character, as the renderer needs to see them. See C10 task 6.
+ *
+ * `(x, y)` is a **fractional** tile position — the player is not on the grid,
+ * which is the whole point of simulating movement in subtiles — and it is the
+ * centre of the sprite's ground face rather than a north-west corner, because
+ * the player has no footprint to have a corner of.
+ *
+ * The two ranges travel with the player rather than as their own fields,
+ * because they are both drawn around the player and both meaningless without
+ * them.
+ */
+export interface PlayerRenderView {
+  readonly x: number;
+  readonly y: number;
+  readonly sprite: SpriteId;
+  /** Tiles the player can build within (C10 task 5). Drawn while a ghost is up. */
+  readonly buildRange: number;
+  /** The tile being mined and how far through it, or null for not mining. */
+  readonly mining: { readonly x: number; readonly y: number; readonly progress: number } | null;
 }
 
 /** A pending placement preview, drawn in the overlay layer so nothing hides it. */
@@ -117,6 +144,17 @@ export interface RenderState {
   readonly world: WorldView;
   /** Unordered. The entity layer sorts by depth key; see `entity-layer.ts`. */
   readonly entities: readonly RenderEntity[];
+  /**
+   * The player, drawn into the depth-sorted pass but kept out of `entities`.
+   *
+   * Out of that array on purpose: `ScenePicker` is handed the same list the
+   * frame drew, so anything in it is something the cursor can hit. A player in
+   * there would answer for every pixel of their own sprite — reporting their
+   * own tile instead of the ground behind them, and an `entityId` of
+   * `NO_ENTITY`, which means "nothing" everywhere else in the codebase. Null
+   * before C10 wires one in, and in any test that renders an empty world.
+   */
+  readonly player: PlayerRenderView | null;
   readonly hover: TileCoord | null;
   readonly ghost: GhostView | null;
   readonly selected: TileCoord | null;

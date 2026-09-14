@@ -7,8 +7,9 @@
  */
 
 import type { TileBounds } from '../../game/world/coordinates.js';
+import { NO_ENTITY } from '../../game/entities/entity.js';
 import type { Camera } from '../camera.js';
-import { RENDER_LAYER_COUNT, type RenderEntity } from '../render-state.js';
+import { RENDER_LAYER_COUNT, RenderLayer, type PlayerRenderView, type RenderEntity } from '../render-state.js';
 import type { SpriteAtlas } from '../sprite-atlas.js';
 
 /**
@@ -47,6 +48,12 @@ export const DEPTH_TILE_STRIDE = DEPTH_LAYER_STRIDE * RENDER_LAYER_COUNT;
  * The largest magnitude this reaches is about `2^45`, well inside the range
  * where a float64 holds every integer exactly, so the arithmetic is a genuine
  * positional encoding rather than an approximate one.
+ *
+ * The player (C10) goes through here with a **fractional** position, which is
+ * fine: the key is arithmetic, not an index, so a player halfway between two
+ * depth rows sorts halfway between them — which is exactly where they should
+ * be drawn. Only the id has to be an integer, and the player uses `NO_ENTITY`,
+ * a number the store never hands out.
  */
 export function depthKey(entity: RenderEntity): number {
   if (!Number.isInteger(entity.id) || entity.id < 0 || entity.id >= DEPTH_ID_LIMIT) {
@@ -68,6 +75,27 @@ export function overlapsBounds(entity: RenderEntity, bounds: TileBounds): boolea
     entity.y <= bounds.maxY &&
     entity.y + entity.height - 1 >= bounds.minY
   );
+}
+
+/**
+ * The player as a drawable. A 1x1 footprint centred on where they stand.
+ *
+ * The anchor everything else uses is a footprint's north-west corner, and the
+ * layer adds half the footprint back to find the centre; the player has a
+ * position rather than a footprint, so half a tile comes off here to survive
+ * that round trip. Doing it this way rather than special-casing the anchor in
+ * `draw` keeps one anchoring rule in the renderer instead of two.
+ */
+function asDrawable(player: PlayerRenderView): RenderEntity {
+  return {
+    id: NO_ENTITY,
+    x: player.x - 0.5,
+    y: player.y - 0.5,
+    width: 1,
+    height: 1,
+    sprite: player.sprite,
+    layer: RenderLayer.Building,
+  };
 }
 
 export class EntityLayer {
@@ -95,10 +123,22 @@ export class EntityLayer {
     entities: readonly RenderEntity[],
     camera: Camera,
     bounds: TileBounds,
+    player: PlayerRenderView | null = null,
   ): void {
     this.visible.length = 0;
     for (const entity of entities) {
       if (overlapsBounds(entity, bounds)) this.visible.push(entity);
+    }
+
+    // The player is sorted in with everything else rather than drawn over it,
+    // so walking behind a miner puts the miner in front — which is the whole
+    // reason §5 has a depth key. They arrive as a separate argument instead of
+    // in `entities` because that array is also what the picker searches, and
+    // the player is not something the cursor should be able to hit — see
+    // `render-state.ts` on why.
+    if (player !== null) {
+      const drawable = asDrawable(player);
+      if (overlapsBounds(drawable, bounds)) this.visible.push(drawable);
     }
 
     // Recomputing the key inside the comparator is O(n log n) key computations
