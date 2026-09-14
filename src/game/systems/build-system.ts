@@ -30,8 +30,13 @@ export interface BuildSystemOptions {
   readonly world: World;
   readonly entities: EntityStore;
   readonly buildings: BuildingRegistry;
-  /** The player's items. C08's `Inventory` and C10's player state replace this. */
-  readonly items: ItemCounts;
+  /**
+   * The player's items. Still `ItemCounts`: C08 built the real `SlotInventory`
+   * but it keys on registered item ids, and a build cost is paid in building
+   * items, which do not exist as items until C16 gives them recipes. C10's
+   * player state is where this moves.
+   */
+  readonly inventory: ItemCounts;
 }
 
 /** A placement that would work, or the one reason it would not. */
@@ -41,13 +46,13 @@ export class BuildSystem {
   private readonly world: World;
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
-  private readonly items: ItemCounts;
+  private readonly inventory: ItemCounts;
 
   constructor(options: BuildSystemOptions) {
     this.world = options.world;
     this.entities = options.entities;
     this.buildings = options.buildings;
-    this.items = options.items;
+    this.inventory = options.inventory;
   }
 
   /**
@@ -90,7 +95,7 @@ export class BuildSystem {
       return 'no_resource';
     }
 
-    return this.items.canAfford(definition.buildCost) ? null : 'unaffordable';
+    return this.inventory.canAfford(definition.buildCost) ? null : 'unaffordable';
   }
 
   /**
@@ -105,7 +110,7 @@ export class BuildSystem {
     if (reason !== null) return reason;
 
     const definition = this.buildings.get(buildingId);
-    this.items.take(definition.buildCost);
+    this.inventory.take(definition.buildCost);
     this.entities.create({
       type: definition.entityType,
       x,
@@ -132,7 +137,7 @@ export class BuildSystem {
     if (entity === undefined || this.entities.isPendingRemoval(entity.id)) return 'nothing_there';
 
     this.entities.remove(entity.id);
-    this.items.give(this.buildings.forEntityType(entity.type).buildCost);
+    this.inventory.give(this.buildings.forEntityType(entity.type).buildCost);
     return null;
   }
 

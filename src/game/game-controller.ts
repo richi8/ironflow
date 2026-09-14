@@ -184,7 +184,7 @@ export class GameController {
   getHudView(): HudView {
     const stats = this.game.getStats();
     const tick = this.simulation.getTick();
-    const counts = this.simulation.items.toJSON();
+    const counts = this.simulation.inventory.toJSON();
 
     let itemTotal = 0;
     const items: HudItemCount[] = [];
@@ -216,7 +216,7 @@ export class GameController {
 
     this.simulation.buildings.all().forEach((definition, index) => {
       const cost: BuildMenuCost[] = definition.buildCost.map((stack) =>
-        freeze({ itemId: stack.itemId, count: stack.count, held: this.simulation.items.count(stack.itemId) }),
+        freeze({ itemId: stack.itemId, count: stack.count, held: this.simulation.inventory.count(stack.itemId) }),
       );
       entries.push(
         freeze({
@@ -224,7 +224,7 @@ export class GameController {
           name: definition.name,
           category: definition.category,
           cost: freeze(cost),
-          affordable: this.simulation.items.canAfford(definition.buildCost),
+          affordable: this.simulation.inventory.canAfford(definition.buildCost),
           // Every building is unlocked until C22 has a technology tree.
           unlocked: true,
           selected: held?.buildingId === definition.id,
@@ -403,7 +403,7 @@ export class GameController {
     for (const definition of this.simulation.buildings.all()) {
       parts.push(definition.id);
       for (const stack of definition.buildCost) {
-        parts.push(String(this.simulation.items.count(stack.itemId)));
+        parts.push(String(this.simulation.inventory.count(stack.itemId)));
       }
     }
     return parts.join('|');

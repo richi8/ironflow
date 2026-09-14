@@ -4,6 +4,8 @@ import { BUILDINGS } from './data/buildings.js';
 import { EntityStore } from './entities/entity-store.js';
 import { ItemCounts } from './items/item-stack.js';
 import { BuildingRegistry } from './registries/building-registry.js';
+import { ITEMS } from './data/items.js';
+import { ItemRegistry } from './registries/item-registry.js';
 import { BuildSystem } from './systems/build-system.js';
 import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
@@ -26,7 +28,9 @@ export interface SimulationOptions {
    */
   readonly buildings?: BuildingRegistry;
   readonly entities?: EntityStore;
-  readonly items?: ItemCounts;
+  /** The item content table (C08). Defaulted from `data/items.ts`, like buildings. */
+  readonly items?: ItemRegistry;
+  readonly inventory?: ItemCounts;
 }
 
 export class Simulation {
@@ -48,10 +52,19 @@ export class Simulation {
   readonly buildings: BuildingRegistry;
 
   /**
-   * The player's items. Authoritative (§10). C08 replaces the container and
-   * C10 moves it onto the player; the field stays where the UI can read it.
+   * The item content table. Frozen; the source of every numeric item id (C08).
+   * Nothing holds items by id yet — C09 mines into one and C15 smelts out of
+   * one — but it is built here so a typo in `data/items.ts` fails on the first
+   * frame rather than the first ore.
    */
-  readonly items: ItemCounts;
+  readonly items: ItemRegistry;
+
+  /**
+   * The player's items. Authoritative (§10). Still a string-keyed `ItemCounts`
+   * bag of building items; C10 turns it into the player's real `SlotInventory`
+   * once C16 makes buildings craftable. The field stays where the UI can read it.
+   */
+  readonly inventory: ItemCounts;
 
   private readonly builder: BuildSystem;
 
@@ -69,12 +82,13 @@ export class Simulation {
     this.world = options.world;
     this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
     this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
-    this.items = options.items ?? new ItemCounts();
+    this.items = options.items ?? new ItemRegistry(ITEMS);
+    this.inventory = options.inventory ?? new ItemCounts();
     this.builder = new BuildSystem({
       world: this.world,
       entities: this.entities,
       buildings: this.buildings,
-      items: this.items,
+      inventory: this.inventory,
     });
   }
 

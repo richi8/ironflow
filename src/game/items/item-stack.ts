@@ -3,16 +3,18 @@
  *
  * **Partly scaffolding.** `ItemStack` is permanent — it is how every piece of
  * content data from here on names a quantity of something (build costs now,
- * recipe inputs and outputs from C16). `ItemCounts` is not: C08 brings the real
- * `Inventory`, with stack limits, a slot count, and the separate machine-buffer
- * variant that keeps "why is my furnace stuck" bugs out of the game. This is
- * the smallest thing that can answer the two questions C06 must ask — *can the
- * player pay for this building, and here is the refund* — without pre-empting
- * that chunk's decisions.
+ * recipe inputs and outputs from C16). `ItemCounts` is not: C08 built the real
+ * containers next door in `inventory.ts`, with stack limits, a slot count, and
+ * the separate machine-buffer variant that keeps "why is my furnace stuck" bugs
+ * out of the game.
  *
- * Item ids are strings here. C08 gives every item a numeric runtime id and
- * moves inventories, belts and saves onto it; content data and the UI keep the
- * string form, which is what a build cost is.
+ * This bag outlived them by one chunk more than C08 expected, for a reason
+ * worth writing down. A `SlotInventory` keys on the numeric item ids that C08's
+ * registry hands out, and asks it for a stack size. What this bag holds is
+ * *building* items — a `miner`, a `chest` — and those are not registered items
+ * until C16 gives them recipes. So the player's build materials stay strings
+ * here until then; C10 moves the bag onto the player, and **C16 is the chunk
+ * that replaces it with a `SlotInventory`**.
  */
 
 /** A quantity of one kind of item. Plain data: it goes straight into a save. */

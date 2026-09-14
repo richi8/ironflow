@@ -38,7 +38,7 @@ function makeGame(): { game: Game; simulation: Simulation; scheduler: FakeSchedu
 }
 
 function stocked(simulation: Simulation, amount = 10): void {
-  for (const definition of simulation.buildings.all()) simulation.items.add(definition.id, amount);
+  for (const definition of simulation.buildings.all()) simulation.inventory.add(definition.id, amount);
 }
 
 describe('GameController views', () => {
@@ -60,7 +60,7 @@ describe('GameController views', () => {
 
   it('reports the tick, the stock and the world as the HUD reads them', () => {
     const { game, simulation } = makeGame();
-    simulation.items.add('chest', 3);
+    simulation.inventory.add('chest', 3);
     const controller = new GameController({ game });
 
     for (let i = 0; i < 30; i++) simulation.tick();
@@ -76,7 +76,7 @@ describe('GameController views', () => {
 
   it('prices the build menu against what the player actually holds', () => {
     const { game, simulation } = makeGame();
-    simulation.items.add('chest', 2);
+    simulation.inventory.add('chest', 2);
     const controller = new GameController({ game });
 
     const entries = controller.getBuildMenuView().entries;
@@ -247,7 +247,7 @@ describe('GameController events', () => {
     controller.pump();
     expect(changes).toBe(0);
 
-    simulation.items.add('chest', 1);
+    simulation.inventory.add('chest', 1);
     controller.pump();
     expect(changes).toBe(1);
 
@@ -274,10 +274,10 @@ describe('GameController events', () => {
     let calls = 0;
     const off = controller.subscribe('buildMenuChanged', () => (calls += 1));
 
-    simulation.items.add('chest', 1);
+    simulation.inventory.add('chest', 1);
     controller.pump();
     off();
-    simulation.items.add('chest', 1);
+    simulation.inventory.add('chest', 1);
     controller.pump();
 
     expect(calls).toBe(1);

@@ -83,7 +83,7 @@ const PIPE: BuildingDefinition = {
 interface Harness {
   readonly world: World;
   readonly entities: EntityStore;
-  readonly items: ItemCounts;
+  readonly inventory: ItemCounts;
   readonly buildings: BuildingRegistry;
   readonly system: BuildSystem;
 }
@@ -92,9 +92,15 @@ function harness(extra: readonly BuildingDefinition[] = [PIPE], stock = 10): Har
   const world = testWorld();
   const buildings = new BuildingRegistry([...BUILDINGS, ...extra]);
   const entities = new EntityStore({ footprintOf: buildings.footprintOf });
-  const items = new ItemCounts();
-  for (const definition of buildings.all()) items.add(definition.id, stock);
-  return { world, entities, items, buildings, system: new BuildSystem({ world, entities, buildings, items }) };
+  const inventory = new ItemCounts();
+  for (const definition of buildings.all()) inventory.add(definition.id, stock);
+  return {
+    world,
+    entities,
+    inventory,
+    buildings,
+    system: new BuildSystem({ world, entities, buildings, inventory }),
+  };
 }
 
 describe('BuildingRegistry', () => {
@@ -199,7 +205,7 @@ describe('placement validation', () => {
     const h = harness([PIPE], 0);
     expect(h.system.validate('chest', 10, 10, NORTH)).toBe('unaffordable');
 
-    h.items.add('chest', 1);
+    h.inventory.add('chest', 1);
     expect(h.system.validate('chest', 10, 10, NORTH)).toBeNull();
   });
 
@@ -223,7 +229,7 @@ describe('placement validation', () => {
       world: h.world,
       buildings: h.buildings,
       entities: h.entities,
-      items: h.items,
+      inventory: h.inventory,
     });
     for (const [x, y] of [
       [0, 0],
@@ -243,7 +249,7 @@ describe('placing a building', () => {
     const miner = h.entities.at(0, 0);
     expect(miner?.type).toBe(EntityType.Miner);
     expect(h.entities.size).toBe(1);
-    expect(h.items.count('miner')).toBe(9);
+    expect(h.inventory.count('miner')).toBe(9);
     for (const tile of footprintTiles(0, 0, { width: 2, height: 2 }, NORTH)) {
       expect(h.entities.at(tile.x, tile.y)).toBe(miner);
     }
@@ -251,13 +257,13 @@ describe('placing a building', () => {
 
   it('charges nothing and changes nothing when it refuses', () => {
     const h = harness();
-    const before = h.items.toJSON();
+    const before = h.inventory.toJSON();
 
     expect(h.system.place('chest', 20, 5, NORTH)).toBe('bad_terrain');
     expect(h.system.place('miner', 10, 10, NORTH)).toBe('no_resource');
     expect(h.system.place('sawmill', 10, 10, NORTH)).toBe('unknown_building');
 
-    expect(h.items.toJSON()).toEqual(before);
+    expect(h.inventory.toJSON()).toEqual(before);
     expect(h.entities.size).toBe(0);
     expect(h.entities.nextId).toBe(1);
   });
@@ -306,12 +312,12 @@ describe('removing a building', () => {
   it('refunds the cost and frees every tile of the footprint', () => {
     const h = harness();
     h.system.place('miner', 0, 0, NORTH);
-    expect(h.items.count('miner')).toBe(9);
+    expect(h.inventory.count('miner')).toBe(9);
 
     // Pointed at the far corner, not the anchor: any tile of the footprint is
     // the building, which is what the occupancy index is for.
     expect(h.system.remove(1, 1)).toBeNull();
-    expect(h.items.count('miner')).toBe(10);
+    expect(h.inventory.count('miner')).toBe(10);
 
     // Still standing until the cleanup phase ends the tick (C05).
     expect(h.entities.at(0, 0)).toBeDefined();
@@ -327,7 +333,7 @@ describe('removing a building', () => {
 
     expect(h.system.remove(10, 10)).toBeNull();
     expect(h.system.remove(10, 10)).toBe('nothing_there');
-    expect(h.items.count('chest')).toBe(10);
+    expect(h.inventory.count('chest')).toBe(10);
   });
 
   it('says so when there is nothing there', () => {
@@ -338,7 +344,7 @@ describe('removing a building', () => {
 
   it('place, remove, place again leaves the world where it started', () => {
     const h = harness();
-    const before = h.items.toJSON();
+    const before = h.inventory.toJSON();
 
     h.system.place('miner', 0, 0, EAST);
     h.system.remove(0, 0);
@@ -347,7 +353,7 @@ describe('removing a building', () => {
     h.entities.cleanup();
 
     expect(h.entities.size).toBe(1);
-    expect(h.items.toJSON()).toEqual({ ...before, miner: 9 });
+    expect(h.inventory.toJSON()).toEqual({ ...before, miner: 9 });
     const claimed = footprintTiles(0, 0, { width: 2, height: 2 }, EAST);
     for (const tile of claimed) expect(h.entities.at(tile.x, tile.y)).toBeDefined();
   });
@@ -361,16 +367,16 @@ describe('the command path', () => {
 
   it('builds and removes through the queue, and nowhere else', () => {
     const simulation = new Simulation({ world: testWorld() });
-    simulation.items.add('chest', 5);
+    simulation.inventory.add('chest', 5);
 
     run(simulation, [{ type: 'build', buildingId: 'chest', x: 10, y: 10, rotation: NORTH }]);
     expect(simulation.entities.at(10, 10)).toBeDefined();
-    expect(simulation.items.count('chest')).toBe(4);
+    expect(simulation.inventory.count('chest')).toBe(4);
     expect(simulation.commands.takeRejections()).toEqual([]);
 
     run(simulation, [{ type: 'remove', x: 10, y: 10 }]);
     expect(simulation.entities.at(10, 10)).toBeUndefined();
-    expect(simulation.items.count('chest')).toBe(5);
+    expect(simulation.inventory.count('chest')).toBe(5);
   });
 
   it('rejects with a reason the player can be shown', () => {
@@ -392,7 +398,7 @@ describe('the command path', () => {
 
   it('holds a removed buildings tiles until the tick that removed it ends', () => {
     const simulation = new Simulation({ world: testWorld() });
-    simulation.items.add('chest', 5);
+    simulation.inventory.add('chest', 5);
     run(simulation, [{ type: 'build', buildingId: 'chest', x: 10, y: 10, rotation: NORTH }]);
 
     // Both in one tick: the remove is applied in the command phase, the tiles
@@ -428,7 +434,7 @@ describe('adding a building', () => {
     const h = harness([PIPE, sawmill]);
 
     expect(h.system.place('sawmill', 8, 8, EAST)).toBeNull();
-    expect(h.items.count('sawmill')).toBe(8);
+    expect(h.inventory.count('sawmill')).toBe(8);
     // 3x2 turned east covers 2 wide by 3 tall, and the store learned that size
     // from the registry without anyone telling it about sawmills.
     for (const tile of footprintTiles(8, 8, { width: 3, height: 2 }, EAST)) {
@@ -508,9 +514,9 @@ describe('the playground world', () => {
     const world = new World(createPlaygroundGenerator());
     const buildings = new BuildingRegistry(BUILDINGS);
     const entities = new EntityStore({ footprintOf: buildings.footprintOf });
-    const items = new ItemCounts();
-    for (const definition of buildings.all()) items.add(definition.id, 1);
-    const system = new BuildSystem({ world, entities, buildings, items });
+    const inventory = new ItemCounts();
+    for (const definition of buildings.all()) inventory.add(definition.id, 1);
+    const system = new BuildSystem({ world, entities, buildings, inventory });
 
     expect(system.validate('chest', 14, 3, NORTH)).toBe('bad_terrain'); // the pond
     expect(system.validate('miner', 2, 12, NORTH)).toBeNull(); // the iron patch

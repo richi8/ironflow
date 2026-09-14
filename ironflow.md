@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C07 complete — Milestone A gate passed.** Next: C08 — items & inventories. |
+| **Status** | **C08 complete.** Milestone B in progress. Next: C09 — resource patches. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C08 — Items & inventories** |
+| **First action** | Chunk **C09 — Resource patches** |
 
 ---
 
@@ -2100,6 +2100,52 @@ src/styles/main.css
 stability, buffer-vs-slot semantics.
 
 **Out of scope.** Filters, logistics requests, trash slots.
+
+**Decisions taken while implementing this chunk.**
+
+- **Runtime id `0` is `NO_ITEM`; real items start at 1.** Belt slots and
+  inserter hands need a value meaning *empty* that fits in the same integer
+  array as an item id, and a falsy valid id is the bug family `NO_ENTITY`
+  exists to prevent (C05). One number is cheap.
+- **New content is numbered above every id the saved mapping mentions**, not
+  above the highest id still in use. A deleted item's number stays retired;
+  reusing it would turn every stack of it in every old save into its
+  replacement.
+- **Contents are authoritative; slot *layout* is not.** A `SlotInventory` stores
+  item→count and keeps items packed as tightly as their stack sizes allow, so
+  it can never be full while holding two part-stacks of the same item, and two
+  inventories holding the same things serialize identically however they got
+  there — which is this chunk's third acceptance criterion, and would be false
+  of a stored slot array. The cost is that the player cannot arrange their
+  slots; §2 puts filters, sorting and trash slots out of v1, so there is
+  nothing yet for an arrangement to be worth. The day a player *can* rearrange
+  slots, the arrangement becomes authoritative state and this reverses.
+- **Capacity is not serialized.** A slot count and a per-item cap are facts
+  about the chest definition or the recipe — content, which §10 keeps out of
+  saves. `fromJSON` is handed the capacity by whoever owns the inventory, and
+  refuses contents that do not fit it.
+- **`ItemDefinition.sprite` uses an `item:<id>` form** that the placeholder
+  atlas does not draw yet. Nothing puts an item on screen until C12/C13, which
+  is where the atlas learns the prefix (§11 grammar).
+
+**Deviations.**
+
+- **The player's bag is still C06's string-keyed `ItemCounts`.** `item-stack.ts`
+  predicted that C08 would move it onto the real `Inventory`; it cannot. A
+  build cost is paid in *building* items (`miner`, `chest`), and those become
+  registered items only when C16 gives them recipes — a `SlotInventory` keys on
+  numeric ids and asks the registry for a stack size, so it has nothing to say
+  about them. Registering building items now would be implementing C16's
+  content table early (§19 rule 4). **C16 is where the bag becomes a
+  `SlotInventory`**, and C10 is where it moves onto the player.
+- **`Simulation.items` is now the `ItemRegistry`**, parallel to
+  `Simulation.buildings`, and the player's bag moved to `Simulation.inventory`.
+  The registry is constructed in the simulation even though no system reads it
+  yet, so that a typo in `data/items.ts` fails on the first frame rather than
+  on the first ore (C09).
+- **Six of §15's thirteen items ship.** The four raw resources C09–C11 mine and
+  the two plates C15 smelts. An item nothing can produce or consume is a row no
+  test can tell is wrong; the rest arrive with C16's and C22's recipes.
 
 ---
 

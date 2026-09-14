@@ -484,7 +484,7 @@ describe('the build tool', () => {
 
   it('never touches simulation state: a held building still only enqueues', () => {
     const simulation = new Simulation({ world: new World(createCheckerboardGenerator()) });
-    simulation.items.add('chest', 1);
+    simulation.inventory.add('chest', 1);
     input.detach();
     input = new InputManager({
       canvas,
@@ -501,7 +501,7 @@ describe('the build tool', () => {
 
     simulation.tick();
     expect(simulation.entities.at(3, 8)).toBeDefined();
-    expect(simulation.items.count('chest')).toBe(0);
+    expect(simulation.inventory.count('chest')).toBe(0);
   });
 });
 

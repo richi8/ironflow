@@ -72,7 +72,7 @@ function bootstrap(): void {
    * this line goes with it.
    */
   for (const definition of simulation.buildings.all()) {
-    simulation.items.add(definition.id, 50);
+    simulation.inventory.add(definition.id, 50);
   }
 
   /**
@@ -196,7 +196,7 @@ function bootstrap(): void {
         build:
           held === null
             ? '— (1-9 or B to select, R rotates)'
-            : `${held} r${input.buildRotation} x${simulation.items.count(held)}`,
+            : `${held} r${input.buildRotation} x${simulation.inventory.count(held)}`,
         terrain: `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
         hover:
           hover === null

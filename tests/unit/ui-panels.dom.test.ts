@@ -38,7 +38,7 @@ let harness: Harness;
 
 function mountUi(stock = 10): Harness {
   const simulation = new Simulation({ world: new World(createPlaygroundGenerator()) });
-  for (const definition of simulation.buildings.all()) simulation.items.add(definition.id, stock);
+  for (const definition of simulation.buildings.all()) simulation.inventory.add(definition.id, stock);
 
   const game = new Game({ simulation, scheduler: new FakeScheduler(), render: () => {} });
   const cursor = new DetachedCursor();
@@ -207,7 +207,7 @@ describe('no panel rebuilds its subtree on update', () => {
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
 
     for (let i = 0; i < 200; i++) simulation.tick();
-    simulation.items.add('chest', 7);
+    simulation.inventory.add('chest', 7);
     controller.pump();
     runFrames(ui, 60);
 
