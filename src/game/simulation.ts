@@ -13,6 +13,7 @@ import { ProductionCounters } from './production.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
 import { HandSystem } from './systems/hand-system.js';
+import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
 import { PlayerSystem } from './systems/player-system.js';
 import type { Rotation } from './world/coordinates.js';
@@ -106,6 +107,12 @@ export class Simulation {
    */
   private readonly beltSystem: BeltSystem;
 
+  /**
+   * Inserters (C14), phase 6. It runs after the belts so that what an inserter
+   * finds beside it is a belt that has finished moving — see `inserter-system.ts`.
+   */
+  private readonly inserterSystem: InserterSystem;
+
   private readonly playerSystem: PlayerSystem;
 
   /**
@@ -174,6 +181,11 @@ export class Simulation {
       production: this.production,
     });
     this.beltSystem = new BeltSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+    });
+    this.inserterSystem = new InserterSystem({
       entities: this.entities,
       buildings: this.buildings,
       items: this.items,
@@ -307,7 +319,12 @@ export class Simulation {
     // property of the layout rather than of the order the belts were built in.
     this.beltSystem.tick();
 
-    // Phases 2, 4, 6 and 7 arrive with the chunks listed above.
+    // Phase 6 — inserters. Items cross from one building to the next (C14).
+    // After the belts, so an inserter reads a settled belt position and its
+    // throughput is a property of the layout rather than of array order.
+    this.inserterSystem.tick();
+
+    // Phases 2, 4 and 7 arrive with the chunks listed above.
 
     // Phase 8 — player. Movement and manual mining (C10). It runs after every
     // machine so that the world a step of walking is judged against is the one

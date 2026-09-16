@@ -6,6 +6,7 @@ import {
   HOTBAR_SLOTS,
   type Cursor,
 } from '../../src/game/game-controller.js';
+import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { EAST, NORTH } from '../../src/game/world/coordinates.js';
@@ -86,8 +87,12 @@ describe('GameController views', () => {
     expect(chest?.affordable).toBe(true);
     expect(chest?.cost).toEqual([{ itemId: 'chest', count: 1, held: 2 }]);
     expect(miner?.affordable).toBe(false);
-    // Content order is hotbar order, and only the first nine get a key.
-    expect(entries.map((entry) => entry.hotkey)).toEqual([1, 2, 3]);
+    // Content order is hotbar order, and only the first nine get a key. Taken
+    // from the content table rather than written out, so the building C15 adds
+    // does not fail an assertion about hotkeys.
+    expect(entries.map((entry) => entry.hotkey)).toEqual(
+      BUILDINGS.slice(0, HOTBAR_SLOTS).map((_definition, index) => index + 1),
+    );
   });
 
   it('returns null for a building view of something that is not there', () => {
@@ -186,10 +191,10 @@ describe('GameController build tool', () => {
     controller.selectSlot(1);
     expect(controller.getSelectedBuilding()).toBeNull();
 
-    // Slot 4 has no building behind it yet, and a slot past the hotbar is not
-    // a slot at all. Neither may throw; both empty the hand.
-    controller.selectSlot(3);
-    controller.selectSlot(4);
+    // The slot past the last building has nothing behind it, and a slot past
+    // the hotbar is not a slot at all. Neither may throw; both empty the hand.
+    controller.selectSlot(BUILDINGS.length);
+    controller.selectSlot(BUILDINGS.length + 1);
     expect(controller.getSelectedBuilding()).toBeNull();
     controller.selectSlot(HOTBAR_SLOTS + 1);
     expect(controller.getSelectedBuilding()).toBeNull();

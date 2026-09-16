@@ -65,7 +65,12 @@ function describeOre(world: World, x: number, y: number): string {
 const START_TILE = Object.freeze({ x: 6, y: 6 });
 
 /** What the player starts carrying. See the note at the assignment below. */
-const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({ miner: 5, belt: 100, chest: 10 });
+const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
+  miner: 5,
+  belt: 100,
+  inserter: 20,
+  chest: 10,
+});
 
 /** Fraction of the viewport the player may roam before the camera follows. */
 const FOLLOW_DEADZONE = 0.5;
@@ -120,7 +125,9 @@ function bootstrap(): void {
    * enough to cover the map without ever mining. A hundred belts is the odd
    * one out — belts are cheap, they are spent a dozen at a time, and running
    * out of them mid-drag is the one shortage that makes the game feel broken
-   * rather than constrained (C13). It is still a **balance number** and still temporary
+   * rather than constrained (C13). Twenty inserters is four per miner, which is
+   * enough to wire a first factory and not enough to skip thinking about where
+   * they go (C14). It is still a **balance number** and still temporary
    * in one respect — C16 makes buildings craftable, and a starting stock then
    * becomes a decision about the first five minutes rather than about whether
    * the game can be played at all.

@@ -105,7 +105,12 @@ function harness(extra: readonly BuildingDefinition[] = [PIPE], stock = 10): Har
 
 describe('BuildingRegistry', () => {
   it('keeps content order, which is menu and hotkey order', () => {
-    expect(new BuildingRegistry(BUILDINGS).all().map((d) => d.id)).toEqual(['miner', 'belt', 'chest']);
+    expect(new BuildingRegistry(BUILDINGS).all().map((d) => d.id)).toEqual([
+      'miner',
+      'belt',
+      'inserter',
+      'chest',
+    ]);
   });
 
   it('throws on an unknown id rather than handing back undefined', () => {

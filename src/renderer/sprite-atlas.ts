@@ -16,6 +16,7 @@
  * terrain:<name>                              terrain:grass
  * resource:<name>:<fullness 0-3>              resource:iron:2
  * belt:<rotation 0-3>[:<phase 0-7>]           belt:1:5
+ * inserter:<rotation 0-3>:<swing 0-16>[:h]    inserter:2:8:h
  * item:<item id>                              item:iron_ore
  * player:<idle|walk|work>:<facing 0-3>        player:walk:1
  * building:<category>:<CODE>[:<w>x<h>[:<rise>]]
@@ -157,6 +158,31 @@ export function beltSprite(rotation: Rotation, phase = 0): SpriteId {
   return `belt:${rotation}:${phase}`;
 }
 
+/**
+ * How many arm positions one inserter swing is quantised to. C14 task 7.
+ *
+ * The same arrangement as `BELT_CHEVRON_PHASES`, for the same reason: the
+ * position is baked into the sprite id rather than read from a clock behind
+ * `SpriteAtlas.draw`, so C29 can swap the implementation without the interface
+ * growing a notion of time. Unlike the belt's it is not a *cycle* — it is a
+ * sweep from one end to the other, so there are `STEPS + 1` positions and the
+ * value is clamped rather than wrapped. Seventeen positions across a swing of
+ * twelve ticks is finer than the simulation moves, which is exactly enough.
+ */
+export const INSERTER_SWING_STEPS = 16;
+
+/**
+ * The sprite for an inserter facing `rotation`, `swing` steps into its sweep.
+ *
+ * `swing` is `0` with the hand over the source and `INSERTER_SWING_STEPS` with
+ * it over the destination. `holding` is whether there is an item in it — one
+ * bit rather than the item's own id, because what it is holding is legible in
+ * the inspector and an inserter holds it for under a second.
+ */
+export function inserterSprite(rotation: Rotation, swing: number, holding: boolean): SpriteId {
+  return `inserter:${rotation}:${swing}${holding ? ':h' : ''}`;
+}
+
 /** The sprite for one item, riding a belt or sitting in a panel. */
 export function itemSprite(itemId: string): SpriteId {
   return `item:${itemId}`;
@@ -223,6 +249,12 @@ export type SpriteDescriptor =
       readonly rise: number;
     }
   | { readonly kind: 'belt'; readonly rotation: Rotation; readonly phase: number }
+  | {
+      readonly kind: 'inserter';
+      readonly rotation: Rotation;
+      readonly swing: number;
+      readonly holding: boolean;
+    }
   | { readonly kind: 'item'; readonly fill: string; readonly flat: boolean }
   | { readonly kind: 'player'; readonly activity: PlayerActivity; readonly facing: Rotation }
   | { readonly kind: 'missing' };
@@ -316,6 +348,25 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
       kind: 'belt' as const,
       rotation: Number(text) as Rotation,
       phase: Number(phaseText) % BELT_CHEVRON_PHASES,
+    });
+  }
+
+  if (namespace === 'inserter' && (parts.length === 3 || parts.length === 4)) {
+    // Matched as text for the reason the belt rotation is: `Number('')` is 0,
+    // so `inserter::` would otherwise parse as a north-facing arm at rest.
+    const text = parts[1] ?? '';
+    if (!/^[0-3]$/.test(text)) return MISSING;
+    const swingText = parts[2] ?? '';
+    if (!/^\d+$/.test(swingText)) return MISSING;
+    // Clamped rather than wrapped: a swing is a sweep with two ends, and an
+    // arm that wrapped past the destination would snap back to the source.
+    const holding = parts[3];
+    if (holding !== undefined && holding !== 'h') return MISSING;
+    return Object.freeze({
+      kind: 'inserter' as const,
+      rotation: Number(text) as Rotation,
+      swing: Math.min(Number(swingText), INSERTER_SWING_STEPS),
+      holding: holding === 'h',
     });
   }
 
@@ -454,6 +505,9 @@ export class ProceduralAtlas implements SpriteAtlas {
         return;
       case 'belt':
         drawBelt(ctx, sx, sy, zoom, sprite.rotation, sprite.phase);
+        return;
+      case 'inserter':
+        drawInserter(ctx, sx, sy, zoom, sprite.rotation, sprite.swing, sprite.holding);
         return;
       case 'item':
         drawItem(ctx, sx, sy, zoom, sprite.fill, sprite.flat);
@@ -647,6 +701,83 @@ function drawBelt(
     ctx.lineTo(sx + fx * along + gx * CHEVRON_HALF_WIDTH, sy + fy * along + gy * CHEVRON_HALF_WIDTH);
     ctx.stroke();
   }
+}
+
+/** The inserter's base, as a fraction of a tile and in rise units. */
+const INSERTER_BASE_SIZE = 0.46;
+const INSERTER_BASE_RISE = 0.2;
+
+/** How far the hand reaches from the base, in tiles, at each end of the sweep. */
+const INSERTER_ARM_REACH = 0.52;
+
+/** How high the arm arcs at the middle of the sweep, in rise units. */
+const INSERTER_ARM_LIFT = 0.5;
+
+/** The hand, and the item in it, as a fraction of a tile. */
+const INSERTER_HAND_SIZE = 0.2;
+
+/**
+ * An inserter: a squat base with one arm sweeping over it.
+ *
+ * The sweep is an **arc**, not a slide. Interpolating the hand's position
+ * linearly from the source tile to the destination tile would take it through
+ * the base at the halfway point, where the two offsets cancel — so the arm
+ * would vanish into itself every cycle. Sweeping through a half turn instead
+ * (`cos` along the facing axis, `sin` upward) puts the hand over the source at
+ * one end, over the destination at the other, and raised above the machine in
+ * between, which is both what an inserter does and the only shape that reads
+ * at a glance in isometric.
+ *
+ * The rotation is the *facing*, which is the destination side: `swing` 0 is
+ * therefore behind the base and `INSERTER_SWING_STEPS` is in front of it.
+ */
+function drawInserter(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  rotation: Rotation,
+  swing: number,
+  holding: boolean,
+): void {
+  const fill = color('blue');
+  drawPrism(ctx, sx, sy, zoom, {
+    fill,
+    code: '',
+    width: INSERTER_BASE_SIZE,
+    height: INSERTER_BASE_SIZE,
+    rise: INSERTER_BASE_RISE,
+  });
+
+  const forward = DIRECTION_OFFSETS[rotation];
+  if (forward === undefined) return;
+  const fx = (forward.x * EAST_STEP.x + forward.y * SOUTH_STEP.x) * zoom;
+  const fy = (forward.x * EAST_STEP.y + forward.y * SOUTH_STEP.y) * zoom;
+
+  // π at the source end, 0 at the destination end.
+  const angle = Math.PI * (1 - swing / INSERTER_SWING_STEPS);
+  const along = Math.cos(angle) * INSERTER_ARM_REACH;
+  const shoulderY = sy - INSERTER_BASE_RISE * RISE_UNIT * zoom;
+  const handX = sx + fx * along;
+  const handY = shoulderY + fy * along - Math.sin(angle) * INSERTER_ARM_LIFT * RISE_UNIT * zoom;
+
+  ctx.beginPath();
+  ctx.moveTo(sx, shoulderY);
+  ctx.lineTo(handX, handY);
+  ctx.strokeStyle = color(holding ? 'accent' : 'blue-high');
+  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // The hand itself, so the end of the arm is a thing rather than a stop. It
+  // takes the cargo colour when full, which is what makes a working inserter
+  // readable from across the factory without reading the item.
+  groundFacePath(ctx, handX, handY, INSERTER_HAND_SIZE, INSERTER_HAND_SIZE, zoom);
+  ctx.fillStyle = shade(color(holding ? 'accent-high' : 'blue-high'), TOP_TONE);
+  ctx.fill();
+  ctx.strokeStyle = shade(fill, OUTLINE_TONE);
+  ctx.lineWidth = 1;
+  ctx.stroke();
 }
 
 /** How much of a tile one item covers. Four of these fit along a tile (§9). */

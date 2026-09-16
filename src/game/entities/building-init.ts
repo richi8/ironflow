@@ -6,12 +6,13 @@
  * Neither of them knows that a miner has a progress counter, and neither
  * should: one is storage and the other is placement rules. This is the third
  * job — turning a definition into the initial state of one instance — and it
- * is the file C13's belts and C15's furnaces add their own line to.
+ * is the file C13's belts, C14's inserters and C15's furnaces add their own
+ * line to.
  *
  * The branch is on **content**, never on an id or an entity type:
- * `definition.mining` is what makes something a miner, `definition.belt` a belt
- * and `definition.storage` a container, so the day C21 adds an electric miner,
- * nothing here changes. That is the same rule `build-system.ts`
+ * `definition.mining` is what makes something a miner, `definition.belt` a belt,
+ * `definition.inserter` an inserter and `definition.storage` a container, so
+ * the day C21 adds an electric miner, nothing here changes. That is the same rule `build-system.ts`
  * states in its header, kept true by giving the type-specific part its own
  * place to live rather than by care.
  */
@@ -22,6 +23,7 @@ import type { Rotation } from '../world/coordinates.js';
 import { newBelt } from './belt-entity.js';
 import { newChest } from './chest-entity.js';
 import type { EntityInit } from './entity.js';
+import { newInserter } from './inserter-entity.js';
 import { newMiner } from './miner-entity.js';
 
 /**
@@ -39,6 +41,7 @@ export function initialBuildingState(
 ): EntityInit {
   if (definition.mining !== undefined) return newMiner(x, y, rotation);
   if (definition.belt !== undefined) return newBelt(x, y, rotation);
+  if (definition.inserter !== undefined) return newInserter(x, y, rotation);
   if (definition.storage !== undefined) return newChest(x, y, rotation);
   return { type: definition.entityType, x, y, rotation };
 }

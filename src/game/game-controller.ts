@@ -39,9 +39,10 @@
  */
 
 import type { Command } from './commands/command.js';
-import type { EntityId } from './entities/entity.js';
+import type { Entity, EntityId } from './entities/entity.js';
 import { footprintExtent } from './entities/entity.js';
-import { machineStatusName } from './entities/machine-status.js';
+import { asInserter, inserterCycleProgress } from './entities/inserter-entity.js';
+import { machineStatusName, statusOf } from './entities/machine-status.js';
 import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
@@ -388,14 +389,16 @@ export class GameController {
       id: entity.id,
       buildingId: definition.id,
       name: definition.name,
-      // A building with no system behind it — a chest — is honestly idle. A
-      // miner says which of C11's three things it is doing, which is §13's
-      // "status must always explain a stall" becoming true for the first time.
-      status: miner === null ? ('idle' as const) : machineStatusName(miner.status),
+      // A building with no system behind it — a chest — is honestly idle.
+      // Everything that can stall stores why, and `statusOf` is the one place
+      // that knows the field is optional — which is §13's "status must always
+      // explain a stall" holding for every machine rather than for the miner
+      // the sentence was first written about.
+      status: machineStatusName(statusOf(entity)),
       // Derived from the tick count every frame, never stored (§10). Null,
       // not zero, for a building that is not partway through anything — see
       // the note in `views/building-view.ts`.
-      progress: miner === null || mining === null ? null : miner.progressTicks / mining.ticksPerItem,
+      progress: this.progressOf(entity),
       inputs: EMPTY_STACKS,
       outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
       // Measured for the selected machine only (C12 task 2). A machine asked
@@ -637,6 +640,33 @@ export class GameController {
       }
     }
     return parts.join('|');
+  }
+
+  /**
+   * How far through its current piece of work a machine is, `0..1`.
+   *
+   * Null — not zero — for a building with nothing to be partway through, which
+   * is what lets the inspector leave the bar out rather than draw a dead one
+   * under every crate in the factory (see `views/building-view.ts`).
+   *
+   * A miner counts ticks toward the next item; an inserter counts ticks
+   * through one swing cycle (C14). Both are progress in the sense the bar
+   * means: something is happening and this is how much of it is left.
+   */
+  private progressOf(entity: Entity): number | null {
+    const miner = asMiner(entity);
+    if (miner !== null) {
+      const mining = this.simulation.buildings.miningFor(entity.type);
+      return mining === null ? null : miner.progressTicks / mining.ticksPerItem;
+    }
+
+    const inserter = asInserter(entity);
+    if (inserter !== null) {
+      const config = this.simulation.buildings.inserterFor(entity.type);
+      return config === null ? null : inserterCycleProgress(inserter, config);
+    }
+
+    return null;
   }
 
   /**

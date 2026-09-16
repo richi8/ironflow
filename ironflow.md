@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C13 complete.** Milestone B in progress. Next: C14 — inserters. |
+| **Status** | **C14 complete.** Milestone B in progress. Next: C15 — furnace and the first vertical slice. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C14 — Inserters** |
+| **First action** | Chunk **C15 — Furnace and the first vertical slice** |
 
 ---
 
@@ -2963,6 +2963,148 @@ two lanes (never, in v1).
 neighbour-removed-mid-swing safety; rate verification.
 
 **Out of scope.** Filter inserters, stack inserters, long inserters.
+
+**Decisions taken while implementing this chunk.**
+
+- **The state machine has a fifth state, `Returning`.** Task 1's list is four
+  states and an arm that teleports home: after the drop the hand is over the
+  *destination*, and something has to bring it back before the next pickup.
+  Folding the return into `Idle` would give `Idle` a duration and a hidden
+  condition; leaving it out altogether would draw an inserter whose arm snaps
+  home instantly, which reads as a machine running at twice its stated rate.
+
+- **The four timed stages sum to `ticksPerItem`, and `Idle` has none.** That is
+  what makes 1.0 items/s exact rather than approximate: `Returning` completing
+  begins the next `Pickup` in the same tick, so a saturated inserter never
+  passes through `Idle` and delivers one item every thirty ticks for ever. The
+  split is a tenth of the cycle for the grab and a tenth for the release, the
+  rest divided between the two swings with the odd tick going to the carry —
+  all of it computed once at registry-build time (§6 R3), so the stages cannot
+  drift apart from the cycle they divide however C20 retunes the rate. The
+  registry refuses a rate under four ticks a cycle, because four stages need
+  four ticks.
+
+- **The item is taken at the end of `Pickup` and only ever put down in the
+  destination.** Between those two moments it exists nowhere else; `heldItem`
+  is the only record of it. This is what makes task 3's "never assume a
+  neighbour still exists" a property rather than a habit — a vanished source
+  cannot un-take an item that was never taken.
+
+- **A destination removed mid-swing leaves the inserter holding, not
+  dropping.** Task 6 keeps the *ordinary* stall empty-handed by checking the
+  destination has room at pickup time, which is acceptance criterion 2. What it
+  cannot prevent is the chest being demolished while the arm is already across.
+  The item is out of the belt by then, and the three possible answers are
+  destroy it, put it on the ground, or hold it. Nothing in IronFlow deletes an
+  item the player mined and there is no such thing as an item lying on the
+  ground (§2), so it holds: `Drop` does not complete, the inserter reports
+  `output_full`, and the moment anything with room appears in front the item
+  goes in. It is not hostage either — the hand shows in the inspector and the
+  player can take it back (see the deviation on `HandSystem` below).
+
+- **Contention is not a rule written anywhere; it falls out of two decisions.**
+  Inserters are walked in the store's id-ordered array (§6 R4) and the item
+  leaves the source at the *instant* the pickup completes, so the lower id
+  takes it and the higher one, reaching the same tick, finds the belt empty and
+  parks. No reservation, no priority table, nothing extra to keep in step
+  across a save — which is why the test asserts the answer flips when the two
+  inserters are built in the other order. §6 R6 is about ids, not geometry.
+
+- **A belt offers its front item and a container its lowest item id.**
+  `items[0]` is the item nearest the output end by `belt-entity.ts`'s
+  invariant, and a chest's slots are kept sorted — so "whatever is first" never
+  depends on the order things were put in (§6 R4).
+
+- **`MachineStatus` gained a `statusOf(entity)` reader**, and the inspector's
+  status and progress are no longer a branch on "is this a miner". C12 wrote
+  `status: miner === null ? 'idle' : …`, which was honest with one kind of
+  machine in the game and would have become a branch per chunk. §13's "status
+  must always explain a stall" is now true for every machine that stores one,
+  and C15 and C21 add theirs without touching the controller.
+
+- **The arm sweeps through an arc, not a slide.** Interpolating the hand's
+  position linearly from the source tile to the destination tile takes it
+  through the base at the halfway point, where the two offsets cancel and the
+  arm vanishes into itself every cycle. Sweeping through a half turn — `cos`
+  along the facing axis, `sin` upward — puts the hand over the source at one
+  end, over the destination at the other and raised above the machine in
+  between, which is both what an inserter does and the only shape that reads in
+  isometric.
+
+- **Content order in `data/buildings.ts` follows §15's building table**, so the
+  inserter sits between the belt and the chest. That order is also menu and
+  hotkey order, so the chest moved from key 3 to key 4. Four tests had the old
+  count written into them by hand; they now read it from the content table,
+  which is what C06's "adding a building requires zero code changes elsewhere"
+  was supposed to mean for tests too.
+
+**Deviations.**
+
+- **Task 1's four states are five.** See the first decision above.
+
+- **Task 2's `speedTier` is not stored**, for exactly the reason C13 gave for
+  the belt's: the rate is content on `BuildingDefinition.inserter`, so C22's
+  fast inserter is a table entry and C20's balance pass does not have to
+  migrate every inserter in every save.
+
+- **`heldItem` is an `ItemId` with `NO_ITEM` for an empty hand**, not a
+  nullable field. C05 refuses `undefined` in an entity because it does not
+  survive `JSON.stringify`, and `0` already means "no item" everywhere else
+  (`item-registry.ts`).
+
+- **Acceptance 3's "returns to idle and drops nothing" is read literally for a
+  removed *source* and as "drops nothing" for a removed *destination*.** The
+  first returns to idle empty-handed, which is exactly the sentence; the second
+  holds, for the reason set out above. Both are tested, and neither throws.
+
+- **`HandSystem.outputsOf` gained an inserter's hand.** C12 built it for a
+  miner's buffer and C13 added a chest's contents; an inserter holding one item
+  it cannot put down is the same problem one item wide, and a `TAKE` button
+  beside it is the affordance that makes task 6's worry about a hostage item
+  moot. `insert` still refuses everything — C15's furnace is still the first
+  machine with somewhere to put an ingredient.
+
+- **Task 7's "render-side interpolation of `stateTicks`" is quantised to
+  seventeen arm positions baked into the sprite id**, the same arrangement C13
+  used for the chevrons and for the same reason: `SpriteAtlas.draw` takes no
+  time, and giving it some would put a clock behind the interface whose whole
+  purpose is that C29 can swap the implementation. It interpolates per *tick*
+  rather than per frame — at thirty ticks a second across twelve ticks of
+  swing, that is finer than the eye resolves, and extrapolating by the frame's
+  `alpha` would make a stalled arm jitter forward and snap back, which is C13's
+  reasoning about blocked belt items applied to the one part of an inserter a
+  player watches.
+
+- **The sprite id carries one bit for "holding" rather than the item's id.**
+  The hand takes the cargo colour when full, so a working inserter reads from
+  across the factory; *what* it is holding is in the inspector, and it holds it
+  for under a second. Threading the item registry into `describeEntities` to
+  colour a diamond that size was not worth the parameter.
+
+- **The player starts with 20 inserters** as well as 5 miners, 100 belts and 10
+  chests. Four per miner: enough to wire a first factory, not enough to skip
+  thinking about where they go. A **balance number** for C20.
+
+**Noticed, not fixed.**
+
+- **Three files now each carry their own copy of "how an item gets into a
+  chest"** — `belt-system.ts`, `hand-system.ts` and `inserter-system.ts` all
+  build a `SlotInventory` over an entity's `contents`. It is about six lines
+  each and §19 rule 5 forbids refactoring an unrelated system inside a chunk,
+  but three is the number at which it stops being a coincidence. C15 has to
+  touch all three to give the furnace an input buffer, which makes C15 the
+  chunk that should unify them into a single "ports" module.
+- An inserter draws in `RenderLayer.InserterArm`, so its arm goes over
+  everything in its own depth row — including an item on the belt it is
+  reaching into. It is still overdrawn by anything standing in the row *in
+  front* of it, which for a belt (flat) is invisible and for a future 2x2
+  machine will clip the last few pixels of the arm. C29's real art is where
+  that gets a proper answer; drawing the arm as its own depth-sorted drawable
+  would be the fix.
+- `InserterSystem` asks `sourceItem` at the start of a cycle and `grab` at the
+  end of the pickup, which walks the source lookup twice per item. It is two
+  map lookups every thirty ticks per inserter and nowhere near §12's budget;
+  C28 is where it would show up if it ever mattered.
 
 ---
 

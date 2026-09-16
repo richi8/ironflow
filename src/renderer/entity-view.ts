@@ -16,10 +16,15 @@
 
 import { BELT_TILE_UNITS, type BeltEntity } from '../game/entities/belt-entity.js';
 import type { EntityStore } from '../game/entities/entity-store.js';
-import { NO_ENTITY, footprintExtent } from '../game/entities/entity.js';
+import { NO_ENTITY, footprintExtent, type Entity } from '../game/entities/entity.js';
 import { EntityType } from '../game/entities/entity-types.js';
-import type { BuildingDefinition, BuildingRegistry } from '../game/registries/building-registry.js';
-import type { ItemRegistry } from '../game/registries/item-registry.js';
+import { asInserter, inserterArmPosition, type InserterEntity } from '../game/entities/inserter-entity.js';
+import type {
+  BuildingDefinition,
+  BuildingRegistry,
+  InserterConfig,
+} from '../game/registries/building-registry.js';
+import { NO_ITEM, type ItemRegistry } from '../game/registries/item-registry.js';
 import { DIRECTION_OFFSETS, type Rotation } from '../game/world/coordinates.js';
 
 import type { PlayerView } from '../game/views/player-view.js';
@@ -27,7 +32,9 @@ import type { PlayerView } from '../game/views/player-view.js';
 import { RenderLayer, type PlayerRenderView, type RenderEntity } from './render-state.js';
 import {
   BELT_CHEVRON_PHASES,
+  INSERTER_SWING_STEPS,
   beltSprite,
+  inserterSprite,
   itemSprite,
   playerSprite,
   type SpriteId,
@@ -43,7 +50,12 @@ import {
  * (§19 rule 17), which is the same test `building-init.ts` makes.
  */
 function layerFor(definition: BuildingDefinition): RenderLayer {
-  return definition.belt === undefined ? RenderLayer.Building : RenderLayer.Belt;
+  if (definition.belt !== undefined) return RenderLayer.Belt;
+  // An inserter's arm reaches over the tiles either side of it, so it draws
+  // after everything else in its own depth row — including an item sitting on
+  // the belt it is reaching into.
+  if (definition.inserter !== undefined) return RenderLayer.InserterArm;
+  return RenderLayer.Building;
 }
 
 /**
@@ -57,7 +69,27 @@ function layerFor(definition: BuildingDefinition): RenderLayer {
  * a sprite id (§4).
  */
 export function buildingSprite(definition: BuildingDefinition, rotation: Rotation, phase = 0): SpriteId {
-  return definition.belt === undefined ? (definition.sprite as SpriteId) : beltSprite(rotation, phase);
+  if (definition.belt !== undefined) return beltSprite(rotation, phase);
+  // An inserter at rest, which is what a ghost is: the arm is over the source
+  // side and the hand is empty. A *placed* one is drawn from its own state —
+  // see `inserterSpriteFor`, which this is deliberately not, because a ghost
+  // has a rotation and no cycle to be partway through.
+  if (definition.inserter !== undefined) return inserterSprite(rotation, 0, false);
+  return definition.sprite as SpriteId;
+}
+
+/**
+ * Which arm position a placed inserter is drawn in. C14 task 7.
+ *
+ * The interpolation is render-side, as the task asks, but the *quantity* it
+ * interpolates is simulation state: `inserterArmPosition` turns a state and a
+ * tick count into "how far across, 0 to 1", and this is the step that turns
+ * that into one of the atlas's seventeen arm positions. Rounded rather than
+ * floored so the two ends of the sweep are reached, and reached symmetrically.
+ */
+function inserterSpriteFor(inserter: InserterEntity, config: InserterConfig): SpriteId {
+  const swing = Math.round(inserterArmPosition(inserter, config) * INSERTER_SWING_STEPS);
+  return inserterSprite(inserter.rotation, swing, inserter.heldItem !== NO_ITEM);
 }
 
 /**
@@ -72,6 +104,26 @@ export function buildingSprite(definition: BuildingDefinition, rotation: Rotatio
 export function beltPhase(tilesPerSecond: number, seconds: number): number {
   const step = Math.floor(seconds * tilesPerSecond * BELT_CHEVRON_PHASES);
   return ((step % BELT_CHEVRON_PHASES) + BELT_CHEVRON_PHASES) % BELT_CHEVRON_PHASES;
+}
+
+/**
+ * What one placed entity looks like right now.
+ *
+ * Every building but the inserter is a picture of its *definition* and its
+ * rotation — which is what `buildingSprite` answers, and why the ghost can use
+ * the same function. An inserter is the first whose appearance depends on what
+ * it is doing, so it is the one that has to be handed the entity.
+ */
+function spriteFor(
+  entity: Entity,
+  definition: BuildingDefinition,
+  buildings: BuildingRegistry,
+  phase: number,
+): SpriteId {
+  const inserter = definition.inserter === undefined ? null : asInserter(entity);
+  const config = inserter === null ? null : buildings.inserterFor(entity.type);
+  if (inserter !== null && config !== null) return inserterSpriteFor(inserter, config);
+  return buildingSprite(definition, entity.rotation, phase);
 }
 
 /**
@@ -100,7 +152,7 @@ export function describeEntities(
       y: entity.y,
       width: extent.width,
       height: extent.height,
-      sprite: buildingSprite(definition, entity.rotation, phase),
+      sprite: spriteFor(entity, definition, buildings, phase),
       layer: layerFor(definition),
     });
   });

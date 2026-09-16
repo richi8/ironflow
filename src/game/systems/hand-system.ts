@@ -34,6 +34,11 @@
  * and nothing here changes. C13 adds the second kind of thing a player can
  * take from: anything with `storage` on its definition, which is a chest.
  *
+ * C14 adds the third: an inserter's hand, which holds at most one item and is
+ * takeable for the reason a chest is — a container the player can watch fill
+ * and never empty is not a container, and an inserter stuck holding one item
+ * with its destination demolished is the same problem one item wide.
+ *
  * Nothing has an *input* buffer yet, so `insert` still refuses everything.
  * That refusal is the permanent answer for a miner; C15's furnace is the first
  * machine with somewhere to put an ingredient, and it is the chunk that fills
@@ -44,13 +49,14 @@
 import { asChest } from '../entities/chest-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { forEachFootprintTile, type Entity } from '../entities/entity.js';
+import { asInserter, inserterHolding } from '../entities/inserter-entity.js';
 import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
 import { SlotInventory } from '../items/inventory.js';
 import type { ItemStack } from '../items/item-stack.js';
 import { MINE_RANGE_TILES, type PlayerState } from '../player/player-state.js';
 import { BuildingRegistry } from '../registries/building-registry.js';
-import type { ItemRegistry } from '../registries/item-registry.js';
+import { NO_ITEM, type ItemRegistry } from '../registries/item-registry.js';
 
 export interface HandSystemOptions {
   readonly entities: EntityStore;
@@ -124,6 +130,15 @@ export class HandSystem {
       return stacks;
     }
 
+    // An inserter's hand (C14). It is an output in the only sense that matters
+    // here — the player can see what is in it and take it back — and that is
+    // the answer to task 6's worry about an item held hostage by an inserter
+    // whose destination was demolished mid-swing.
+    const inserter = asInserter(entity);
+    if (inserter !== null && inserterHolding(inserter) && this.items.isItemId(inserter.heldItem)) {
+      return [{ itemId: this.items.byId(inserter.heldItem).id, count: 1 }];
+    }
+
     return NO_STACKS;
   }
 
@@ -152,6 +167,15 @@ export class HandSystem {
   private removeFrom(entity: Entity, itemId: string, amount: number): number {
     const miner = asMiner(entity);
     if (miner !== null) return takeMinerOutput(miner, amount);
+
+    // Taking the item out of an inserter's hand leaves it mid-swing with
+    // nothing to deliver, which `InserterSystem` treats as a completed drop.
+    const inserter = asInserter(entity);
+    if (inserter !== null) {
+      if (!inserterHolding(inserter) || amount < 1) return 0;
+      inserter.heldItem = NO_ITEM;
+      return 1;
+    }
 
     const chest = asChest(entity);
     const storage = this.buildings.storageFor(entity.type);

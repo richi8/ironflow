@@ -15,10 +15,16 @@
  * that make them do something.
  *
  * C13 adds the third, the belt, and gives the chest the insides §15 always
- * said it had. Both are one field each — `belt` and `storage` — because what
- * a building *is* is decided by the content it carries and never by its id
- * (§19 rule 17): the whole of "this thing moves items" is `tilesPerSecond`,
- * and the whole of "this thing holds items" is `slots`.
+ * said it had. C14 adds the fourth, the inserter. All of them are one field
+ * each — `belt`, `storage`, `inserter` — because what a building *is* is
+ * decided by the content it carries and never by its id (§19 rule 17): the
+ * whole of "this thing moves items along itself" is `tilesPerSecond`, the
+ * whole of "this thing holds items" is `slots`, and the whole of "this thing
+ * hands items to its neighbour" is `itemsPerSecond`.
+ *
+ * The order is §15's building table order, and it is also menu and hotkey
+ * order — which is why the inserter goes between the belt and the chest
+ * rather than on the end.
  */
 
 import { EntityType } from '../entities/entity-types.js';
@@ -73,6 +79,27 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     // The rotation is appended by the renderer, which is the only layer
     // allowed to know that `belt:1` names a picture — see `entity-view.ts`.
     sprite: 'belt',
+  },
+  {
+    id: 'inserter',
+    name: 'Inserter',
+    entityType: EntityType.Inserter,
+    category: 'logistics',
+    size: { width: 1, height: 1 },
+    // Four, and like the belt the rotation is the mechanic: an inserter takes
+    // from the tile behind it and puts into the tile in front (C14).
+    rotationCount: 4,
+    buildCost: [{ itemId: 'inserter', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §15's anchor: 1.0 items/s, which is 30 ticks per cycle exactly.
+    // Deliberately an eighth of a tier-1 belt, so saturating one takes eight
+    // inserters — the asymmetry §15 calls "where layout decisions live".
+    // A **balance number** for C20's pass.
+    inserter: { itemsPerSecond: 1.0 },
+    // The arm's swing and whether the hand is full are appended by the
+    // renderer, which is the only layer allowed to know what that looks like
+    // — see `entity-view.ts`, exactly as with the belt above.
+    sprite: 'inserter',
   },
   {
     id: 'chest',

@@ -13,9 +13,11 @@ import {
 import { TILE_TYPE_COUNT, TileType, tileProperties } from '../../src/game/world/tile.js';
 import { PALETTE, color, shade } from '../../src/renderer/palette.js';
 import {
+  INSERTER_SWING_STEPS,
   RESOURCE_SPRITES,
   TERRAIN_SPRITES,
   describeSprite,
+  inserterSprite,
   playerSprite,
   resourceSprite,
   terrainSprite,
@@ -135,6 +137,37 @@ describe('sprite ids', () => {
     // because a counter ran past eight would be the worst kind of bug.
     expect(describeSprite('belt:1:11')).toEqual({ kind: 'belt', rotation: 1, phase: 3 });
     expect(describeSprite('belt:1:x')).toEqual({ kind: 'missing' });
+  });
+
+  it('resolves an inserter arm at each facing, with and without an item in it', () => {
+    for (const rotation of [0, 1, 2, 3] as const) {
+      expect(describeSprite(inserterSprite(rotation, 0, false))).toEqual({
+        kind: 'inserter',
+        rotation,
+        swing: 0,
+        holding: false,
+      });
+      expect(describeSprite(inserterSprite(rotation, INSERTER_SWING_STEPS, true))).toEqual({
+        kind: 'inserter',
+        rotation,
+        swing: INSERTER_SWING_STEPS,
+        holding: true,
+      });
+    }
+  });
+
+  it('clamps a swing past the far end rather than wrapping it back to the near one', () => {
+    // Unlike the belt's phase, a swing is a sweep with two ends. An arm that
+    // wrapped would snap from the destination back to the source mid-drop,
+    // which reads as an inserter that dropped the item on the floor (C14).
+    expect(describeSprite(`inserter:1:${INSERTER_SWING_STEPS + 40}`)).toEqual({
+      kind: 'inserter',
+      rotation: 1,
+      swing: INSERTER_SWING_STEPS,
+      holding: false,
+    });
+    expect(describeSprite('inserter:1:x')).toEqual({ kind: 'missing' });
+    expect(describeSprite('inserter:1:4:z')).toEqual({ kind: 'missing' });
   });
 
   it('draws a marker rather than throwing on an id it cannot parse', () => {

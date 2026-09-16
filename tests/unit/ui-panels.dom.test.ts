@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { DetachedCursor, GameController } from '../../src/game/game-controller.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
@@ -36,7 +37,10 @@ interface Harness {
 
 let harness: Harness;
 
-function mountUi(stock = 10): Harness {
+/** How many of each building the harness hands the player. */
+const STOCK = 10;
+
+function mountUi(stock = STOCK): Harness {
   const simulation = new Simulation({ world: new World(createPlaygroundGenerator()) });
   for (const definition of simulation.buildings.all()) simulation.inventory.add(definition.id, stock);
 
@@ -106,10 +110,12 @@ describe('mounting', () => {
     // Nine slots whatever the content table holds: a slot with nothing behind
     // it is an empty tile that fills itself when a building is added (C06).
     expect(root.querySelectorAll('.if-slot').length).toBe(9);
-    // Three buildings today, and one group each, because a category with no
-    // building in it gets no heading.
-    expect(root.querySelectorAll('.if-build-row').length).toBe(3);
-    expect(root.querySelectorAll('.if-build-menu__group').length).toBe(3);
+    // One row per building and one group per category that has one in it,
+    // both read from the content table: a chunk that adds a building must not
+    // have to come back and edit a number here.
+    const categories = new Set(BUILDINGS.map((definition) => definition.category));
+    expect(root.querySelectorAll('.if-build-row').length).toBe(BUILDINGS.length);
+    expect(root.querySelectorAll('.if-build-menu__group').length).toBe(categories.size);
   });
 
   it('starts with the build menu closed and the hand empty', () => {
@@ -134,10 +140,11 @@ describe('the toolbar drives the game through commands only', () => {
   it('selects a building, places it and removes it', () => {
     const { root, controller, simulation, cursor } = harness;
 
-    query<HTMLButtonElement>(root, '.if-slot[data-slot="3"]').click();
+    const slot = BUILDINGS.findIndex((definition) => definition.id === 'chest') + 1;
+    query<HTMLButtonElement>(root, `.if-slot[data-slot="${slot}"]`).click();
     expect(controller.getSelectedBuilding()).toBe('chest');
     controller.pump();
-    expect(query<HTMLElement>(root, '.if-slot[data-slot="3"]').classList.contains('is-selected')).toBe(true);
+    expect(query<HTMLElement>(root, `.if-slot[data-slot="${slot}"]`).classList.contains('is-selected')).toBe(true);
 
     // The click changed the selection and nothing else: the world is untouched
     // until a command runs (§19 rule 8).
@@ -231,7 +238,8 @@ describe('no panel rebuilds its subtree on update', () => {
     // what it forbids is the *elements* around them being thrown away, and
     // none were.
     expect(records.length).toBeGreaterThan(0);
-    expect(tileValue(root, 'ITEMS')).toBe('37');
+    // `stock` of every building, plus the seven chests added above.
+    expect(tileValue(root, 'ITEMS')).toBe(String(STOCK * BUILDINGS.length + 7));
   });
 });
 

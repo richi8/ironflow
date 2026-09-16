@@ -123,6 +123,42 @@ export interface BeltConfig {
 }
 
 /**
+ * How fast an inserter moves items, as content authors it. C14 task 2.
+ *
+ * Its presence is what makes a building an inserter — `building-init.ts`
+ * branches on this field and on nothing else — so C22's fast inserter is a
+ * table entry rather than a code change. Authored in items per second because
+ * that is the unit §15's anchor table is written in.
+ */
+export interface InserterProperties {
+  /** §15's anchors: 1.0 standard, 2.5 fast. Deliberately below belt speed. */
+  readonly itemsPerSecond: number;
+}
+
+/**
+ * The same, as the four stage lengths the state machine actually counts.
+ *
+ * The four add up to `ticksPerItem` exactly, which is what makes the rate
+ * exact: a saturated inserter never rests in `Idle`, so it delivers one item
+ * every `ticksPerItem` ticks for ever. Grabbing and releasing are quick and
+ * the two swings are the bulk — a tenth of the cycle at each end, the rest
+ * split evenly — so at 1.0 items/s the arm spends 24 of its 30 ticks moving,
+ * which is what an inserter looks like.
+ */
+export interface InserterConfig {
+  /** Exactly `Math.round(TPS / itemsPerSecond)`. At least 4 — see `validate`. */
+  readonly ticksPerItem: number;
+  /** Reaching into the source. The item is taken when this stage completes. */
+  readonly pickupTicks: number;
+  /** Swinging across, item in hand. */
+  readonly carryTicks: number;
+  /** Releasing. The item goes into the destination when this completes. */
+  readonly dropTicks: number;
+  /** Swinging back empty-handed. */
+  readonly returnTicks: number;
+}
+
+/**
  * How much a container holds, as content authors it. §15: a chest is 24 slots.
  *
  * Its presence is what makes a building storage, in the same way `mining`
@@ -164,6 +200,8 @@ export interface BuildingDefinition {
   readonly mining?: MiningProperties;
   /** Present only on buildings that carry items along themselves (C13). */
   readonly belt?: BeltProperties;
+  /** Present only on buildings that move items between their neighbours (C14). */
+  readonly inserter?: InserterProperties;
   /** Present only on buildings that hold items for the player (C13). */
   readonly storage?: StorageProperties;
   /**
@@ -183,6 +221,7 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   Object.freeze(definition.buildCost);
   if (definition.mining !== undefined) Object.freeze(definition.mining);
   if (definition.belt !== undefined) Object.freeze(definition.belt);
+  if (definition.inserter !== undefined) Object.freeze(definition.inserter);
   if (definition.storage !== undefined) Object.freeze(definition.storage);
   return Object.freeze(definition);
 }
@@ -249,6 +288,22 @@ function validate(definition: BuildingDefinition): void {
     }
   }
 
+  const inserter = definition.inserter;
+  if (inserter !== undefined) {
+    if (!Number.isFinite(inserter.itemsPerSecond) || inserter.itemsPerSecond <= 0) {
+      throw new Error(`BuildingRegistry: ${where} inserts ${inserter.itemsPerSecond} items/s, which is not a rate.`);
+    }
+    // Four stages, each at least one tick. Below this the cycle cannot be
+    // divided into a pickup, a swing, a drop and a return at all — and an
+    // inserter with a zero-length swing is one whose arm is in two places on
+    // the same tick, which no amount of rendering can make legible.
+    if (Math.round(TPS / inserter.itemsPerSecond) < INSERTER_STAGES) {
+      throw new Error(
+        `BuildingRegistry: ${where} inserts ${inserter.itemsPerSecond} items/s, which is under ${INSERTER_STAGES} ticks a cycle.`,
+      );
+    }
+  }
+
   const storage = definition.storage;
   if (storage !== undefined && (!Number.isInteger(storage.slots) || storage.slots < 1)) {
     throw new Error(`BuildingRegistry: ${where} has ${storage.slots} slots; it must be whole and above 0.`);
@@ -285,6 +340,32 @@ function unitsPerTick(belt: BeltProperties): number {
   return Math.round((belt.tilesPerSecond * BELT_TILE_UNITS) / TPS);
 }
 
+/** How many timed stages one inserter cycle has. See `InserterConfig`. */
+const INSERTER_STAGES = 4;
+
+/**
+ * Items per second as four whole stage lengths that sum to the cycle (§6 R3).
+ *
+ * The rounding happens once, here, at registry-build time, and every later
+ * number is a subtraction — so the four stages cannot drift apart from the
+ * cycle they divide however the content is retuned. `carryTicks` takes the odd
+ * tick of an odd-length pair of swings, because reaching the destination a
+ * tick early is the half a player is watching.
+ */
+function inserterConfig(inserter: InserterProperties): InserterConfig {
+  const ticksPerItem = Math.round(TPS / inserter.itemsPerSecond);
+  const grab = Math.max(1, Math.round(ticksPerItem / 10));
+  const swings = ticksPerItem - 2 * grab;
+  const carryTicks = Math.ceil(swings / 2);
+  return Object.freeze({
+    ticksPerItem,
+    pickupTicks: grab,
+    carryTicks,
+    dropTicks: grab,
+    returnTicks: swings - carryTicks,
+  });
+}
+
 export class BuildingRegistry {
   /**
    * Definition order, which is menu order and hotkey order. The array is the
@@ -304,6 +385,9 @@ export class BuildingRegistry {
 
   /** Belt content, converted to fixed-point units per tick once (§6 R3). */
   private readonly beltByType = new Map<EntityType, BeltConfig>();
+
+  /** Inserter content, converted to whole stage lengths once (§6 R3). */
+  private readonly inserterByType = new Map<EntityType, InserterConfig>();
 
   private readonly storageByType = new Map<EntityType, StorageProperties>();
 
@@ -345,6 +429,9 @@ export class BuildingRegistry {
           value.entityType,
           Object.freeze({ unitsPerTick: unitsPerTick(value.belt), tilesPerSecond: value.belt.tilesPerSecond }),
         );
+      }
+      if (value.inserter !== undefined) {
+        this.inserterByType.set(value.entityType, inserterConfig(value.inserter));
       }
       if (value.storage !== undefined) {
         this.storageByType.set(value.entityType, value.storage);
@@ -408,6 +495,14 @@ export class BuildingRegistry {
    */
   beltFor(type: EntityType): BeltConfig | null {
     return this.beltByType.get(type) ?? null;
+  }
+
+  /**
+   * How this kind of building moves items, or null if it is not an inserter
+   * (C14). Null rather than a throw, for the reason `beltFor` gives.
+   */
+  inserterFor(type: EntityType): InserterConfig | null {
+    return this.inserterByType.get(type) ?? null;
   }
 
   /** How much this kind of building stores, or null if it stores nothing (C13). */

@@ -25,6 +25,8 @@
  * tick, whatever was written.
  */
 
+import type { Entity } from './entity.js';
+
 /** What a machine is doing, or the reason it is not. See the file header. */
 export enum MachineStatus {
   /** Nothing to do, and nothing wrong. A chest; a machine that has not ticked. */
@@ -74,4 +76,18 @@ export function machineStatusName(status: MachineStatus): MachineStatusName {
     throw new RangeError(`machineStatusName: ${status} is not a MachineStatus.`);
   }
   return name;
+}
+
+/**
+ * The status an entity is remembering, or `Idle` for one that remembers none.
+ *
+ * Not every entity has a status field: a chest has nothing to be stalled on,
+ * and `Idle` — which the inspector renders as "Nothing to do" — is the honest
+ * answer for it. Everything that *can* stall stores one, and this is the one
+ * place that knows the field is optional, so the controller does not grow a
+ * branch per machine type as C15 and C21 add theirs.
+ */
+export function statusOf(entity: Entity): MachineStatus {
+  const status = (entity as Partial<{ status: MachineStatus }>).status;
+  return status !== undefined && isMachineStatus(status) ? status : MachineStatus.Idle;
 }
