@@ -286,16 +286,23 @@ export class InputManager {
   private selection: EntityId | null = null;
   /** The tile the current drag last enqueued for. See `actOnTile`. */
   private lastActedTile: TileCoord | null = null;
-  /** Where a line-build drag was anchored, or null when one is not running. */
-  private lineStart: TileCoord | null = null;
-  /** The tile the line currently reaches, so the release can finish it. */
-  private lineEnd: TileCoord | null = null;
+  /** Is the drag in progress a line-build one? See `extendLine`. */
+  private lineDrag = false;
+  /**
+   * The far end of the line so far: reached, but not yet laid.
+   *
+   * The line grows **from here**, not from where the drag started. Which way a
+   * tile faces is decided by the tile after it, so the head is the one tile
+   * whose direction is still a guess — it is laid the moment the drag moves
+   * past it, or on release.
+   */
+  private lineHead: TileCoord | null = null;
   /**
    * Tiles this drag has already asked for, and which way it asked for them.
    *
-   * Without it the path would be re-enqueued on every pointer move and every
-   * tile after the first would come back `'occupied'` — one toast per frame,
-   * which is the "invisible rejection" problem in reverse (§7).
+   * Without it a pointer that wobbles between two tiles would re-enqueue them
+   * and every repeat would come back `'occupied'` — one toast per frame, which
+   * is the "invisible rejection" problem in reverse (§7).
    *
    * A `Set` would do; the rotation is kept because it is what a reader wants
    * when this is inspected. A `Map` is safe here regardless: this is
@@ -506,12 +513,12 @@ export class InputManager {
       this.laid.clear();
       // A belt drags out a *line* anchored where the button went down (C13
       // task 7); everything else places one building per tile crossed.
-      this.lineStart = this.tool?.lineBuild === true ? this.hovered : null;
-      this.lineEnd = null;
+      this.lineDrag = this.tool?.lineBuild === true;
+      this.lineHead = this.lineDrag ? this.hovered : null;
       // A line lays nothing on the press: which way the anchor tile should
       // face is not known until the drag has left it. A press that never
       // moves still places one belt, facing the ghost — `endDrag` does it.
-      if (this.lineStart === null) this.actOnTile(this.hovered);
+      if (!this.lineDrag) this.actOnTile(this.hovered);
       return;
     }
 
@@ -564,11 +571,11 @@ export class InputManager {
 
   /** What a left-drag does to the tile it is currently over. */
   private dragOverTile(): void {
-    if (this.lineStart === null) {
+    if (!this.lineDrag) {
       this.actOnTile(this.hovered);
       return;
     }
-    this.updateLine(this.hovered);
+    this.extendLine(this.hovered);
   }
 
 
@@ -596,8 +603,8 @@ export class InputManager {
     this.drag = null;
     this.finishLine();
     this.lastActedTile = null;
-    this.lineStart = null;
-    this.lineEnd = null;
+    this.lineDrag = false;
+    this.lineHead = null;
     this.laid.clear();
     this.mouse.release(drag.pointerId);
     this.canvas.classList.remove(DRAGGING_CLASS);
@@ -734,44 +741,70 @@ export class InputManager {
   }
 
   /**
-   * Extend the belt line from the drag's anchor to `tile`. C13 task 7.
+   * Extend the belt line to `tile`. C13 task 7.
    *
-   * One `build` per tile of the path, and one only: the path is recomputed
-   * from the anchor on every pointer move, so almost all of it is already
-   * asked for and is skipped.
+   * **The line grows from its own head, never from where the drag started.**
+   * That is the whole design, and the alternative is the bug it replaced: a
+   * path recomputed from the anchor changes *shape* as the cursor moves — the
+   * long-axis rule flips the corner to the other side of the rectangle the
+   * moment the drag becomes taller than it is wide — and since a tile once
+   * asked for is never taken back, both routes get built and a wandering
+   * cursor fills the rectangle in. Growing from the head means the only tiles
+   * ever asked for are the ones between two consecutive cursor positions, so
+   * what gets built is what the player drew.
    *
-   * **The tile under the cursor is not laid until the drag passes it or ends.**
-   * That one rule is what keeps the gesture free of `remove` commands. A
-   * tile's rotation is decided by the tile *after* it, so the last tile of the
-   * path is the only one whose direction is still a guess — and it is exactly
-   * the tile that becomes the corner when the player turns. Laying it early
-   * means laying it the wrong way and then having to take it up, and a `remove`
-   * and a `build` in the same tick do not work: C05 defers removal to the
-   * cleanup phase, so the build that follows is honestly refused as
-   * `'occupied'` and the corner is left as a hole. Holding it back for one
-   * tile costs nothing — the ghost is still drawn under the cursor — and the
-   * corner comes out facing the way the player turned, first time.
+   * **The head tile itself is not laid until the drag moves past it.** A
+   * tile's direction is decided by the tile after it, so the head is the one
+   * tile whose direction is still a guess — and it is exactly the tile that
+   * becomes the corner when the player turns. Laying it early means laying it
+   * the wrong way and then having to take it up, and a `remove` and a `build`
+   * on one tile in one tick do not work: C05 defers removal to the cleanup
+   * phase, so the build that follows is honestly refused as `'occupied'` and
+   * the corner is left as a hole. Holding it back costs nothing — the ghost is
+   * still drawn under the cursor — and the corner comes out facing the way the
+   * player turned, first time.
    */
-  private updateLine(tile: TileCoord | null): void {
-    const start = this.lineStart;
-    if (start === null || tile === null) return;
+  private extendLine(tile: TileCoord | null): void {
+    if (tile === null) return;
     // Switching from mining to placing mid-drag: the same hand-over
     // `actOnTile` makes, for the same reason.
     this.stopMining();
-    this.lineEnd = tile;
-    this.layPath(start, tile, false);
+
+    const head = this.lineHead;
+    if (head === null) {
+      this.lineHead = tile;
+      return;
+    }
+    if (head.x === tile.x && head.y === tile.y) return;
+
+    // Retracing the line the drag has already laid. The head moves back and
+    // nothing is laid: extending *into* an existing tile would otherwise put a
+    // belt at the head facing backwards, nose to nose with the run behind it.
+    if (this.isLaid(tile)) {
+      this.lineHead = tile;
+      return;
+    }
+
+    this.layPath(head, tile, false);
+    this.lineHead = tile;
   }
 
   /**
-   * Finish the line: lay the tile the drag ended on.
+   * Finish the line: lay the head, the one tile held back while dragging.
    *
    * Also what turns a press that never moved into a single belt, facing the
    * rotation the ghost was showing.
    */
   private finishLine(): void {
-    const start = this.lineStart;
-    if (start === null) return;
-    this.layPath(start, this.lineEnd ?? start, true);
+    const head = this.lineHead;
+    if (!this.lineDrag || head === null) return;
+    this.layPath(head, head, true);
+  }
+
+  /** Has this drag already asked for a belt on this tile? */
+  private isLaid(tile: TileCoord): boolean {
+    if (tile.x < TILE_MIN || tile.x > TILE_MAX || tile.y < TILE_MIN || tile.y > TILE_MAX) return false;
+    return this.laid.has(tileKey(tile.x, tile.y));
   }
 
   private layPath(start: TileCoord, end: TileCoord, includeLast: boolean): void {
@@ -786,11 +819,11 @@ export class InputManager {
       if (segment.x < TILE_MIN || segment.x > TILE_MAX || segment.y < TILE_MIN || segment.y > TILE_MAX) continue;
 
       const key = tileKey(segment.x, segment.y);
-      // Already asked for. A tile can only be asked for with a *different*
-      // rotation by a drag that backtracked past its own corner and then
-      // turned; leaving it alone is the better trade than taking up a belt the
-      // player has paid for, and may already have items on, to fix a facing
-      // they can fix with one click.
+      // Already asked for. A tile can only be reached again with a *different*
+      // rotation by a drag that retraced past its own corner and then turned;
+      // leaving it alone is the better trade than taking up a belt the player
+      // has paid for, and may already have items on, to fix a facing they can
+      // fix with one click.
       if (this.laid.has(key)) continue;
 
       this.laid.set(key, segment.rotation);

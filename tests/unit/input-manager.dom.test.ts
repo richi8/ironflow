@@ -907,6 +907,73 @@ describe('laying a belt line', () => {
       expect(queued()).toEqual(['build belt 2,0 r2', 'build belt 2,1 r2']);
     });
 
+    it('lays the L the drag drew, and not the rectangle around it', () => {
+      // The reported bug: a drag east and then south built all four sides.
+      // A path recomputed from the *anchor* changes shape as the cursor moves
+      // — the long-axis rule flips the corner to the other side of the
+      // rectangle the moment the drag is taller than it is wide — and since a
+      // tile once asked for is never taken back, both routes got built.
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      // Deliberately taller than it is wide, so the anchored path's long axis
+      // flips from x to y partway down the second leg — the exact moment the
+      // old code started building the opposite two sides.
+      const route = [
+        [1, 0], [2, 0], [3, 0],
+        [3, 1], [3, 2], [3, 3], [3, 4], [3, 5],
+      ] as const;
+      for (const [x, y] of route) {
+        canvas.dispatchEvent(pointerEvent('pointermove', { ...at(x, y), buttons: BUTTONS_LEFT }));
+      }
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(3, 5), button: BUTTON_LEFT, buttons: 0 }));
+
+      expect(queued()).toEqual([
+        'build belt 0,0 r1',
+        'build belt 1,0 r1',
+        'build belt 2,0 r1',
+        // The corner, laid facing south the first time it is laid at all.
+        'build belt 3,0 r2',
+        'build belt 3,1 r2',
+        'build belt 3,2 r2',
+        'build belt 3,3 r2',
+        'build belt 3,4 r2',
+        'build belt 3,5 r2',
+      ]);
+    });
+
+    it('lays one clean L when the cursor jumps the whole way in one move', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(3, 2), buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(3, 2), button: BUTTON_LEFT, buttons: 0 }));
+
+      expect(queued()).toEqual([
+        'build belt 0,0 r1',
+        'build belt 1,0 r1',
+        'build belt 2,0 r1',
+        'build belt 3,0 r2',
+        'build belt 3,1 r2',
+        'build belt 3,2 r2',
+      ]);
+    });
+
+    it('lays nothing new when the drag retraces its own line', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      for (const [x, y] of [[1, 0], [2, 0], [3, 0]] as const) {
+        canvas.dispatchEvent(pointerEvent('pointermove', { ...at(x, y), buttons: BUTTONS_LEFT }));
+      }
+      expect(queued()).toEqual(['build belt 0,0 r1', 'build belt 1,0 r1', 'build belt 2,0 r1']);
+
+      // Back along the line it just laid. Nothing is asked for: extending into
+      // a tile already laid would put a belt at the head facing backwards,
+      // nose to nose with the run behind it.
+      for (const [x, y] of [[2, 0], [1, 0], [0, 0]] as const) {
+        canvas.dispatchEvent(pointerEvent('pointermove', { ...at(x, y), buttons: BUTTONS_LEFT }));
+      }
+      expect(queued()).toEqual([]);
+    });
+
     it('never enqueues a remove, however the drag wanders', () => {
       input.setBuildTool(BELT);
       canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
@@ -920,6 +987,15 @@ describe('laying a belt line', () => {
       // And never the same tile twice, whatever route the cursor took.
       const tiles = all.map((c) => c.split(' ')[2]);
       expect(new Set(tiles).size).toBe(tiles.length);
+      // Only tiles the cursor actually walked through, in the box it stayed
+      // inside: a wandering drag must not fill anything in.
+      for (const tile of tiles) {
+        const [x, y] = (tile ?? '').split(',').map(Number);
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThanOrEqual(3);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(y).toBeLessThanOrEqual(3);
+      }
     });
 
     it('leaves the held rotation following the line, so the next click continues it', () => {

@@ -2846,17 +2846,31 @@ two lanes (never, in v1).
   fast belt animates twice as fast without anything in the renderer learning
   that a second tier exists. The clock is accumulated from the frame delta and
   not read raw, so pausing stops the chevrons with the belts.
-- **Drag-to-build lays a tile only once its direction is final, and never
-  enqueues a `remove`.** A tile's rotation is decided by the tile *after* it,
-  so the last tile of the path is the only one still a guess — and it is
-  exactly the tile that becomes the corner when the player turns. Laying it
-  early means laying it the wrong way and taking it up again, and a `remove`
-  and a `build` on one tile in one tick **do not work**: C05 defers removal to
-  the cleanup phase, so the build that follows is honestly refused as
-  `'occupied'` and the corner is left as a hole. This was found by driving the
-  running game, not by a test. Holding the last tile back costs nothing — the
-  ghost is still drawn under the cursor — and the corner comes out facing the
-  way the player turned, first time. A press that never moves still places one
+- **Drag-to-build grows the line from its own head, and never enqueues a
+  `remove`.** Two rules, and both were found by driving the running game rather
+  than by a test.
+
+  *The line grows from the head, not from the anchor.* A path recomputed from
+  where the drag started changes **shape** as the cursor moves — the
+  long-axis-first rule flips the corner to the other side of the rectangle the
+  moment the drag becomes taller than it is wide — and because a tile once
+  asked for is never taken back, both routes get built: dragging an L builds
+  all four sides, and a wandering cursor fills the rectangle in. Extending from
+  the head means the only tiles ever asked for are the ones between two
+  consecutive cursor positions, so what gets built is what the player drew. A
+  drag that retraces its own line moves the head back and lays nothing, because
+  extending *into* a tile already laid would put a belt at the head facing
+  backwards, nose to nose with the run behind it.
+
+  *The head tile is not laid until the drag moves past it.* A tile's direction
+  is decided by the tile after it, so the head is the one tile whose direction
+  is still a guess — and it is exactly the tile that becomes the corner when
+  the player turns. Laying it early means laying it the wrong way and taking it
+  up again, and a `remove` and a `build` on one tile in one tick **do not
+  work**: C05 defers removal to the cleanup phase, so the build that follows is
+  honestly refused as `'occupied'` and the corner is left as a hole. Holding
+  the head back costs nothing — the ghost is still drawn under the cursor — and
+  the corner comes out facing the way the player turned, first time. A press that never moves still places one
   belt, on release, facing the ghost.
 
 **Deviations.**
