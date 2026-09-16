@@ -62,10 +62,20 @@ class FakeCamera implements CameraControl {
   }
 }
 
-/** Ten pixels to a tile, so a screen coordinate reads as its tile at a glance. */
+/**
+ * Ten pixels to a tile, so a screen coordinate reads as its tile at a glance.
+ *
+ * `entitiesAt` is C12's addition: the picker is what decides whether a pixel is
+ * a machine or bare ground, and selection is now that answer rather than the
+ * tile beside it. Tiles are named `"x,y"` and map to the entity id the pick
+ * reports; everything not listed is ground.
+ */
 class GridPicker implements TilePicker {
+  readonly entitiesAt = new Map<string, number>();
+
   pick(screenX: number, screenY: number): { tile: TileCoord; entityId: number | null } {
-    return { tile: { x: Math.floor(screenX / 10), y: Math.floor(screenY / 10) }, entityId: null };
+    const tile = { x: Math.floor(screenX / 10), y: Math.floor(screenY / 10) };
+    return { tile, entityId: this.entitiesAt.get(`${tile.x},${tile.y}`) ?? null };
   }
 }
 
@@ -115,6 +125,7 @@ let canvas: HTMLCanvasElement;
 let camera: FakeCamera;
 let commands: CommandProcessor;
 let actions: [InputAction, 'down' | 'up'][];
+let picker: GridPicker;
 let input: InputManager;
 
 /**
@@ -129,11 +140,12 @@ function mount(bindings = DEFAULT_KEYBINDINGS): void {
   camera = new FakeCamera();
   commands = new CommandProcessor();
   actions = [];
+  picker = new GridPicker();
   input = new InputManager({
     canvas,
     keyTarget: document,
     camera,
-    picker: new GridPicker(),
+    picker,
     commands,
     bindings,
     onAction: (action, phase) => actions.push([action, phase]),
@@ -355,14 +367,44 @@ describe('commands', () => {
   });
 });
 
+/**
+ * Selection. C12 task 4: click a machine to select it, click empty ground or
+ * press Escape to deselect, and none of it is simulation state.
+ */
 describe('selection', () => {
+  /** A machine at tile (3, 8), which is the pixel (35, 82) every test clicks. */
+  const MACHINE = 7;
+
+  beforeEach(() => {
+    picker.entitiesAt.set('3,8', MACHINE);
+  });
+
   it('follows the left button and is cleared by the right one', () => {
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
-    expect(input.selected).toEqual({ x: 3, y: 8 });
+    expect(input.selectedEntityId).toBe(MACHINE);
     canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 82, button: BUTTON_LEFT }));
 
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
-    expect(input.selected).toBeNull();
+    expect(input.selectedEntityId).toBeNull();
+  });
+
+  it('is cleared by clicking bare ground', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 82, button: BUTTON_LEFT }));
+    expect(input.selectedEntityId).toBe(MACHINE);
+
+    // (9, 9) has nothing on it, so the pick reports ground and the panel shuts.
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 95, y: 95, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    expect(input.selectedEntityId).toBeNull();
+  });
+
+  it('inspects a machine instead of mining the ground under it', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+    // A miner always stands on ore, so without this rule every click on one
+    // would also start digging the tile it is standing on.
+    expect(input.selectedEntityId).toBe(MACHINE);
+    expect(commands.pending).toBe(0);
   });
 
   it('ignores a second button pressed during a drag', () => {
@@ -370,13 +412,14 @@ describe('selection', () => {
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: BUTTONS_LEFT }));
 
     // Right-clicking mid-drag is a slip, not an instruction to deselect.
-    expect(input.selected).toEqual({ x: 3, y: 8 });
+    expect(input.selectedEntityId).toBe(MACHINE);
   });
 
   it('is cleared by the bound action, not by a hard-coded Escape', () => {
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    expect(input.selectedEntityId).toBe(MACHINE);
     document.dispatchEvent(keyEvent('keydown', 'Escape'));
-    expect(input.selected).toBeNull();
+    expect(input.selectedEntityId).toBeNull();
   });
 });
 
@@ -496,9 +539,10 @@ describe('the build tool', () => {
   });
 
   it('does not move the selection while placing', () => {
+    picker.entitiesAt.set('3,8', 7);
     input.setBuildTool(BELT);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
-    expect(input.selected).toBeNull();
+    expect(input.selectedEntityId).toBeNull();
   });
 
   it('never touches simulation state: a held building still only enqueues', () => {

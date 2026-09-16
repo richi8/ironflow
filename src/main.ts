@@ -15,7 +15,6 @@ import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
 import { describeEntities, describePlayer } from './renderer/entity-view.js';
-import type { MachineView } from './game/views/building-view.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, RenderState } from './renderer/render-state.js';
@@ -31,9 +30,12 @@ import { GameUI } from './ui/ui.js';
  *
  * C07 took three things out of it, which is why it is shorter than it was:
  * hotkey resolution and the placement preview moved into `GameController`, and
- * the rejection readout became real toasts. What is left is wiring, plus the
- * one translation §4 will not let the controller do — turning a building's
- * content id into a sprite id for the ghost.
+ * the rejection readout became real toasts. C12 took a fourth — the `machine`
+ * debug row, which the inspector now says properly, and a second copy of the
+ * same information in a developer readout is a second thing to keep in step
+ * (the same reasoning that retired C04's `reject` row). What is left is wiring,
+ * plus the one translation §4 will not let the controller do — turning a
+ * building's content id into a sprite id for the ghost.
  */
 
 function requireElement<T extends Element>(selector: string): T {
@@ -74,21 +76,6 @@ function overflow(value: number, min: number, max: number): number {
   if (value < min) return value - min;
   if (value > max) return value - max;
   return 0;
-}
-
-/**
- * The machine under the cursor, for the debug overlay (C11).
- *
- * C12's inspector is the panel this becomes; until then it is how a miner's
- * status, progress and buffer are checked against what the world is doing,
- * which is what §20 asks for — every acceptance criterion verified in the
- * running application rather than only in a test.
- */
-function describeMachine(view: MachineView | null): string {
-  if (view === null) return '—';
-  const progress = `${Math.round(view.progress * 100)}%`;
-  const held = view.outputs.map((stack) => `${stack.itemId} x${stack.count}`).join(', ');
-  return `${view.name} ${view.status} ${progress}${held === '' ? '' : ` -> ${held}`}`;
 }
 
 /** The player, for the debug overlay. See the row it fills in. */
@@ -267,7 +254,7 @@ function bootstrap(): void {
       player,
       hover: input.hover,
       ghost: currentGhost(),
-      selected: input.selected,
+      selected: controller.getSelectionView(),
     };
     renderer.render(state, camera, alpha);
 
@@ -296,19 +283,16 @@ function bootstrap(): void {
           hover === null
             ? '—'
             : `${hover.x},${hover.y}${input.hoverEntity === null ? '' : ` #${input.hoverEntity}`}`,
-        // C09's readout: the number behind the tint and the pile. The
-        // inspector (C12) is where this becomes a player-facing panel; until
-        // then it is the only way to check that what depleted on screen is
-        // what depleted in the arrays.
+        // C09's readout: the number behind the tint and the pile. It stays
+        // after C12 because it is about the *world*, not about a machine —
+        // the inspector answers for buildings and has nothing to say about a
+        // bare ore tile.
         ore: hover === null ? '—' : describeOre(world, hover.x, hover.y),
         // C10's readout: where the player is between tiles, which way they
-        // face and how far into the current lump they are. The inspector
-        // (C12) and an inventory panel are where this becomes player-facing;
-        // until then it is how the subtile arithmetic is checked by eye.
+        // face and how far into the current lump they are. An inventory panel
+        // is where the bag becomes player-facing; the subtile arithmetic is
+        // checked by eye here and nowhere else.
         player: describePlayerState(controller.getPlayerView()),
-        // C11's readout: what the machine under the cursor is doing, and why
-        // it is not. C12's inspector is where this becomes player-facing.
-        machine: describeMachine(input.hoverEntity === null ? null : controller.getBuildingView(input.hoverEntity)),
       },
       elapsedMs,
     );

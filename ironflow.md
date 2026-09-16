@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C11 complete.** Milestone B in progress. Next: C12 — inspector & view models. |
+| **Status** | **C12 complete.** Milestone B in progress. Next: C13 — belts. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C12 — Inspector & view models** |
+| **First action** | Chunk **C13 — Belts** |
 
 ---
 
@@ -562,6 +562,13 @@ export type Command =
   | { type: 'stopMining' };                      // added in C10, see below
 ```
 
+**Implementation note (C12).** `takeItems` and `insertItems` are owned by
+`game/systems/hand-system.ts` — the player reaching into a machine, in phase 1
+because somebody clicked, as against C14's inserter, which is a building
+running in phase 6. Taking is real; **inserting is validated and refused**,
+because a miner's buffer is an output and nothing else in the game has an input
+buffer until C15's furnace. See C12's deviations.
+
 **Implementation note (C10).** Two refinements, both forced by the fact that
 commands arrive at *frame* rate and take effect at *tick* rate.
 
@@ -967,9 +974,10 @@ stopped while paused. Two consequences worth writing down:
 
 - **The 10 Hz lane has a subscriber from the start.** This table names it for
   the inspector, which is C12's. Leaving it empty would be an abstraction with
-  no implementation (rule 10), so it drives the thing in C07 that genuinely
-  wants a sub-second timer: a toast counting down to its own removal. C12 adds
-  the inspector beside it.
+  no implementation (rule 10), so it drove the thing in C07 that genuinely
+  wants a sub-second timer: a toast counting down to its own removal. C12 put
+  the inspector beside it, and added `selectionChanged` for the one thing the
+  lane cannot do — open the panel on the frame of the click, and while paused.
 - **A panel that must repaint while paused does it on an event.** The HUD is the
   only one: "paused" is what it has to say, and it cannot say it from a lane
   that pause has stopped. `pauseChanged` is that event, and it is why the word
@@ -981,6 +989,16 @@ until C22; a field that is always `null` is a promise the view cannot keep. The
 HUD still draws both tiles from §11's icon set, dimmed, so the bar does not gain
 two tiles in the middle later — the placeholder is one string in the panel, and
 C21 deletes it by giving the tile something to read.
+
+**Implementation note (C12).** The `MachineView` sketch above is not quite
+what shipped, and the difference is this section's own rule about `HudView`
+applied to machines: **a view model carries only what exists.** `progress` and
+`ratePerMinute` are `number | null` — a chest is not 0% of the way through
+something at 0 items a minute, it has no progress and no output, and a panel
+handed zeroes draws a dead bar under every crate. The contents are
+`MachineStack` rather than `ItemStack`, carrying a display name and a buffer
+capacity, because §4 lets only the controller ask the item registry and because
+"12/50" is what says `output_full` is coming before the machine stops.
 
 **Implementation note (C11).** Two additions to the sketch above.
 
@@ -2586,6 +2604,128 @@ buffer-full stall and resume; depletion transition.
 a known production sequence; frozen view models.
 
 **Out of scope.** Recipe selection UI (C16), graphs, production statistics screen.
+
+**Decisions taken while implementing this chunk.**
+
+- **The rolling rate needs a monotone counter, and it lives beside the
+  simulation rather than on the entity.** Task 2 puts the average in the
+  controller's derived state, and an average over a window needs to know what a
+  machine's output total *was* 300 ticks ago. `production.ts` holds both
+  halves: `ProductionCounters`, which `MiningSystem` increments where an item
+  is produced, and `ProductionRate`, the controller's window over it. Counting
+  production rather than sampling the buffer is the load-bearing part — a
+  buffer goes *down* when something empties it, and a rate measured from a
+  number that falls reads as negative production the moment C14's inserter
+  arrives. Neither half is authoritative state: the counter is the same third
+  thing `AlertLog` is (§10), a measurement the simulation writes and never
+  reads back, so it is not in the save and a loaded world simply fills its
+  window over the next ten seconds. Keeping it off `MinerEntity` is what makes
+  that true by construction — a `producedTotal` field would be written into
+  every save by C24 and migrated forever for a number the player looks at for a
+  few seconds.
+- **The window is measured per *selected* machine, not per machine.** One
+  window, reset when the selection changes. §12's reference factory has 2,500
+  machines and the inspector shows one; 2,500 windows kept current so that one
+  could be read is work with no reader. `perMinuteFor(id)` therefore answers 0
+  for any machine but the selected one, which is the honest answer — a figure
+  borrowed from a different miner is worse than no figure.
+- **A short window reads over the history it has.** Samples arrive at frame
+  rate, kept one per tick, so a window opened two seconds ago spans two
+  seconds. The alternative — report 0 until 300 ticks have passed — is a panel
+  telling the player that a visibly running machine produces nothing, which is
+  the bug pillar 3 exists to prevent.
+- **Selection moved from a tile to an entity, and the highlight to a
+  footprint.** `InputManager` held a `selectedTile` from C04; the inspector
+  wants a machine, so it now holds the picker's `entityId` — which makes "click
+  empty ground to deselect" fall out of the pick rather than being a second
+  rule. `RenderState.selected` became a rectangle, because a 2x2 miner clicked
+  on its north corner and outlined one tile wide reads as a highlight that
+  missed. `GameController.getSelectionView()` supplies it from the same
+  `footprintExtent` the ghost uses.
+- **`BuildCursor` is now `Cursor`.** The interface the controller declares for
+  `InputManager` to satisfy gained `selectedEntityId` and `setSelectedEntity`,
+  at which point a name about building was wrong. Selection is the same kind of
+  thing the other members are: presentation state, pointer-rate, never
+  serialized, read by no system.
+- **`selectionChanged` is a game event, so the panel opens on the frame of the
+  click.** The inspector otherwise lives on §13's 10 Hz lane, which would put
+  up to a tenth of a second between the click and the panel and would show
+  nothing at all while paused — and reading a machine is exactly what a player
+  pauses to do. The controller notices the change in `pump()`, the same place
+  it notices a build-menu change, and the same place it drops a selection whose
+  machine has been demolished.
+- **Clicking a machine inspects it and does not mine the ground under it.** A
+  miner always stands on ore, so without this every click on one would also
+  start digging the tile it is standing on. `actOnTile` skips a tile with an
+  entity on it when the hand is empty.
+- **The panel's stack rows are a fixed pool.** §13 forbids rebuilding a
+  subtree, and a buffer with a varying number of lines is the shape that tempts
+  a panel into `innerHTML = ''`. Four rows per section, built at mount and
+  hidden when unused; C16 is the chunk that could produce a machine with more
+  ingredients than that, and it is the chunk that would raise the number.
+- **Manual transfer is its own system, `systems/hand-system.ts`.** The exact
+  parallel of `BuildSystem`: it owns one pair of commands end to end, including
+  their refusals, and C15's furnace adds an arm there rather than widening the
+  orchestration. It is not C14's inserter — that is a building, it runs every
+  tick in phase 6, and it has no opinion about where the player is standing.
+  What counts as a buffer is content (`definition.mining`), never an id (§19
+  rule 17).
+- **Reach for taking is the mining range, six tiles, not the build range.**
+  These are the player's arms, and the arms that swing a pick and the hand that
+  reaches into a hopper ought to reach the same distance. Measured to the
+  nearest footprint tile, exactly as build reach is.
+- **Three new rejection reasons**, each with a sentence in `notifications.ts`:
+  `'unknown_entity'` (the machine was demolished between the frame that drew
+  the button and the tick that read the click — reachable without anyone doing
+  anything wrong), `'nothing_to_take'` and `'not_accepted'`.
+
+**Deviations.**
+
+- **`insertItems` is validated but nothing accepts items yet, and the panel has
+  no insert control.** Task 5 names both directions. A miner's buffer is an
+  *output*, and a chest has no inventory — how a plain-data entity (C05) holds
+  one is a decision C13 has to make anyway, since its acceptance criterion is
+  "the chest fills", and making it here would be implementing C13 in advance
+  (§19 rule 4). So the command's arm is real and its refusal is the answer that
+  stays true for a miner forever ("that machine does not take items"), the
+  view's `inputs` is an empty list, and the INPUT section hides itself. **C15's
+  furnace is the first machine with somewhere to put an ingredient**, and it
+  fills in `HandSystem.insert` and gives the input rows their button. Taking is
+  fully real, and it is what finally gives C11's "emptying it resumes
+  production" a way for a player to do it.
+- **`MachineView.progress` and `ratePerMinute` are nullable, and the stacks are
+  richer than `ItemStack`.** §13's sketch gives plain numbers and bare stacks.
+  The reason is §13's own note about `HudView`: a view model carries only what
+  exists. A chest is not a machine that is 0% of the way through something at 0
+  items a minute — it has no progress and no output, and a panel handed zeroes
+  cannot tell those apart, so it draws a dead bar and a dead number under every
+  crate in the factory. `MachineStack` adds `name` and `capacity` because only
+  the controller may ask the item registry (§4) and because "12/50" is the
+  number that says `output_full` is coming, which is what pillar 3 wants on
+  screen *before* the miner stops.
+- **`'idle'` reads "Nothing to do".** C07's decision 8 settled that a chest is
+  honestly idle and that this chunk's "never a bare idle" is about machines
+  that *could* run. The panel says so in words rather than showing the enum's
+  name, which is the same sentence with nothing bare about it.
+- **The `machine` row left the F3 overlay.** C11 added it saying the inspector
+  was where it became player-facing. It is, and a second copy of the same
+  information in a developer readout is a second thing to keep in step — the
+  same reasoning that retired C04's `reject` row in C07. The `ore` and `player`
+  rows stay: one is about the world and one about the player, and the inspector
+  answers for neither.
+- **The F3 overlay moved right.** It sat at the top-left corner, which is where
+  the inspector now lives. One CSS line, on a panel only a developer sees.
+
+**Noticed, not fixed.**
+
+- The rate window holds up to 301 samples in two arrays and drops the oldest
+  with `shift()`, which is O(n) on a 301-element array once per tick for one
+  machine. It is nothing, and a ring buffer would be more code than it saves
+  until a profiler says otherwise (§19 rule 20).
+- `getBuildingView` is called once per 10 Hz update and allocates a fresh
+  frozen view each time. That is the point of a snapshot (§13) and it is one
+  object every tenth of a second; it would matter only if something started
+  asking for every machine at once, which is C28's production screen.
 
 ---
 

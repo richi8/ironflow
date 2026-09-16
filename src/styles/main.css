@@ -53,9 +53,10 @@ body {
 
 .debug-overlay {
   position: fixed;
-  /* Below the HUD bar (C07), which owns the top edge. */
+  /* Below the HUD bar (C07), which owns the top edge, and to the right of the
+     inspector (C12), which owns the top-left corner whenever it is open. */
   top: 56px;
-  left: 12px;
+  left: 260px;
   min-width: 190px;
   padding: 8px 10px;
   border: 1px solid var(--if-stroke);
@@ -389,6 +390,183 @@ body {
   color: var(--if-text-dim);
   font-size: 10px;
   text-align: center;
+}
+
+/* --- Inspector (C12) ------------------------------------------------------ */
+
+.if-inspector {
+  position: fixed;
+  top: 56px;
+  left: 12px;
+  width: 236px;
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 95%, transparent);
+  font-size: 12px;
+}
+
+.if-inspector__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--if-stroke);
+}
+
+.if-inspector__title {
+  flex: 1;
+  margin: 0;
+  color: var(--if-accent);
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: 0.12em;
+}
+
+.if-inspector__close {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.if-inspector__close:hover {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+/* §11's status tokens, one per tone. The icon and the words share the colour,
+   so the panel reads at a glance from across the screen. */
+.if-inspector__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  line-height: 1.35;
+}
+
+.if-inspector__status[data-tone='ok'] {
+  color: var(--if-ok);
+}
+
+.if-inspector__status[data-tone='warn'] {
+  color: var(--if-warn);
+}
+
+.if-inspector__status[data-tone='danger'] {
+  color: var(--if-danger);
+}
+
+.if-inspector__status[data-tone='idle'] {
+  color: var(--if-text-muted);
+}
+
+.if-inspector__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.if-inspector__track {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--if-bg-deep);
+}
+
+.if-inspector__bar {
+  width: 0;
+  height: 100%;
+  background: var(--if-accent);
+}
+
+.if-inspector__percent {
+  min-width: 4ch;
+  color: var(--if-text-muted);
+  text-align: right;
+}
+
+.if-inspector__rate,
+.if-inspector__where {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.if-inspector__where {
+  margin-bottom: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--if-stroke);
+}
+
+.if-inspector__label {
+  color: var(--if-text-dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.if-inspector__value {
+  color: var(--if-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-inspector__section {
+  margin-bottom: 8px;
+}
+
+.if-stack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  padding: 4px 6px;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+}
+
+.if-stack__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-stack__count {
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-stack__take {
+  padding: 1px 6px;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.if-stack__take:hover:not(:disabled) {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+.if-stack__take:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* --- Notifications -------------------------------------------------------- */

@@ -22,7 +22,7 @@
 import type { Alert } from './alert.js';
 import type { Command, CommandRejectionReason } from '../commands/command.js';
 
-export type GameEventType = 'rejected' | 'alert' | 'buildMenuChanged' | 'pauseChanged';
+export type GameEventType = 'rejected' | 'alert' | 'buildMenuChanged' | 'pauseChanged' | 'selectionChanged';
 
 /** A command did not happen, and here is the reason a player can be shown. */
 export interface CommandRejectedEvent {
@@ -60,7 +60,30 @@ export interface PauseChangedEvent {
   readonly paused: boolean;
 }
 
-export type GameEvent = CommandRejectedEvent | AlertEvent | BuildMenuChangedEvent | PauseChangedEvent;
+/**
+ * The player selected a different machine, or none (C12 task 4).
+ *
+ * The event exists because of one acceptance criterion: "clicking any entity
+ * opens the inspector **within one frame**". The inspector otherwise lives on
+ * §13's 10 Hz lane, which would leave up to a tenth of a second between the
+ * click and the panel — long enough to feel like the click was missed. It is
+ * also the lane that stops while the game is paused, and selecting a machine
+ * to read it is exactly what a player does while paused.
+ *
+ * It carries the id rather than the view so that the panel re-reads a frozen
+ * snapshot, for the reason `buildMenuChanged` carries nothing at all.
+ */
+export interface SelectionChangedEvent {
+  readonly type: 'selectionChanged';
+  readonly entityId: number | null;
+}
+
+export type GameEvent =
+  | CommandRejectedEvent
+  | AlertEvent
+  | BuildMenuChangedEvent
+  | PauseChangedEvent
+  | SelectionChangedEvent;
 
 /** The event a given type name carries. Lets `subscribe` narrow its callback. */
 export type GameEventOf<T extends GameEventType> = Extract<GameEvent, { type: T }>;

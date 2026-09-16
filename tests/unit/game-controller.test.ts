@@ -4,7 +4,7 @@ import {
   DetachedCursor,
   GameController,
   HOTBAR_SLOTS,
-  type BuildCursor,
+  type Cursor,
 } from '../../src/game/game-controller.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
@@ -96,7 +96,7 @@ describe('GameController views', () => {
     expect(controller.getBuildingView(999)).toBeNull();
   });
 
-  it('describes a placed building for the panel C12 will render', () => {
+  it('describes a placed building for the inspector', () => {
     const { game, simulation } = makeGame();
     stocked(simulation);
     const controller = new GameController({ game });
@@ -109,7 +109,11 @@ describe('GameController views', () => {
     expect(Object.isFrozen(view)).toBe(true);
     expect(view?.name).toBe('Chest');
     expect(view?.status).toBe('idle');
-    expect(view?.progress).toBe(0);
+    // Null rather than zero: a chest is not a machine that is 0% of the way
+    // through something, and C12's panel draws no bar and no rate for it.
+    expect(view?.progress).toBeNull();
+    expect(view?.ratePerMinute).toBeNull();
+    expect(view?.outputs).toEqual([]);
   });
 });
 
@@ -351,7 +355,7 @@ describe('the cursor interface', () => {
     // The shape `InputManager` already had before C07 existed. Written out
     // here because that assignability is what keeps §4 intact: the UI sees
     // what the player is holding without `ui/**` ever importing `input/**`.
-    const cursor: BuildCursor = new DetachedCursor();
+    const cursor: Cursor = new DetachedCursor();
     const { game } = makeGame();
     const controller = new GameController({ game, cursor });
 

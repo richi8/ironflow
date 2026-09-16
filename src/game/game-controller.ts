@@ -31,7 +31,7 @@
  * owned by `InputManager` (C04) — it is not serialized, no system reads it, and
  * it changes at pointer rate rather than at tick rate. The UI still has to see
  * it, and §4 forbids `ui/**` from importing `input/**`. So the controller reads
- * it through `BuildCursor`, a four-member interface that `InputManager`
+ * it through `Cursor`, a six-member interface that `InputManager`
  * satisfies structurally and has never heard of — the same arrangement C04 used
  * in the other direction for `CameraControl` and `TilePicker`. Nothing is
  * cached: every view reads the cursor live, so a rotation pressed between two
@@ -42,16 +42,18 @@ import type { Command } from './commands/command.js';
 import type { EntityId } from './entities/entity.js';
 import { footprintExtent } from './entities/entity.js';
 import { machineStatusName } from './entities/machine-status.js';
-import { asMiner, minerOutput } from './entities/miner-entity.js';
+import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
+import { ProductionRate } from './production.js';
 import { BuildingRegistry, type BuildingDefinition } from './registries/building-registry.js';
 import type { Simulation } from './simulation.js';
 import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
-import type { MachineView } from './views/building-view.js';
+import type { MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudView } from './views/hud-view.js';
 import type { PlacementView } from './views/placement-view.js';
+import type { SelectionView } from './views/selection-view.js';
 import type { PlayerActivity, PlayerView } from './views/player-view.js';
 import { BUILD_RANGE_TILES, MINE_RANGE_TILES } from './player/player-state.js';
 import { NORTH, type Rotation, type TileCoord } from './world/coordinates.js';
@@ -72,12 +74,24 @@ export interface HeldBuilding {
   readonly rotationCount: 1 | 2 | 4;
 }
 
-/** What the player is holding and where they are pointing. See the file header. */
-export interface BuildCursor {
+/**
+ * What the player is holding, where they are pointing, and what they have
+ * selected. See the file header.
+ *
+ * C12 added the last of the three, and it is the same kind of thing as the
+ * other two: presentation state owned by `InputManager`, changing at pointer
+ * rate, never serialized, read by no system (C12 task 4). The controller holds
+ * a setter as well as a getter because the inspector's close button and
+ * `clearSelection()` have to put it down from the UI's side, which §4 will not
+ * let them do by reaching into `input/**`.
+ */
+export interface Cursor {
   readonly buildTool: HeldBuilding | null;
   readonly buildRotation: Rotation;
   readonly hover: TileCoord | null;
+  readonly selectedEntityId: EntityId | null;
   setBuildTool(tool: HeldBuilding | null): void;
+  setSelectedEntity(entityId: EntityId | null): void;
 }
 
 /**
@@ -102,18 +116,23 @@ export interface GameControllerOptions {
    * Where the held building lives. Defaults to a detached holder, so a headless
    * test can drive the controller without an input layer or a DOM.
    */
-  readonly cursor?: BuildCursor;
+  readonly cursor?: Cursor;
 }
 
-/** A `BuildCursor` with nothing on the other end of it. For tests and headless use. */
-export class DetachedCursor implements BuildCursor {
+/** A `Cursor` with nothing on the other end of it. For tests and headless use. */
+export class DetachedCursor implements Cursor {
   buildTool: HeldBuilding | null = null;
   buildRotation: Rotation = NORTH;
   hover: TileCoord | null = null;
+  selectedEntityId: EntityId | null = null;
 
   setBuildTool(tool: HeldBuilding | null): void {
     if (tool === null || this.buildTool?.buildingId !== tool.buildingId) this.buildRotation = NORTH;
     this.buildTool = tool;
+  }
+
+  setSelectedEntity(entityId: EntityId | null): void {
+    this.selectedEntityId = entityId;
   }
 }
 
@@ -122,7 +141,7 @@ type Listener = (event: GameEvent) => void;
 export class GameController {
   private readonly game: Game;
   private readonly simulation: Simulation;
-  private readonly cursor: BuildCursor;
+  private readonly cursor: Cursor;
   private readonly listeners = new Map<GameEventType, Set<Listener>>();
 
   /**
@@ -145,11 +164,26 @@ export class GameController {
    */
   private menuSignature = '';
 
+  /**
+   * The rolling items/minute of the selected machine (C12 task 2).
+   *
+   * Derived state, held here and never persisted (§10) — the plan puts it in
+   * the controller in as many words. It is sampled in `pump()` rather than
+   * recomputed in `getBuildingView`, because a rolling average is a function
+   * of *when* it was asked and a view getter must be safe to call twice in a
+   * frame without changing the answer.
+   */
+  private readonly rate = new ProductionRate();
+
+  /** The last selection told to the UI, so a change can become one event. */
+  private lastSelection: EntityId | null = null;
+
   constructor(options: GameControllerOptions) {
     this.game = options.game;
     this.simulation = options.game.simulation;
     this.cursor = options.cursor ?? new DetachedCursor();
     this.menuSignature = this.buildMenuSignature();
+    this.lastSelection = this.cursor.selectedEntityId;
   }
 
   /* ---------------------------------------------------------------- *
@@ -185,6 +219,26 @@ export class GameController {
     for (const alert of this.simulation.alerts.take()) {
       this.alerts += 1;
       this.emit({ type: 'alert', alert });
+    }
+
+    // C12: a selection whose machine has been demolished is not a selection.
+    // Dropped here rather than in the input layer, which has no way to know an
+    // entity is gone — it holds an id, and ids are never reused (§6 R5).
+    const selected = this.cursor.selectedEntityId;
+    if (selected !== null && this.simulation.entities.get(selected) === undefined) {
+      this.cursor.setSelectedEntity(null);
+    }
+
+    const selection = this.cursor.selectedEntityId;
+    if (selection !== this.lastSelection) {
+      this.lastSelection = selection;
+      // The window measured a different machine; keeping it would show one
+      // miner's rate under another's name for the next ten seconds.
+      this.rate.reset();
+      this.emit({ type: 'selectionChanged', entityId: selection });
+    }
+    if (selection !== null) {
+      this.rate.sample(selection, this.simulation.getTick(), this.simulation.production.totalFor(selection));
     }
 
     const signature = this.buildMenuSignature();
@@ -298,6 +352,14 @@ export class GameController {
     });
   }
 
+  /**
+   * One building, as the inspector draws it. `null` for an id nothing answers to.
+   *
+   * Everything here is derived on the spot from authoritative state (§10) and
+   * frozen on the way out (§13), so a panel holding one of these is holding a
+   * photograph: it cannot reach a machine through it and it cannot be
+   * surprised by the machine changing underneath it.
+   */
   getBuildingView(id: EntityId): MachineView | null {
     const entity = this.simulation.entities.get(id);
     if (entity === undefined) return null;
@@ -305,7 +367,7 @@ export class GameController {
 
     const miner = asMiner(entity);
     const mining = miner === null ? null : this.simulation.buildings.miningFor(entity.type);
-    const output = miner === null ? null : minerOutput(miner);
+    const output = this.simulation.hands.outputOf(entity);
 
     return freeze({
       id: entity.id,
@@ -315,18 +377,60 @@ export class GameController {
       // miner says which of C11's three things it is doing, which is §13's
       // "status must always explain a stall" becoming true for the first time.
       status: miner === null ? ('idle' as const) : machineStatusName(miner.status),
-      // Derived from the tick count every frame, never stored (§10). The
-      // denominator is content, so a `null` config is 0 rather than a divide
-      // by zero (§6 R7).
-      progress: miner === null || mining === null ? 0 : miner.progressTicks / mining.ticksPerItem,
+      // Derived from the tick count every frame, never stored (§10). Null,
+      // not zero, for a building that is not partway through anything — see
+      // the note in `views/building-view.ts`.
+      progress: miner === null || mining === null ? null : miner.progressTicks / mining.ticksPerItem,
       inputs: EMPTY_STACKS,
-      outputs: output === null ? EMPTY_STACKS : freeze([freeze(output)]),
-      // C12 measures this as a rolling average over 300 ticks; until then a
-      // rate nobody has computed is 0 rather than a number that looks measured.
-      ratePerMinute: 0,
+      outputs:
+        output === null
+          ? EMPTY_STACKS
+          : freeze([this.stackView(output.itemId, output.count, mining?.bufferCapacity ?? null)]),
+      // Measured for the selected machine only (C12 task 2). A machine asked
+      // about in passing reads 0 rather than a figure from someone else's
+      // window; a machine that produces nothing at all reads null.
+      ratePerMinute: mining === null ? null : this.rate.perMinuteFor(entity.id),
       x: entity.x,
       y: entity.y,
       rotation: entity.rotation,
+      inReach: this.simulation.hands.canReach(entity),
+    });
+  }
+
+  /**
+   * The selected machine, or null when nothing is selected.
+   *
+   * The inspector's whole input. It is a second method rather than a
+   * `getBuildingView(getSelection())` at the call site so that a selection
+   * pointing at a machine demolished this frame is one `null` here instead of
+   * an id the panel has to know to check.
+   */
+  getInspectorView(): MachineView | null {
+    const selected = this.cursor.selectedEntityId;
+    return selected === null ? null : this.getBuildingView(selected);
+  }
+
+  /**
+   * The selected building's footprint, for the renderer's outline (C12 task 4).
+   *
+   * The extent is asked of the same `footprintExtent` the ghost uses, so a
+   * rotated 2x1 is outlined the way it is drawn rather than the way it was
+   * authored.
+   */
+  getSelectionView(): SelectionView | null {
+    const selected = this.cursor.selectedEntityId;
+    if (selected === null) return null;
+    const entity = this.simulation.entities.get(selected);
+    if (entity === undefined) return null;
+
+    const definition = this.simulation.buildings.forEntityType(entity.type);
+    const extent = footprintExtent(definition.size, entity.rotation);
+    return freeze({
+      entityId: entity.id,
+      x: entity.x,
+      y: entity.y,
+      width: extent.width,
+      height: extent.height,
     });
   }
 
@@ -406,6 +510,45 @@ export class GameController {
   }
 
   /* ---------------------------------------------------------------- *
+   * Selection and manual transfer (C12 tasks 4 and 5)
+   * ---------------------------------------------------------------- */
+
+  /** The selected machine's id, or null. UI state; no system reads it. */
+  getSelection(): EntityId | null {
+    return this.cursor.selectedEntityId;
+  }
+
+  /**
+   * Stop inspecting. The inspector's close button, and Escape's other half.
+   *
+   * The `selectionChanged` event follows on the next `pump()` rather than from
+   * here, so that a selection cleared by a click, by this call and by a
+   * demolished machine all reach the UI by one path.
+   */
+  clearSelection(): void {
+    this.cursor.setSelectedEntity(null);
+  }
+
+  /**
+   * Ask for items to be moved from a machine's output into the player's bag.
+   *
+   * A command like everything else (§7): this builds the plain data and queues
+   * it, the simulation decides, and a refusal comes back as a toast one tick
+   * later. It is a named method rather than the panel writing the command out
+   * so that the UI never has to know the shape of one — the same reason
+   * `selectSlot` exists instead of the toolbar reaching for the registry.
+   */
+  takeItems(entityId: EntityId, itemId: string, amount: number): CommandResult {
+    return this.dispatch({ type: 'takeItems', entityId, itemId, amount });
+  }
+
+  /** The other direction. Nothing in the game accepts items by hand yet — see
+   * `systems/hand-system.ts` — so this is refused with a reason until C15. */
+  insertItems(entityId: EntityId, itemId: string, amount: number): CommandResult {
+    return this.dispatch({ type: 'insertItems', entityId, itemId, amount });
+  }
+
+  /* ---------------------------------------------------------------- *
    * Pause
    * ---------------------------------------------------------------- */
 
@@ -481,6 +624,20 @@ export class GameController {
   }
 
   /**
+   * One line of a machine's buffer, named and frozen.
+   *
+   * The name comes from the item registry, which is the only place it exists
+   * and the one thing §4 will not let a panel ask for itself. An id the
+   * registry has never heard of keeps its own id as its name rather than
+   * throwing: a view model is drawn every frame, and a content typo should
+   * read as a strange label rather than take the frame down.
+   */
+  private stackView(itemId: string, count: number, capacity: number | null): MachineStack {
+    const name = this.simulation.items.has(itemId) ? this.simulation.items.get(itemId).name : itemId;
+    return freeze({ itemId, name, count, capacity });
+  }
+
+  /**
    * The player-facing name of an item.
    *
    * Until C08 there is no item registry, and every item in the game is a
@@ -494,7 +651,7 @@ export class GameController {
 }
 
 /** Nothing in, nothing out. Shared so every empty machine view points at one array. */
-const EMPTY_STACKS = Object.freeze([]);
+const EMPTY_STACKS: readonly MachineStack[] = Object.freeze([]);
 
 /**
  * Freeze a view before it leaves the controller (§13).

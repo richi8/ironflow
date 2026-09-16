@@ -44,6 +44,9 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   nothing_there: 'There is nothing there to remove.',
   out_of_reach: 'Too far away — walk closer.',
   inventory_full: 'You cannot carry any more of that.',
+  unknown_entity: 'That machine is no longer there.',
+  nothing_to_take: 'There is none of that in there.',
+  not_accepted: 'That machine does not take items.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {

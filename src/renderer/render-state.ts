@@ -141,6 +141,22 @@ export interface GhostView {
 }
 
 /**
+ * The selected building's footprint, outlined in the overlay layer (C12).
+ *
+ * A rectangle rather than a tile, because the outline belongs around the
+ * *building*: a 2x2 miner clicked on its north corner and highlighted one tile
+ * wide reads as a highlight that missed. Structurally satisfied by the
+ * controller's `SelectionView`, which carries the entity id as well — the
+ * renderer has no use for it and so does not name it.
+ */
+export interface SelectionRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
  * Everything one frame needs. Assembled fresh by the controller each frame.
  *
  * The entity list is empty until C05 gives the game entities to put in it;
@@ -165,5 +181,5 @@ export interface RenderState {
   readonly player: PlayerRenderView | null;
   readonly hover: TileCoord | null;
   readonly ghost: GhostView | null;
-  readonly selected: TileCoord | null;
+  readonly selected: SelectionRect | null;
 }

@@ -9,7 +9,9 @@ import { BUILD_RANGE_TILES, PlayerState } from './player/player-state.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
+import { ProductionCounters } from './production.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
+import { HandSystem } from './systems/hand-system.js';
 import { MiningSystem } from './systems/mining-system.js';
 import { PlayerSystem } from './systems/player-system.js';
 import type { Rotation } from './world/coordinates.js';
@@ -100,6 +102,27 @@ export class Simulation {
   private readonly playerSystem: PlayerSystem;
 
   /**
+   * The player's hands: the `takeItems` and `insertItems` commands (C12).
+   *
+   * Exposed rather than private because the controller asks it two read-only
+   * questions the inspector needs — what is in a machine's output buffer, and
+   * whether the player could reach it — and asking the system that *applies*
+   * the transfer is what keeps the panel from offering a take that the next
+   * tick refuses.
+   */
+  readonly hands: HandSystem;
+
+  /**
+   * How much each machine has made. Derived, never persisted (§10, C12 task 2).
+   *
+   * Systems write, the controller samples, and nothing in `game/` reads it
+   * back — see `production.ts`. It lives on the simulation rather than in the
+   * controller because production happens here; the rolling *average* is the
+   * controller's.
+   */
+  readonly production = new ProductionCounters();
+
+  /**
    * What the world has to tell the player (C11 task 5).
    *
    * Not authoritative state and never serialized: systems record here inside a
@@ -141,6 +164,13 @@ export class Simulation {
       buildings: this.buildings,
       items: this.items,
       alerts: this.alerts,
+      production: this.production,
+    });
+    this.hands = new HandSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+      player: this.player,
     });
     this.playerSystem = new PlayerSystem({
       world: this.world,
@@ -270,7 +300,11 @@ export class Simulation {
     // Phase 9 — cleanup. Deferred removals are applied here and nowhere else,
     // which is what makes "a system never sees a half-removed entity" a
     // property of the phase order rather than of every system's care.
-    this.entities.cleanup();
+    const removed = this.entities.cleanup();
+    // Ids are never reused (§6 R5), so a counter for a demolished machine can
+    // never be read again — only paid for. This is the one place that knows
+    // an entity has actually gone.
+    if (removed.length > 0) this.production.forget(removed);
   }
 
   /**
@@ -282,7 +316,8 @@ export class Simulation {
    * so rather than nothing at all.
    *
    * Each later chunk replaces one arm of this with a call into its system —
-   * C10 `movePlayer` and `mineTile`, C15 `setRecipe`, C22 `startResearch`.
+   * C10 `movePlayer` and `mineTile`, C12 `takeItems` and `insertItems`, C15
+   * `setRecipe`, C22 `startResearch`.
    * There is deliberately no handler registry: a switch is smaller, it is
    * exhaustively checked by the compiler, and a registry would be an
    * abstraction for a plugin system nobody wants (§19 rule 10).
@@ -307,6 +342,10 @@ export class Simulation {
         this.player.startMining(command.x, command.y);
         return null;
       }
+      case 'takeItems':
+        return this.hands.take(command.entityId, command.itemId, command.amount);
+      case 'insertItems':
+        return this.hands.insert(command.entityId, command.itemId, command.amount);
       case 'stopMining':
         // A no-op when nothing is being mined. Releasing the button over empty
         // ground is not a mistake, and telling the player it was would put a

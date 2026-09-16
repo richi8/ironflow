@@ -72,7 +72,14 @@ export class OverlayLayer {
       this.drawMiningProgress(ctx, camera, state.player.mining);
     }
     if (state.selected !== null) {
-      this.outline(ctx, camera, state.selected, 1, 1, color('accent-high'));
+      this.outline(
+        ctx,
+        camera,
+        state.selected,
+        state.selected.width,
+        state.selected.height,
+        color('accent-high'),
+      );
     }
     if (state.hover !== null) {
       this.outline(ctx, camera, state.hover, 1, 1, color('accent'));

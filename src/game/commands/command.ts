@@ -104,7 +104,22 @@ export type CommandRejectionReason =
    */
   | 'out_of_reach'
   /** The player is carrying all they can of what that tile yields. */
-  | 'inventory_full';
+  | 'inventory_full'
+  /* Added in C12. */
+  /**
+   * No entity has that id any more.
+   *
+   * Reachable without anyone doing anything wrong: the inspector's take button
+   * carries the id it was drawn with, and a machine can be demolished — by the
+   * player, or by a drag that ended on it — between the frame that drew the
+   * button and the tick that reads the command. Separate from
+   * `'nothing_there'`, which is about a *tile* the player pointed at.
+   */
+  | 'unknown_entity'
+  /** The machine holds none of the item that was asked for (C12 task 5). */
+  | 'nothing_to_take'
+  /** The machine has no input buffer, or none that accepts that item. */
+  | 'not_accepted';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {

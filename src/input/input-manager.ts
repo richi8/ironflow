@@ -24,6 +24,7 @@
  */
 
 import type { CommandSink } from '../game/commands/command-processor.js';
+import type { EntityId } from '../game/commands/command.js';
 import { NORTH, isRotation, type Rotation, type TileCoord } from '../game/world/coordinates.js';
 
 import { KeyboardInput } from './keyboard-input.js';
@@ -175,8 +176,8 @@ export class InputManager {
   private pointerX: number | null = null;
   private pointerY: number | null = null;
   private hovered: TileCoord | null = null;
-  private hoveredEntity: number | null = null;
-  private selectedTile: TileCoord | null = null;
+  private hoveredEntity: EntityId | null = null;
+  private selection: EntityId | null = null;
   /** The tile the current drag last enqueued for. See `actOnTile`. */
   private lastActedTile: TileCoord | null = null;
   private tool: BuildTool | null = null;
@@ -233,13 +234,30 @@ export class InputManager {
   }
 
   /** The entity under the cursor, if the cursor is on one rather than on ground. */
-  get hoverEntity(): number | null {
+  get hoverEntity(): EntityId | null {
     return this.hoveredEntity;
   }
 
-  /** The last tile clicked. Presentation state; C12's inspector reads it. */
-  get selected(): TileCoord | null {
-    return this.selectedTile;
+  /**
+   * The machine being inspected, or null (C12 task 4).
+   *
+   * Presentation state, like hover and the held building: it is not
+   * serialized, no system reads it, and the controller sees it only through
+   * the `Cursor` interface it declares for itself — which is why the name is
+   * the interface's rather than the shorter one this file would pick.
+   *
+   * An *entity* rather than a tile, because what the inspector shows is a
+   * machine. Clicking bare ground is how a player says "nothing", and that
+   * falls out of reading the picker's answer straight: it is `null` exactly
+   * when the pixel was ground.
+   */
+  get selectedEntityId(): EntityId | null {
+    return this.selection;
+  }
+
+  /** Select a machine, or `null` for none. The inspector's close button. */
+  setSelectedEntity(entityId: EntityId | null): void {
+    this.selection = entityId;
   }
 
   /**
@@ -356,8 +374,11 @@ export class InputManager {
     if (sample.button === BUTTON_LEFT) {
       this.beginDrag(sample, 'tile');
       // Placing does not move the selection: dragging out a row of chests
-      // should not drag C12's inspector along behind it.
-      if (this.tool === null) this.selectedTile = this.hovered;
+      // should not drag the inspector along behind it. With an empty hand the
+      // picker's answer *is* the selection — a machine, or null for ground,
+      // which is C12 task 4's "click empty ground to deselect" with no second
+      // rule to write down.
+      if (this.tool === null) this.selection = this.hoveredEntity;
       this.lastActedTile = null;
       this.actOnTile(this.hovered);
       return;
@@ -372,7 +393,7 @@ export class InputManager {
         this.setBuildTool(null);
         return;
       }
-      this.selectedTile = null;
+      this.selection = null;
       this.removeAt(this.hovered);
     }
   }
@@ -460,7 +481,7 @@ export class InputManager {
       if (action === 'selection.clear') {
         // One key that means "stop what you are doing": it drops the held
         // building as well as the selection, so Escape is always the way out.
-        this.selectedTile = null;
+        this.selection = null;
         this.setBuildTool(null);
       }
       if (action === 'build.rotate') this.rotateTool();
@@ -534,9 +555,9 @@ export class InputManager {
    * out-of-scope "drag-to-build lines" — that is C13's straight-line snapping
    * for belts. This is the same one-command-per-tile path mining already used.
    *
-   * `mineTile` still has no effect until C10; the simulation refuses it with
-   * `'not_implemented'` and the refusal is shown, which is the honest state of
-   * an empty hand in a game that has no player character yet.
+   * With an empty hand over a building the answer is neither: the click has
+   * already selected it (C12), and mining the tile a machine stands on is not
+   * something a player could have meant.
    */
   private actOnTile(tile: TileCoord | null): void {
     if (tile === null) return;
@@ -545,6 +566,11 @@ export class InputManager {
 
     const tool = this.tool;
     if (tool === null) {
+      // Clicking a machine inspects it; it does not try to mine the ground
+      // underneath it (C12 task 4). Without this a miner sitting on ore — the
+      // only place a miner ever sits — could not be clicked without also
+      // starting to dig the tile it stands on.
+      if (this.hoveredEntity !== null) return;
       this.mining = true;
       this.commands.enqueue({ type: 'mineTile', x: tile.x, y: tile.y });
       return;

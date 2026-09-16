@@ -418,7 +418,9 @@ describe('miner placement and views', () => {
 
     expect(view?.status).toBe('running');
     expect(view?.progress).toBeCloseTo(0.5, 10);
-    expect(view?.outputs).toEqual([{ itemId: 'iron_ore', count: 1 }]);
+    // Named and capped by the controller, so the panel can say "1/50" without
+    // reaching for the item registry or the building table itself (§4).
+    expect(view?.outputs).toEqual([{ itemId: 'iron_ore', name: 'Iron Ore', count: 1, capacity: 50 }]);
     expect(Object.isFrozen(view?.outputs)).toBe(true);
 
     // A building with no system behind it is still honestly idle.

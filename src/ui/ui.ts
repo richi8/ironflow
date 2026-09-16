@@ -23,23 +23,24 @@
  * | Lane | Rate | Drives |
  * |---|---|---|
  * | `hud` | 5 Hz | the status bar's counters |
- * | `live` | 10 Hz | toast expiry, and C12's inspector |
+ * | `live` | 10 Hz | the inspector's bar and rate, and toast expiry |
  *
- * §13 names the 10 Hz lane for "inspector progress bars, live rates", and the
- * inspector is C12's. Rather than leave the lane empty — an abstraction with no
- * implementation, which is §19 rule 10 — it drives the thing in C07 that
- * genuinely wants a sub-second timer: a toast counting down to its own removal.
- * C12 adds the inspector to the same lane and changes nothing else.
+ * §13 names the 10 Hz lane for "inspector progress bars, live rates", and C12
+ * put the inspector in it. C07 had the lane already, driving the thing that
+ * genuinely wanted a sub-second timer before the inspector existed: a toast
+ * counting down to its own removal.
  *
  * Everything else is event-driven: the build menu and hotbar repaint on
- * `buildMenuChanged` and the HUD additionally on `pauseChanged`, which is what
- * lets the word PAUSED appear on a frame where both lanes are stopped.
+ * `buildMenuChanged`, the HUD additionally on `pauseChanged`, and the inspector
+ * on `selectionChanged` — which is what lets the word PAUSED appear, and a
+ * clicked machine open, on a frame where both lanes are stopped.
  */
 
 import type { GameController } from '../game/game-controller.js';
 
 import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
+import { Inspector } from './inspector.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
 import { Toolbar } from './toolbar.js';
 
@@ -63,6 +64,7 @@ export class GameUI {
   private readonly hud: Hud;
   private readonly toolbar: Toolbar;
   private readonly buildMenu: BuildMenu;
+  private readonly inspector: Inspector;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -84,6 +86,17 @@ export class GameUI {
     this.buildMenu = new BuildMenu({
       onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
     });
+    this.inspector = new Inspector({
+      // The panel names an item and a count; which machine that means is the
+      // controller's answer, read at the moment of the click rather than
+      // remembered by the panel — a panel holding an entity id is a panel that
+      // can act on a machine the player is no longer looking at.
+      onTake: (itemId, count) => {
+        const selected = this.controller.getSelection();
+        if (selected !== null) this.controller.takeItems(selected, itemId, count);
+      },
+      onClose: () => this.controller.clearSelection(),
+    });
   }
 
   mount(): void {
@@ -94,6 +107,7 @@ export class GameUI {
 
     this.hud.mount(this.root);
     this.buildMenu.mount(this.root, menuView);
+    this.inspector.mount(this.root);
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
@@ -123,6 +137,10 @@ export class GameUI {
       // say. Its periodic lane is stopped at that moment; this is the event
       // that gets the word on screen.
       this.controller.subscribe('pauseChanged', () => this.refreshHud()),
+      // C12: the inspector opens on the frame of the click rather than on the
+      // next beat of the 10 Hz lane — and while paused, which is exactly when
+      // a player stops to read a machine.
+      this.controller.subscribe('selectionChanged', () => this.refreshInspector()),
     );
   }
 
@@ -155,6 +173,7 @@ export class GameUI {
       const elapsed = this.liveAccumulatorMs;
       this.liveAccumulatorMs %= LIVE_INTERVAL_MS;
       this.notifications.update(elapsed - this.liveAccumulatorMs);
+      this.refreshInspector();
     }
   }
 
@@ -169,10 +188,16 @@ export class GameUI {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.inspector.destroy();
     this.toolbar.destroy();
     this.buildMenu.destroy();
     this.hud.destroy();
     this.mounted = false;
+  }
+
+  /** Read a fresh snapshot of the selected machine, or close the panel. */
+  private refreshInspector(): void {
+    this.inspector.update(this.controller.getInspectorView());
   }
 
   private refreshHud(): void {

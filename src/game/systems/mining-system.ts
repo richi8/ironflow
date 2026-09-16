@@ -46,6 +46,7 @@
  */
 
 import type { AlertLog } from '../alerts.js';
+import type { ProductionCounters } from '../production.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { footprintTileAt, footprintTileCount, type Footprint } from '../entities/entity.js';
 import { EntityType } from '../entities/entity-types.js';
@@ -64,6 +65,8 @@ export interface MiningSystemOptions {
   readonly items: ItemRegistry;
   /** Where a miner running dry is recorded for the UI. C11 task 5. */
   readonly alerts: AlertLog;
+  /** Where each miner's lifetime output is counted, for C12's rate readout. */
+  readonly production: ProductionCounters;
 }
 
 export class MiningSystem {
@@ -72,6 +75,7 @@ export class MiningSystem {
   private readonly buildings: BuildingRegistry;
   private readonly items: ItemRegistry;
   private readonly alerts: AlertLog;
+  private readonly production: ProductionCounters;
 
   constructor(options: MiningSystemOptions) {
     this.world = options.world;
@@ -79,6 +83,7 @@ export class MiningSystem {
     this.buildings = options.buildings;
     this.items = options.items;
     this.alerts = options.alerts;
+    this.production = options.production;
   }
 
   /**
@@ -148,6 +153,10 @@ export class MiningSystem {
     // and the rate would quietly be slower than the content table says.
     miner.progressTicks -= config.ticksPerItem;
     miner.outputCount += taken;
+    // Counted where it is produced, not where it is stored: the buffer goes
+    // down again when something empties it, and a rate measured from a number
+    // that falls would read as negative production (C12 task 2).
+    this.production.record(miner.id, taken);
     // Past the tile it came from, even if it yielded nothing — a tile that
     // emptied between the check and here must not be tried again first.
     miner.tileCursor = (index + 1) % tileCount;
