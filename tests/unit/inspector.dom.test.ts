@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DetachedCursor, GameController } from '../../src/game/game-controller.js';
 import { Game } from '../../src/game/game.js';
-import { EntityType } from '../../src/game/entities/entity-types.js';
+import { newChest, type ChestEntity } from '../../src/game/entities/chest-entity.js';
 import { MACHINE_STATUS_COUNT, machineStatusName } from '../../src/game/entities/machine-status.js';
 import { newMiner, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { Simulation } from '../../src/game/simulation.js';
@@ -256,7 +256,7 @@ describe('status', () => {
   });
 
   it('gives a chest no progress bar and no rate, rather than two zeroes', () => {
-    const chest = harness.simulation.entities.create({ type: EntityType.Chest, x: 0, y: 0, rotation: NORTH });
+    const chest = harness.simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     select(chest.id);
 
     expect(query<HTMLElement>('.if-inspector__progress').hidden).toBe(true);

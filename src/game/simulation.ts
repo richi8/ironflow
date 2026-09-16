@@ -10,6 +10,7 @@ import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
 import { ProductionCounters } from './production.js';
+import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
 import { HandSystem } from './systems/hand-system.js';
 import { MiningSystem } from './systems/mining-system.js';
@@ -99,6 +100,12 @@ export class Simulation {
 
   private readonly miningSystem: MiningSystem;
 
+  /**
+   * Belts (C13), phase 5. It keeps a derived downstream-first order of its own
+   * and rebuilds it when the entity set changes — see `belt-system.ts`.
+   */
+  private readonly beltSystem: BeltSystem;
+
   private readonly playerSystem: PlayerSystem;
 
   /**
@@ -165,6 +172,11 @@ export class Simulation {
       items: this.items,
       alerts: this.alerts,
       production: this.production,
+    });
+    this.beltSystem = new BeltSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
     });
     this.hands = new HandSystem({
       entities: this.entities,
@@ -290,7 +302,12 @@ export class Simulation {
     // it was built rather than the one after.
     this.miningSystem.tick();
 
-    // Phases 2 and 4-7 arrive with the chunks listed above.
+    // Phase 5 — belts. Items move, hand off between belts, and are dropped on
+    // by the machines beside them (C13). Downstream-first, so belt speed is a
+    // property of the layout rather than of the order the belts were built in.
+    this.beltSystem.tick();
+
+    // Phases 2, 4, 6 and 7 arrive with the chunks listed above.
 
     // Phase 8 — player. Movement and manual mining (C10). It runs after every
     // machine so that the world a step of walking is judged against is the one

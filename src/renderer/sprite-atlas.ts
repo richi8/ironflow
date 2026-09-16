@@ -15,7 +15,8 @@
  * ```text
  * terrain:<name>                              terrain:grass
  * resource:<name>:<fullness 0-3>              resource:iron:2
- * belt:<rotation 0-3>                         belt:1
+ * belt:<rotation 0-3>[:<phase 0-7>]           belt:1:5
+ * item:<item id>                              item:iron_ore
  * player:<idle|walk|work>:<facing 0-3>        player:walk:1
  * building:<category>:<CODE>[:<w>x<h>[:<rise>]]
  *                                             building:extraction:MI
@@ -135,8 +136,31 @@ export const TERRAIN_SPRITES: readonly SpriteId[] = Object.freeze(
   Array.from({ length: TILE_TYPE_COUNT }, (_unused, type) => `terrain:${tileProperties(type).name}`),
 );
 
-/** The sprite for a belt facing each `Rotation`, indexed by it. */
+/** The sprite for a belt facing each `Rotation`, indexed by it. Phase 0. */
 export const BELT_SPRITES: readonly SpriteId[] = Object.freeze(['belt:0', 'belt:1', 'belt:2', 'belt:3']);
+
+/**
+ * How many chevron positions one belt animation cycle has. C13 task 8.
+ *
+ * The animation is a *discrete* phase baked into the sprite id rather than a
+ * clock the atlas reads, because `SpriteAtlas.draw` takes no time and giving
+ * it one would put a wall clock behind an interface whose whole purpose is
+ * that C29 can swap the implementation. Eight steps at two tiles a second is
+ * sixteen a second, which reads as motion; the phase is computed render-side
+ * from elapsed wall time (§6: presentation may read the clock freely) in
+ * `entity-view.ts`, and nothing in `game/` knows it exists.
+ */
+export const BELT_CHEVRON_PHASES = 8;
+
+/** The sprite for a belt facing `rotation`, `phase` steps into its cycle. */
+export function beltSprite(rotation: Rotation, phase = 0): SpriteId {
+  return `belt:${rotation}:${phase}`;
+}
+
+/** The sprite for one item, riding a belt or sitting in a panel. */
+export function itemSprite(itemId: string): SpriteId {
+  return `item:${itemId}`;
+}
 
 /** The sprite for a terrain type. Falls back to the missing marker. */
 export function terrainSprite(type: TileType): SpriteId {
@@ -198,7 +222,8 @@ export type SpriteDescriptor =
       readonly height: number;
       readonly rise: number;
     }
-  | { readonly kind: 'belt'; readonly rotation: Rotation }
+  | { readonly kind: 'belt'; readonly rotation: Rotation; readonly phase: number }
+  | { readonly kind: 'item'; readonly fill: string; readonly flat: boolean }
   | { readonly kind: 'player'; readonly activity: PlayerActivity; readonly facing: Rotation }
   | { readonly kind: 'missing' };
 
@@ -232,6 +257,9 @@ const CATEGORY_COLORS: Readonly<Record<string, ColorToken>> = Object.freeze({
 });
 
 const DEFAULT_CATEGORY_COLOR: ColorToken = 'panel-high';
+
+/** An item whose name does not match a palette token — C16's intermediates. */
+const DEFAULT_ITEM_COLOR: ColorToken = 'text-muted';
 
 /**
  * Resolve a sprite id, memoised.
@@ -275,12 +303,37 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     return Object.freeze({ kind: 'resource' as const, fill: color(token), bucket: Number(text) });
   }
 
-  if (namespace === 'belt' && parts.length === 2) {
+  if (namespace === 'belt' && (parts.length === 2 || parts.length === 3)) {
     // Matched as text, not with `Number`: `Number('')` is 0, so `belt:` would
     // otherwise parse as a perfectly good north-facing belt.
     const text = parts[1] ?? '';
     if (!/^[0-3]$/.test(text)) return MISSING;
-    return Object.freeze({ kind: 'belt' as const, rotation: Number(text) as Rotation });
+    // The phase is optional so that a ghost — which has a rotation but no
+    // animation — can name a belt without inventing a frame number.
+    const phaseText = parts[2] ?? '0';
+    if (!/^\d+$/.test(phaseText)) return MISSING;
+    return Object.freeze({
+      kind: 'belt' as const,
+      rotation: Number(text) as Rotation,
+      phase: Number(phaseText) % BELT_CHEVRON_PHASES,
+    });
+  }
+
+  if (namespace === 'item' && parts.length === 2) {
+    const itemId = parts[1] ?? '';
+    if (itemId.length === 0) return MISSING;
+    // An item's colour is the colour of the thing it came out of the ground
+    // as: `iron_ore` and `iron_plate` are both `--if-iron`, which is what
+    // makes a belt of iron read as one line whatever stage it is at. C29
+    // replaces this with real icons; until then a plate is the same colour
+    // drawn flat, because a flat sheet is what a plate is.
+    const flat = itemId.endsWith('_plate');
+    const token = itemId.replace(/_(ore|plate)$/, '');
+    return Object.freeze({
+      kind: 'item' as const,
+      fill: color(isColorToken(token) ? token : DEFAULT_ITEM_COLOR),
+      flat,
+    });
   }
 
   if (namespace === 'player' && parts.length === 3) {
@@ -400,7 +453,10 @@ export class ProceduralAtlas implements SpriteAtlas {
         drawPrism(ctx, sx, sy, zoom, sprite);
         return;
       case 'belt':
-        drawBelt(ctx, sx, sy, zoom, sprite.rotation);
+        drawBelt(ctx, sx, sy, zoom, sprite.rotation, sprite.phase);
+        return;
+      case 'item':
+        drawItem(ctx, sx, sy, zoom, sprite.fill, sprite.flat);
         return;
       case 'player':
         drawPlayer(ctx, sx, sy, zoom, sprite.activity, sprite.facing);
@@ -540,7 +596,32 @@ function drawResource(
   }
 }
 
-function drawBelt(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: number, rotation: Rotation): void {
+/** Chevrons drawn per belt tile, and how far apart they sit, in tile fractions. */
+const CHEVRON_COUNT = 3;
+const CHEVRON_SPACING = 0.28;
+
+/** Where the hindmost chevron starts, and how long its arms are. */
+const CHEVRON_ORIGIN = -0.52;
+const CHEVRON_HEAD = 0.2;
+const CHEVRON_HALF_WIDTH = 0.22;
+
+/**
+ * A belt: a flat plate with chevrons sliding along it the way items do.
+ *
+ * `phase` slides the whole row forward by one spacing over a full cycle, and
+ * the row is one chevron longer than it needs to be so the pattern is
+ * continuous rather than a shape that reappears at the back edge. It is
+ * render-side time and nothing else — no simulation state reaches this file,
+ * and an item's *actual* position is drawn separately, on top (§6).
+ */
+function drawBelt(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  rotation: Rotation,
+  phase: number,
+): void {
   fillFace(ctx, sx, sy, 1, 1, zoom, color('panel-high'));
 
   const forward = DIRECTION_OFFSETS[rotation];
@@ -557,15 +638,59 @@ function drawBelt(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: n
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
-  // Two chevrons pointing the way items travel. Offsets are fractions of a
-  // tile, so the belt reads the same at every zoom.
-  for (const along of [-0.28, 0.04]) {
+  const slide = (phase / BELT_CHEVRON_PHASES) * CHEVRON_SPACING;
+  for (let i = 0; i < CHEVRON_COUNT; i++) {
+    const along = CHEVRON_ORIGIN + i * CHEVRON_SPACING + slide;
     ctx.beginPath();
-    ctx.moveTo(sx + fx * along - gx * 0.26, sy + fy * along - gy * 0.26);
-    ctx.lineTo(sx + fx * (along + 0.24), sy + fy * (along + 0.24));
-    ctx.lineTo(sx + fx * along + gx * 0.26, sy + fy * along + gy * 0.26);
+    ctx.moveTo(sx + fx * along - gx * CHEVRON_HALF_WIDTH, sy + fy * along - gy * CHEVRON_HALF_WIDTH);
+    ctx.lineTo(sx + fx * (along + CHEVRON_HEAD), sy + fy * (along + CHEVRON_HEAD));
+    ctx.lineTo(sx + fx * along + gx * CHEVRON_HALF_WIDTH, sy + fy * along + gy * CHEVRON_HALF_WIDTH);
     ctx.stroke();
   }
+}
+
+/** How much of a tile one item covers. Four of these fit along a tile (§9). */
+export const ITEM_TILE_SIZE = 0.3;
+
+/** How far an item floats above the belt under it, in rise units. */
+const ITEM_RISE = 0.12;
+
+/** A plate lies flat; a lump of ore sits proud of the belt. */
+const PLATE_RISE = 0.04;
+
+/**
+ * One item: a small diamond sitting on whatever it is riding.
+ *
+ * Deliberately not a prism. An item is drawn four to a tile and there may be
+ * thousands on screen at once (§12), so it is two paths rather than seven, and
+ * the shading that tells a lump of ore from a plate is a lift and a tone
+ * rather than a pair of extra faces.
+ */
+function drawItem(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  fill: string,
+  flat: boolean,
+): void {
+  const lift = (flat ? PLATE_RISE : ITEM_RISE) * RISE_UNIT * zoom;
+
+  // A shadow on the surface below, so an item reads as being *on* the belt
+  // rather than as a stain in it.
+  groundFacePath(ctx, sx, sy, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
+  const previousAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = previousAlpha * 0.4;
+  ctx.fillStyle = color('bg-deep');
+  ctx.fill();
+  ctx.globalAlpha = previousAlpha;
+
+  groundFacePath(ctx, sx, sy - lift, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
+  ctx.fillStyle = shade(fill, flat ? TOP_TONE : LUMP_TOP_TONE);
+  ctx.fill();
+  ctx.strokeStyle = shade(fill, OUTLINE_TONE);
+  ctx.lineWidth = 1;
+  ctx.stroke();
 }
 
 /** How tall the placeholder figure stands, in rise units. Shorter than a chest. */

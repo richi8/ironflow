@@ -96,6 +96,25 @@ export class EntityStore {
 
   private nextEntityId: EntityId;
 
+  /**
+   * Bumped whenever an entity is added or actually removed. C13 task 3.
+   *
+   * §10 calls belt network topology derived state, rebuilt rather than
+   * persisted, and a derived index needs to know when the thing it indexes has
+   * changed. A counter is the cheapest honest answer: `BeltSystem` keeps the
+   * number it last built its downstream-first order from and rebuilds when the
+   * two differ. It is **not** authoritative state — it is never serialized,
+   * and a loaded world starts at zero with every index rebuilt on its first
+   * tick, which is what `rebuildDerived()` means (§10).
+   *
+   * Anything that changes an entity's position, rotation or existence must
+   * bump it. Today that is `create` and `cleanup`; a future `rotate` belongs
+   * here too, which is the other reason base fields are readonly (see
+   * `entity.ts`) — the only way to turn a belt will be a store method, and
+   * this is the line that method has to remember.
+   */
+  private revision = 0;
+
   constructor(options: EntityStoreOptions = {}) {
     this.footprintOf = options.footprintOf ?? UNIT_FOOTPRINTS;
     this.nextEntityId = options.nextId ?? FIRST_ENTITY_ID;
@@ -120,6 +139,11 @@ export class EntityStore {
    */
   get nextId(): EntityId {
     return this.nextEntityId;
+  }
+
+  /** How many times the set of entities has changed. See the field's note. */
+  get structureRevision(): number {
+    return this.revision;
   }
 
   /**
@@ -171,6 +195,7 @@ export class EntityStore {
     this.nextEntityId = id + 1;
 
     const entity = { ...init, id } as T;
+    this.revision += 1;
     this.entities.push(entity);
     this.byId.set(id, entity);
     this.bucket(type).push(entity);
@@ -288,6 +313,7 @@ export class EntityStore {
     }
 
     this.pending.clear();
+    this.revision += 1;
     return removed;
   }
 

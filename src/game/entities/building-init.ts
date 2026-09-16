@@ -9,8 +9,9 @@
  * is the file C13's belts and C15's furnaces add their own line to.
  *
  * The branch is on **content**, never on an id or an entity type:
- * `definition.mining` is what makes something a miner, so the day C21 adds an
- * electric one, nothing here changes. That is the same rule `build-system.ts`
+ * `definition.mining` is what makes something a miner, `definition.belt` a belt
+ * and `definition.storage` a container, so the day C21 adds an electric miner,
+ * nothing here changes. That is the same rule `build-system.ts`
  * states in its header, kept true by giving the type-specific part its own
  * place to live rather than by care.
  */
@@ -18,6 +19,8 @@
 import type { BuildingDefinition } from '../registries/building-registry.js';
 import type { Rotation } from '../world/coordinates.js';
 
+import { newBelt } from './belt-entity.js';
+import { newChest } from './chest-entity.js';
 import type { EntityInit } from './entity.js';
 import { newMiner } from './miner-entity.js';
 
@@ -35,5 +38,7 @@ export function initialBuildingState(
   rotation: Rotation,
 ): EntityInit {
   if (definition.mining !== undefined) return newMiner(x, y, rotation);
+  if (definition.belt !== undefined) return newBelt(x, y, rotation);
+  if (definition.storage !== undefined) return newChest(x, y, rotation);
   return { type: definition.entityType, x, y, rotation };
 }

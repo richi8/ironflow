@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DetachedCursor, GameController } from '../../src/game/game-controller.js';
 import { Game } from '../../src/game/game.js';
-import { EntityType } from '../../src/game/entities/entity-types.js';
+import { newChest, type ChestEntity } from '../../src/game/entities/chest-entity.js';
 import { MachineStatus, MACHINE_STATUS_COUNT, machineStatusName } from '../../src/game/entities/machine-status.js';
 import { newMiner, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { RATE_WINDOW_TICKS } from '../../src/game/production.js';
@@ -135,7 +135,7 @@ describe('status, for every status there is', () => {
 
   it('calls a building with nothing to do idle, and gives it no bar or rate', () => {
     const { simulation, controller, cursor } = inspecting();
-    const chest = simulation.entities.create({ type: EntityType.Chest, x: 0, y: 0, rotation: NORTH });
+    const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     cursor.setSelectedEntity(chest.id);
 
     const machine = controller.getInspectorView();

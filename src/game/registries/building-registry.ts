@@ -14,9 +14,10 @@
  * a building that cannot be placed for no stated reason.
  */
 
+import { BELT_TILE_UNITS } from '../entities/belt-entity.js';
 import { UNIT_FOOTPRINT, assertFootprint, type Footprint } from '../entities/entity.js';
 import { TPS } from '../simulation-clock.js';
-import { entityTypeName, isEntityType, type EntityType } from '../entities/entity-types.js';
+import { ENTITY_TYPE_COUNT, entityTypeName, isEntityType, type EntityType } from '../entities/entity-types.js';
 import type { ItemStack } from '../items/item-stack.js';
 import { isBuildable, isTileType, tileProperties, type TileType } from '../world/tile.js';
 import { isRotation, type Rotation } from '../world/coordinates.js';
@@ -90,6 +91,49 @@ export interface MiningConfig {
   readonly bufferCapacity: number;
 }
 
+/**
+ * How fast a belt carries things, as content authors it. C13 task 2.
+ *
+ * Its presence is what makes a building a belt — `building-init.ts` branches
+ * on this field and on nothing else — so C22's fast belt is a table entry
+ * rather than a code change. Authored in tiles per second because that is the
+ * unit §9's throughput table is written in.
+ */
+export interface BeltProperties {
+  /** §9's anchor: 2.0 at tier 1, which is 8.0 items/s over four slots. */
+  readonly tilesPerSecond: number;
+}
+
+/**
+ * The same, in the integers the belt system runs on.
+ *
+ * `unitsPerTick` is `tilesPerSecond * BELT_TILE_UNITS / TPS`, rounded once at
+ * registry-build time (§6 R3). It does not come out whole — 2.0 tiles/s is
+ * 17.07 units per tick and stores as 17 — and §9's 256 units per tile is what
+ * makes that acceptable: the belt runs at 1.992 tiles/s, which is the 0.4%
+ * inside the ±1% C13's acceptance criterion allows. The alternative is a
+ * sub-tile scale chosen to divide 30 evenly, which would put a number nobody
+ * can justify in §9's contract table to hide a rounding error nobody can see.
+ */
+export interface BeltConfig {
+  /** Fixed-point units an item advances each tick. `1..BELT_TILE_UNITS - 1`. */
+  readonly unitsPerTick: number;
+  /** What the content table said, kept for the renderer's chevron animation. */
+  readonly tilesPerSecond: number;
+}
+
+/**
+ * How much a container holds, as content authors it. §15: a chest is 24 slots.
+ *
+ * Its presence is what makes a building storage, in the same way `mining`
+ * makes one a miner: a belt ending at anything with this field puts its items
+ * in, and `HandSystem` lets the player take them out again.
+ */
+export interface StorageProperties {
+  /** Slots, each holding one stack of one item (C08's `SlotInventory`). */
+  readonly slots: number;
+}
+
 export interface BuildingDefinition {
   readonly id: string;
   readonly name: string;
@@ -118,6 +162,10 @@ export interface BuildingDefinition {
   readonly placement: PlacementRules;
   /** Present only on buildings that extract from the ground (C11). */
   readonly mining?: MiningProperties;
+  /** Present only on buildings that carry items along themselves (C13). */
+  readonly belt?: BeltProperties;
+  /** Present only on buildings that hold items for the player (C13). */
+  readonly storage?: StorageProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -134,6 +182,8 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   for (const stack of definition.buildCost) Object.freeze(stack);
   Object.freeze(definition.buildCost);
   if (definition.mining !== undefined) Object.freeze(definition.mining);
+  if (definition.belt !== undefined) Object.freeze(definition.belt);
+  if (definition.storage !== undefined) Object.freeze(definition.storage);
   return Object.freeze(definition);
 }
 
@@ -178,6 +228,32 @@ function validate(definition: BuildingDefinition): void {
     }
   }
 
+  const belt = definition.belt;
+  if (belt !== undefined) {
+    if (!Number.isFinite(belt.tilesPerSecond) || belt.tilesPerSecond <= 0) {
+      throw new Error(`BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which is not a speed.`);
+    }
+    const units = unitsPerTick(belt);
+    if (units < 1) {
+      throw new Error(
+        `BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which is under one fixed-point unit per tick.`,
+      );
+    }
+    if (units >= BELT_TILE_UNITS) {
+      // An item that advances a whole tile in one tick would step straight
+      // over the tile in front without ever being on it — so blocking, curves
+      // and hand-off would all be decided by a tile the item never visited.
+      throw new Error(
+        `BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which skips whole tiles in one tick.`,
+      );
+    }
+  }
+
+  const storage = definition.storage;
+  if (storage !== undefined && (!Number.isInteger(storage.slots) || storage.slots < 1)) {
+    throw new Error(`BuildingRegistry: ${where} has ${storage.slots} slots; it must be whole and above 0.`);
+  }
+
   if (definition.placement.onTerrain.length === 0) {
     throw new Error(`BuildingRegistry: ${where} accepts no terrain at all, so it could never be placed.`);
   }
@@ -204,6 +280,11 @@ function ticksPerItem(mining: MiningProperties): number {
   return Math.round(TPS / mining.itemsPerSecond);
 }
 
+/** Tiles per second as whole fixed-point units per tick (§6 R3). See `BeltConfig`. */
+function unitsPerTick(belt: BeltProperties): number {
+  return Math.round((belt.tilesPerSecond * BELT_TILE_UNITS) / TPS);
+}
+
 export class BuildingRegistry {
   /**
    * Definition order, which is menu order and hotkey order. The array is the
@@ -220,6 +301,19 @@ export class BuildingRegistry {
    * because the mining system iterates entities, and an entity carries a type.
    */
   private readonly miningByType = new Map<EntityType, MiningConfig>();
+
+  /** Belt content, converted to fixed-point units per tick once (§6 R3). */
+  private readonly beltByType = new Map<EntityType, BeltConfig>();
+
+  private readonly storageByType = new Map<EntityType, StorageProperties>();
+
+  /**
+   * Entity types whose buildings have an output buffer something else can
+   * empty, ascending. C13 task 5's "back to the source machine" needs a list
+   * of the machines a belt can be loaded from, and it has to be in a fixed
+   * order (§6 R4) that does not depend on which building was defined first.
+   */
+  private readonly outputTypes: readonly EntityType[];
 
   constructor(definitions: readonly BuildingDefinition[]) {
     const frozen: BuildingDefinition[] = [];
@@ -246,9 +340,25 @@ export class BuildingRegistry {
           Object.freeze({ ticksPerItem: ticksPerItem(value.mining), bufferCapacity: value.mining.bufferCapacity }),
         );
       }
+      if (value.belt !== undefined) {
+        this.beltByType.set(
+          value.entityType,
+          Object.freeze({ unitsPerTick: unitsPerTick(value.belt), tilesPerSecond: value.belt.tilesPerSecond }),
+        );
+      }
+      if (value.storage !== undefined) {
+        this.storageByType.set(value.entityType, value.storage);
+      }
     }
 
     this.definitions = Object.freeze(frozen);
+    // Built by walking the *type numbers*, not the definitions, so the order is
+    // the enum's and not the content table's (§6 R4).
+    this.outputTypes = Object.freeze(
+      Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => type as EntityType).filter((type) =>
+        this.miningByType.has(type),
+      ),
+    );
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */
@@ -287,6 +397,34 @@ export class BuildingRegistry {
    */
   miningFor(type: EntityType): MiningConfig | null {
     return this.miningByType.get(type) ?? null;
+  }
+
+  /**
+   * How this kind of building carries items, or null if it is not a belt (C13).
+   *
+   * Null rather than a throw, for the reason `miningFor` gives: the belt
+   * system asks about whatever is in front of a belt, and "that is not a belt"
+   * is the ordinary answer rather than a content error.
+   */
+  beltFor(type: EntityType): BeltConfig | null {
+    return this.beltByType.get(type) ?? null;
+  }
+
+  /** How much this kind of building stores, or null if it stores nothing (C13). */
+  storageFor(type: EntityType): StorageProperties | null {
+    return this.storageByType.get(type) ?? null;
+  }
+
+  /**
+   * Every entity type with an output buffer, ascending by type number.
+   *
+   * What C13's belt system walks to unload machines onto the belts in front of
+   * them. Content decides membership — a building has an output because it has
+   * `mining`, never because of its id (§19 rule 17) — and C15's furnace joins
+   * the list by gaining a recipe output rather than by editing a system.
+   */
+  outputBufferTypes(): readonly EntityType[] {
+    return this.outputTypes;
   }
 
   /**

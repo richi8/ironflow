@@ -13,6 +13,12 @@
  * it, rotates) and a chest is the building with none of them. Between them
  * they exercise the whole pipeline; the other nine arrive with the systems
  * that make them do something.
+ *
+ * C13 adds the third, the belt, and gives the chest the insides §15 always
+ * said it had. Both are one field each — `belt` and `storage` — because what
+ * a building *is* is decided by the content it carries and never by its id
+ * (§19 rule 17): the whole of "this thing moves items" is `tilesPerSecond`,
+ * and the whole of "this thing holds items" is `slots`.
  */
 
 import { EntityType } from '../entities/entity-types.js';
@@ -50,6 +56,25 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     sprite: 'building:extraction:MI:2x2:2',
   },
   {
+    id: 'belt',
+    name: 'Transport Belt',
+    entityType: EntityType.Belt,
+    category: 'logistics',
+    size: { width: 1, height: 1 },
+    // Four, and the only building where the rotation is the whole mechanic:
+    // a belt's facing is the direction items travel (C13).
+    rotationCount: 4,
+    buildCost: [{ itemId: 'belt', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §9's tier-1 anchor: 2.0 tiles/s over four slots per tile is 8.0 items/s,
+    // and that number is what every machine rate in §15 is derived from.
+    // Changing it means re-deriving the content bible (§19 rule 18).
+    belt: { tilesPerSecond: 2.0 },
+    // The rotation is appended by the renderer, which is the only layer
+    // allowed to know that `belt:1` names a picture — see `entity-view.ts`.
+    sprite: 'belt',
+  },
+  {
     id: 'chest',
     name: 'Chest',
     entityType: EntityType.Chest,
@@ -60,6 +85,9 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     rotationCount: 1,
     buildCost: [{ itemId: 'chest', count: 1 }],
     placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §15's 24 slots. A **balance number** for C20: it is how much buffer a
+    // factory gets for free before the player has to think about throughput.
+    storage: { slots: 24 },
     sprite: 'building:storage:CH:1x1:1',
   },
 ]);

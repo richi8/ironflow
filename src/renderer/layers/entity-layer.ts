@@ -63,7 +63,7 @@ export function depthKey(entity: RenderEntity): number {
     throw new RangeError(`depthKey: layer ${entity.layer} is outside [0, ${RENDER_LAYER_COUNT}).`);
   }
 
-  const nearestCorner = entity.x + entity.width - 1 + (entity.y + entity.height - 1);
+  const nearestCorner = entity.depthRow ?? entity.x + entity.width - 1 + (entity.y + entity.height - 1);
   return nearestCorner * DEPTH_TILE_STRIDE + entity.layer * DEPTH_LAYER_STRIDE + entity.id;
 }
 
@@ -98,6 +98,9 @@ function asDrawable(player: PlayerRenderView): RenderEntity {
   };
 }
 
+/** No items on screen. Shared and frozen: every test that draws a bare world. */
+const NO_ITEMS: readonly RenderEntity[] = Object.freeze([]);
+
 export class EntityLayer {
   private readonly atlas: SpriteAtlas;
 
@@ -124,10 +127,20 @@ export class EntityLayer {
     camera: Camera,
     bounds: TileBounds,
     player: PlayerRenderView | null = null,
+    items: readonly RenderEntity[] = NO_ITEMS,
   ): void {
     this.visible.length = 0;
     for (const entity of entities) {
       if (overlapsBounds(entity, bounds)) this.visible.push(entity);
+    }
+
+    // Items on belts (C13) are sorted in with everything else rather than
+    // drawn over it, so a crate standing between the camera and a belt hides
+    // the ore on it. They arrive separately for the same reason the player
+    // does: this array is also what the picker searches, and an item is not
+    // something the cursor can hit — see `render-state.ts`.
+    for (const item of items) {
+      if (overlapsBounds(item, bounds)) this.visible.push(item);
     }
 
     // The player is sorted in with everything else rather than drawn over it,

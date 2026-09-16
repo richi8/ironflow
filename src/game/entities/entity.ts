@@ -165,6 +165,45 @@ export function footprintTileAt(
   return { x: x + (wrapped % extent.width), y: y + Math.floor(wrapped / extent.width) };
 }
 
+/**
+ * Visit the tiles just *outside* a placement, on the side its rotation faces.
+ *
+ * A building's rotation is its output side (C11: "a miner that cannot be
+ * turned towards the belt is a miner that dictates the factory's layout"), and
+ * a 2x2 miner facing north has two tiles in front of it rather than one. This
+ * walks them, in the same row-major order `forEachFootprintTile` uses, so the
+ * tile a machine tries first is a fact anyone can read off the footprint
+ * rather than an accident of how the loop was written (§6 R4).
+ *
+ * Tiles outside the packable range are visited like any other — the caller
+ * decides what a coordinate at the edge of the world means, because the store
+ * and the world answer that question differently.
+ */
+export function forEachOutputTile(
+  x: number,
+  y: number,
+  footprint: Footprint,
+  rotation: Rotation,
+  visit: (tileX: number, tileY: number) => void,
+): void {
+  assertFootprint(footprint);
+  const extent = footprintExtent(footprint, rotation);
+  switch (rotation) {
+    case 0:
+      for (let dx = 0; dx < extent.width; dx++) visit(x + dx, y - 1);
+      return;
+    case 1:
+      for (let dy = 0; dy < extent.height; dy++) visit(x + extent.width, y + dy);
+      return;
+    case 2:
+      for (let dx = 0; dx < extent.width; dx++) visit(x + dx, y + extent.height);
+      return;
+    case 3:
+      for (let dy = 0; dy < extent.height; dy++) visit(x - 1, y + dy);
+      return;
+  }
+}
+
 /** How many tiles a placement covers. */
 export function footprintTileCount(footprint: Footprint, rotation: Rotation): number {
   assertFootprint(footprint);

@@ -104,3 +104,20 @@ export function minerOutput(miner: MinerEntity): ItemStack | null {
   const itemId = resourceItemId(miner.resourceType);
   return itemId === null ? null : { itemId, count: miner.outputCount };
 }
+
+/**
+ * Take up to `amount` items out of a miner's buffer. Returns what was taken.
+ *
+ * The one place that *writes* the buffer from outside the mining system, and
+ * it exists because C13 gave the buffer a second reader: the player's hand
+ * (C12) and a belt running past the miner's output side both empty it, and
+ * `outputCount -= n` written out twice is two chances to forget that the
+ * number may not go below zero. Partial and honest, like every other transfer
+ * in the game (C08).
+ */
+export function takeMinerOutput(miner: MinerEntity, amount: number): number {
+  if (!Number.isInteger(amount) || amount <= 0) return 0;
+  const taken = Math.min(miner.outputCount, amount);
+  miner.outputCount -= taken;
+  return taken;
+}

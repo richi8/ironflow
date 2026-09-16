@@ -25,7 +25,18 @@
 
 import type { CommandSink } from '../game/commands/command-processor.js';
 import type { EntityId } from '../game/commands/command.js';
-import { NORTH, isRotation, type Rotation, type TileCoord } from '../game/world/coordinates.js';
+import {
+  EAST,
+  NORTH,
+  SOUTH,
+  TILE_MAX,
+  TILE_MIN,
+  WEST,
+  isRotation,
+  tileKey,
+  type Rotation,
+  type TileCoord,
+} from '../game/world/coordinates.js';
 
 import { KeyboardInput } from './keyboard-input.js';
 import { DEFAULT_KEYBINDINGS, type InputAction, type KeyBindings } from './keybindings.js';
@@ -82,6 +93,101 @@ export interface TilePicker {
 export interface BuildTool {
   readonly buildingId: string;
   readonly rotationCount: 1 | 2 | 4;
+  /**
+   * Is this a building laid in *lines* rather than one tile at a time? C13
+   * task 7.
+   *
+   * A belt is, and nothing else is yet. Like `rotationCount`, it travels with
+   * the tool because this layer may not read content data (§4): the controller
+   * knows a belt by its `belt` properties and says so here, so the rule stays
+   * "content decides" (§19 rule 17) without the input layer learning what a
+   * belt is.
+   */
+  readonly lineBuild: boolean;
+}
+
+/** One tile of a drag-built line: where it goes and which way it faces. */
+export interface LineSegment {
+  readonly x: number;
+  readonly y: number;
+  readonly rotation: Rotation;
+}
+
+/**
+ * The most tiles one drag may lay. A bound on the burst, not a design limit.
+ *
+ * A drag can only cross tiles that are on screen, so this is far above any
+ * real gesture; it is here because the path is recomputed from the drag's
+ * *anchor* on every pointer move, and an anchor left behind by a zoom-out
+ * should not be able to ask for a line across the world (§7's queue cap is the
+ * backstop, not the plan).
+ */
+export const MAX_LINE_TILES = 512;
+
+/** The rotation that takes you from one tile to the next one along. */
+function directionTo(from: TileCoord, to: TileCoord): Rotation | null {
+  if (to.x === from.x + 1 && to.y === from.y) return EAST;
+  if (to.x === from.x - 1 && to.y === from.y) return WEST;
+  if (to.x === from.x && to.y === from.y + 1) return SOUTH;
+  if (to.x === from.x && to.y === from.y - 1) return NORTH;
+  return null;
+}
+
+/**
+ * The axis-aligned path from `start` to `end`, with one automatic corner.
+ *
+ * C13 task 7 in full: "click-drag lays a path (axis-aligned, with an automatic
+ * corner)". The long axis is walked first, which puts the corner near the end
+ * the player is pointing at — the same shape every belt-laying tool in the
+ * genre produces, and the one that matches the gesture, because a player
+ * dragging mostly east has been describing an eastward run.
+ *
+ * Each tile faces the next one. The **last** tile has no next, so it inherits
+ * the one before it, and a path of a single tile keeps whatever rotation the
+ * player had already chosen — a click with a belt held must place the belt
+ * they can see under the cursor.
+ *
+ * Exported because it is the whole of the feature's logic and deserves a test
+ * that does not need a DOM.
+ */
+export function beltLine(start: TileCoord, end: TileCoord, fallback: Rotation): LineSegment[] {
+  const stepX = Math.sign(end.x - start.x);
+  const stepY = Math.sign(end.y - start.y);
+  const xFirst = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+
+  const tiles: TileCoord[] = [{ x: start.x, y: start.y }];
+  let x = start.x;
+  let y = start.y;
+  const walkX = (): void => {
+    while (x !== end.x && tiles.length < MAX_LINE_TILES) {
+      x += stepX;
+      tiles.push({ x, y });
+    }
+  };
+  const walkY = (): void => {
+    while (y !== end.y && tiles.length < MAX_LINE_TILES) {
+      y += stepY;
+      tiles.push({ x, y });
+    }
+  };
+  if (xFirst) {
+    walkX();
+    walkY();
+  } else {
+    walkY();
+    walkX();
+  }
+
+  const segments: LineSegment[] = [];
+  for (let i = 0; i < tiles.length; i++) {
+    const here = tiles[i];
+    if (here === undefined) continue;
+    const next = tiles[i + 1];
+    const rotation = next === undefined ? undefined : directionTo(here, next);
+    segments.push({ x: here.x, y: here.y, rotation: rotation ?? segments[i - 1]?.rotation ?? fallback });
+  }
+
+  return segments;
 }
 
 export interface InputManagerOptions {
@@ -180,6 +286,23 @@ export class InputManager {
   private selection: EntityId | null = null;
   /** The tile the current drag last enqueued for. See `actOnTile`. */
   private lastActedTile: TileCoord | null = null;
+  /** Where a line-build drag was anchored, or null when one is not running. */
+  private lineStart: TileCoord | null = null;
+  /** The tile the line currently reaches, so the release can finish it. */
+  private lineEnd: TileCoord | null = null;
+  /**
+   * Tiles this drag has already asked for, and which way it asked for them.
+   *
+   * Without it the path would be re-enqueued on every pointer move and every
+   * tile after the first would come back `'occupied'` — one toast per frame,
+   * which is the "invisible rejection" problem in reverse (§7).
+   *
+   * A `Set` would do; the rotation is kept because it is what a reader wants
+   * when this is inspected. A `Map` is safe here regardless: this is
+   * presentation state in the input layer, not a simulation system, and it is
+   * only ever asked `has` (§6 R4).
+   */
+  private readonly laid = new Map<number, Rotation>();
   private tool: BuildTool | null = null;
   private toolRotation: Rotation = NORTH;
   /**
@@ -380,7 +503,15 @@ export class InputManager {
       // rule to write down.
       if (this.tool === null) this.selection = this.hoveredEntity;
       this.lastActedTile = null;
-      this.actOnTile(this.hovered);
+      this.laid.clear();
+      // A belt drags out a *line* anchored where the button went down (C13
+      // task 7); everything else places one building per tile crossed.
+      this.lineStart = this.tool?.lineBuild === true ? this.hovered : null;
+      this.lineEnd = null;
+      // A line lays nothing on the press: which way the anchor tile should
+      // face is not known until the drag has left it. A press that never
+      // moves still places one belt, facing the ghost — `endDrag` does it.
+      if (this.lineStart === null) this.actOnTile(this.hovered);
       return;
     }
 
@@ -428,8 +559,18 @@ export class InputManager {
     }
 
     this.refreshHover();
-    this.actOnTile(this.hovered);
+    this.dragOverTile();
   }
+
+  /** What a left-drag does to the tile it is currently over. */
+  private dragOverTile(): void {
+    if (this.lineStart === null) {
+      this.actOnTile(this.hovered);
+      return;
+    }
+    this.updateLine(this.hovered);
+  }
+
 
   private handleUp(sample: PointerSample): void {
     if (this.drag?.pointerId !== sample.pointerId) return;
@@ -453,7 +594,11 @@ export class InputManager {
     const drag = this.drag;
     if (drag === null) return;
     this.drag = null;
+    this.finishLine();
     this.lastActedTile = null;
+    this.lineStart = null;
+    this.lineEnd = null;
+    this.laid.clear();
     this.mouse.release(drag.pointerId);
     this.canvas.classList.remove(DRAGGING_CLASS);
     this.stopMining();
@@ -586,6 +731,82 @@ export class InputManager {
       y: tile.y,
       rotation: this.toolRotation,
     });
+  }
+
+  /**
+   * Extend the belt line from the drag's anchor to `tile`. C13 task 7.
+   *
+   * One `build` per tile of the path, and one only: the path is recomputed
+   * from the anchor on every pointer move, so almost all of it is already
+   * asked for and is skipped.
+   *
+   * **The tile under the cursor is not laid until the drag passes it or ends.**
+   * That one rule is what keeps the gesture free of `remove` commands. A
+   * tile's rotation is decided by the tile *after* it, so the last tile of the
+   * path is the only one whose direction is still a guess — and it is exactly
+   * the tile that becomes the corner when the player turns. Laying it early
+   * means laying it the wrong way and then having to take it up, and a `remove`
+   * and a `build` in the same tick do not work: C05 defers removal to the
+   * cleanup phase, so the build that follows is honestly refused as
+   * `'occupied'` and the corner is left as a hole. Holding it back for one
+   * tile costs nothing — the ghost is still drawn under the cursor — and the
+   * corner comes out facing the way the player turned, first time.
+   */
+  private updateLine(tile: TileCoord | null): void {
+    const start = this.lineStart;
+    if (start === null || tile === null) return;
+    // Switching from mining to placing mid-drag: the same hand-over
+    // `actOnTile` makes, for the same reason.
+    this.stopMining();
+    this.lineEnd = tile;
+    this.layPath(start, tile, false);
+  }
+
+  /**
+   * Finish the line: lay the tile the drag ended on.
+   *
+   * Also what turns a press that never moved into a single belt, facing the
+   * rotation the ghost was showing.
+   */
+  private finishLine(): void {
+    const start = this.lineStart;
+    if (start === null) return;
+    this.layPath(start, this.lineEnd ?? start, true);
+  }
+
+  private layPath(start: TileCoord, end: TileCoord, includeLast: boolean): void {
+    const tool = this.tool;
+    if (tool === null) return;
+
+    const path = beltLine(start, end, this.toolRotation);
+    const count = includeLast ? path.length : path.length - 1;
+    for (let i = 0; i < count; i++) {
+      const segment = path[i];
+      if (segment === undefined) continue;
+      if (segment.x < TILE_MIN || segment.x > TILE_MAX || segment.y < TILE_MIN || segment.y > TILE_MAX) continue;
+
+      const key = tileKey(segment.x, segment.y);
+      // Already asked for. A tile can only be asked for with a *different*
+      // rotation by a drag that backtracked past its own corner and then
+      // turned; leaving it alone is the better trade than taking up a belt the
+      // player has paid for, and may already have items on, to fix a facing
+      // they can fix with one click.
+      if (this.laid.has(key)) continue;
+
+      this.laid.set(key, segment.rotation);
+      this.commands.enqueue({
+        type: 'build',
+        buildingId: tool.buildingId,
+        x: segment.x,
+        y: segment.y,
+        rotation: segment.rotation,
+      });
+    }
+
+    // The held rotation follows the line, so letting go and clicking once more
+    // continues the run in the direction the player was dragging.
+    const last = path[path.length - 1];
+    if (last !== undefined) this.toolRotation = last.rotation;
   }
 
   /** Ask the simulation to demolish whatever stands on a tile (C06 task 6). */

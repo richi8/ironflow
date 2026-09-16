@@ -97,6 +97,19 @@ export interface RenderEntity {
    */
   readonly sprite: SpriteId;
   readonly layer: RenderLayer;
+  /**
+   * The depth row this sorts in, when the footprint is the wrong answer (C13).
+   *
+   * Normally `x + width - 1 + y + height - 1` — the corner nearest the camera
+   * (§5) — and that is what a drawable leaving this out gets. An item on a
+   * belt needs the override: it is drawn at its real position, which for the
+   * back half of a tile is a depth row *behind* the belt carrying it, so
+   * without this the belt's own flat face paints over it for half of every
+   * tile. Items therefore sort in their belt's row, where `RenderLayer`
+   * decides, nudged by a fraction of a row so that two items on one tile still
+   * overlap in the right order. See `entity-view.ts`.
+   */
+  readonly depthRow?: number;
 }
 
 /**
@@ -168,6 +181,16 @@ export interface RenderState {
   readonly world: WorldView;
   /** Unordered. The entity layer sorts by depth key; see `entity-layer.ts`. */
   readonly entities: readonly RenderEntity[];
+  /**
+   * Items riding belts (C13), sorted into the same depth pass as `entities`.
+   *
+   * Kept out of that array for the reason `player` is: `ScenePicker` searches
+   * whatever is in it, and an item is not something the cursor can hit — it
+   * has no entity id to report (§9: belt items are not entities), so a pick
+   * landing on one would hand the inspector `NO_ENTITY`, which means "nothing"
+   * everywhere else in the codebase.
+   */
+  readonly items: readonly RenderEntity[];
   /**
    * The player, drawn into the depth-sorted pass but kept out of `entities`.
    *

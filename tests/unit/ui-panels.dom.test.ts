@@ -106,10 +106,10 @@ describe('mounting', () => {
     // Nine slots whatever the content table holds: a slot with nothing behind
     // it is an empty tile that fills itself when a building is added (C06).
     expect(root.querySelectorAll('.if-slot').length).toBe(9);
-    // Two buildings today, and one group each, because a category with no
+    // Three buildings today, and one group each, because a category with no
     // building in it gets no heading.
-    expect(root.querySelectorAll('.if-build-row').length).toBe(2);
-    expect(root.querySelectorAll('.if-build-menu__group').length).toBe(2);
+    expect(root.querySelectorAll('.if-build-row').length).toBe(3);
+    expect(root.querySelectorAll('.if-build-menu__group').length).toBe(3);
   });
 
   it('starts with the build menu closed and the hand empty', () => {
@@ -134,10 +134,10 @@ describe('the toolbar drives the game through commands only', () => {
   it('selects a building, places it and removes it', () => {
     const { root, controller, simulation, cursor } = harness;
 
-    query<HTMLButtonElement>(root, '.if-slot[data-slot="2"]').click();
+    query<HTMLButtonElement>(root, '.if-slot[data-slot="3"]').click();
     expect(controller.getSelectedBuilding()).toBe('chest');
     controller.pump();
-    expect(query<HTMLElement>(root, '.if-slot[data-slot="2"]').classList.contains('is-selected')).toBe(true);
+    expect(query<HTMLElement>(root, '.if-slot[data-slot="3"]').classList.contains('is-selected')).toBe(true);
 
     // The click changed the selection and nothing else: the world is untouched
     // until a command runs (§19 rule 8).
@@ -231,7 +231,7 @@ describe('no panel rebuilds its subtree on update', () => {
     // what it forbids is the *elements* around them being thrown away, and
     // none were.
     expect(records.length).toBeGreaterThan(0);
-    expect(tileValue(root, 'ITEMS')).toBe('27');
+    expect(tileValue(root, 'ITEMS')).toBe('37');
   });
 });
 

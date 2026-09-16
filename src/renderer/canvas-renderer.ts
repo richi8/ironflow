@@ -117,7 +117,7 @@ export class CanvasRenderer implements Renderer {
     const bounds = padBounds(camera.visibleTileBounds(), TALLEST_SPRITE_TILES);
 
     this.terrain.draw(ctx, state.world, camera, bounds, this.dpr);
-    this.entities.draw(ctx, state.entities, camera, bounds, state.player);
+    this.entities.draw(ctx, state.entities, camera, bounds, state.player, state.items);
     this.overlay.draw(ctx, state, camera);
   }
 

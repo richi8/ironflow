@@ -31,16 +31,22 @@
  * Content, never an id (§19 rule 17). A machine has an output buffer because
  * its building definition has `mining` on it — the same test `building-init.ts`
  * and `MiningSystem` already make — so C21's electric miner is a table entry
- * and nothing here changes. Nothing has an *input* buffer yet: a miner's
- * buffer is an output and a chest has no inventory until C13, so `insert`
- * refuses everything. That refusal is the permanent answer for a miner, not a
- * placeholder.
+ * and nothing here changes. C13 adds the second kind of thing a player can
+ * take from: anything with `storage` on its definition, which is a chest.
+ *
+ * Nothing has an *input* buffer yet, so `insert` still refuses everything.
+ * That refusal is the permanent answer for a miner; C15's furnace is the first
+ * machine with somewhere to put an ingredient, and it is the chunk that fills
+ * the arm in. A chest is filled by the belt running into it (C13) and emptied
+ * by the take button, which is the loop C13's acceptance criteria describe.
  */
 
+import { asChest } from '../entities/chest-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { forEachFootprintTile, type Entity } from '../entities/entity.js';
-import { asMiner, minerOutput } from '../entities/miner-entity.js';
+import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
+import { SlotInventory } from '../items/inventory.js';
 import type { ItemStack } from '../items/item-stack.js';
 import { MINE_RANGE_TILES, type PlayerState } from '../player/player-state.js';
 import { BuildingRegistry } from '../registries/building-registry.js';
@@ -90,17 +96,73 @@ export class HandSystem {
   }
 
   /**
-   * What is waiting in a machine's output buffer, or null when it holds
-   * nothing a player could take.
+   * What is waiting in a machine's output, as stacks a player could take.
    *
-   * The one place that knows how a machine's output is *stored* — for a miner,
-   * a bare count whose item is implied by `resourceType` (C11). The inspector
+   * The one place that knows how a building's output is *stored*: for a miner,
+   * a bare count whose item is implied by `resourceType` (C11); for a chest,
+   * the plain `[itemId, count]` array the entity carries (C13). The inspector
    * reads it through the controller and this system reads it to empty it, so
    * the panel can never offer a take the simulation will not honour.
+   *
+   * A list rather than C12's single stack, because a chest holds more than one
+   * kind of thing. Ordered by item id for a chest and single for a miner, so
+   * the inspector's rows never reorder under the player's cursor.
    */
-  outputOf(entity: Entity): ItemStack | null {
+  outputsOf(entity: Entity): readonly ItemStack[] {
     const miner = asMiner(entity);
-    return miner === null ? null : minerOutput(miner);
+    if (miner !== null) {
+      const output = minerOutput(miner);
+      return output === null ? NO_STACKS : [output];
+    }
+
+    const chest = asChest(entity);
+    if (chest !== null && this.buildings.storageFor(entity.type) !== null) {
+      const stacks: ItemStack[] = [];
+      for (const [itemId, count] of chest.contents) {
+        if (this.items.isItemId(itemId)) stacks.push({ itemId: this.items.byId(itemId).id, count });
+      }
+      return stacks;
+    }
+
+    return NO_STACKS;
+  }
+
+  /**
+   * How many of one item a machine would hand over. Zero for "none of that".
+   *
+   * Asked by string id, because that is the vocabulary a command speaks (§7),
+   * and answered from `outputsOf` so there is one definition of "what is in
+   * there" rather than a second one that can disagree with the panel.
+   */
+  private availableOf(entity: Entity, itemId: string): number {
+    for (const stack of this.outputsOf(entity)) {
+      if (stack.itemId === itemId) return stack.count;
+    }
+    return 0;
+  }
+
+  /**
+   * Take `amount` of one item out of a machine. Returns what actually left.
+   *
+   * The write half of `outputsOf`, and the reason both are here: a miner's
+   * count and a chest's array are two ways of storing the same idea, and the
+   * two places that empty them — this and C13's belt system — must not each
+   * carry their own copy of how.
+   */
+  private removeFrom(entity: Entity, itemId: string, amount: number): number {
+    const miner = asMiner(entity);
+    if (miner !== null) return takeMinerOutput(miner, amount);
+
+    const chest = asChest(entity);
+    const storage = this.buildings.storageFor(entity.type);
+    if (chest === null || storage === null) return 0;
+
+    const inventory = new SlotInventory({
+      slots: storage.slots,
+      stackSizeOf: this.items.stackSizeOf,
+      contents: chest.contents,
+    });
+    return inventory.remove(this.items.idOf(itemId), amount);
   }
 
   /**
@@ -113,24 +175,23 @@ export class HandSystem {
     if (entity === undefined) return 'unknown_entity';
     if (!this.canReach(entity)) return 'out_of_reach';
 
-    const output = this.outputOf(entity);
-    if (output === null || output.itemId !== itemId) return 'nothing_to_take';
     // An item the registry has never heard of cannot be put in a slot
     // inventory, which keys on runtime ids. It is the same "there is none of
     // that in there" from the player's side, so it needs no reason of its own.
     if (!this.items.has(itemId)) return 'nothing_to_take';
+    const available = this.availableOf(entity, itemId);
+    if (available <= 0) return 'nothing_to_take';
 
     const runtimeId = this.items.idOf(itemId);
     const space = this.player.inventory.spaceFor(runtimeId);
     if (space <= 0) return 'inventory_full';
 
-    const moved = this.player.inventory.add(runtimeId, Math.min(amount, output.count, space));
+    const moved = this.player.inventory.add(runtimeId, Math.min(amount, available, space));
     if (moved === 0) return 'inventory_full';
 
-    // Only ever reduced, and only by what the bag actually accepted — the
-    // remainder stays in the machine rather than evaporating between the two.
-    const miner = asMiner(entity);
-    if (miner !== null) miner.outputCount -= moved;
+    // Only by what the bag actually accepted — the remainder stays in the
+    // machine rather than evaporating between the two.
+    this.removeFrom(entity, itemId, moved);
     return null;
   }
 
@@ -148,3 +209,6 @@ export class HandSystem {
     return 'not_accepted';
   }
 }
+
+/** Nothing to take. Shared and frozen: most buildings, most of the time. */
+const NO_STACKS: readonly ItemStack[] = Object.freeze([]);

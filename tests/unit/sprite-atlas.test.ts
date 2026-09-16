@@ -123,10 +123,18 @@ describe('sprite ids', () => {
     });
   });
 
-  it('resolves each belt direction', () => {
+  it('resolves each belt direction, with and without an animation phase', () => {
     for (const rotation of [0, 1, 2, 3]) {
-      expect(describeSprite(`belt:${rotation}`)).toEqual({ kind: 'belt', rotation });
+      // A belt named without a phase is a still one: the ghost has a direction
+      // and no animation, and must not have to invent a frame number (C13).
+      expect(describeSprite(`belt:${rotation}`)).toEqual({ kind: 'belt', rotation, phase: 0 });
+      expect(describeSprite(`belt:${rotation}:5`)).toEqual({ kind: 'belt', rotation, phase: 5 });
     }
+    // Out-of-range phases wrap rather than draw a magenta marker: the phase is
+    // a wall-clock frame counter, and a renderer that stopped drawing belts
+    // because a counter ran past eight would be the worst kind of bug.
+    expect(describeSprite('belt:1:11')).toEqual({ kind: 'belt', rotation: 1, phase: 3 });
+    expect(describeSprite('belt:1:x')).toEqual({ kind: 'missing' });
   });
 
   it('draws a marker rather than throwing on an id it cannot parse', () => {

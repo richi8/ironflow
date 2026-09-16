@@ -87,7 +87,7 @@ describe('GameController views', () => {
     expect(chest?.cost).toEqual([{ itemId: 'chest', count: 1, held: 2 }]);
     expect(miner?.affordable).toBe(false);
     // Content order is hotbar order, and only the first nine get a key.
-    expect(entries.map((entry) => entry.hotkey)).toEqual([1, 2]);
+    expect(entries.map((entry) => entry.hotkey)).toEqual([1, 2, 3]);
   });
 
   it('returns null for a building view of something that is not there', () => {
@@ -181,15 +181,15 @@ describe('GameController build tool', () => {
 
     controller.selectSlot(1);
     expect(controller.getSelectedBuilding()).toBe('miner');
-    expect(cursor.buildTool).toEqual({ buildingId: 'miner', rotationCount: 4 });
+    expect(cursor.buildTool).toEqual({ buildingId: 'miner', rotationCount: 4, lineBuild: false });
 
     controller.selectSlot(1);
     expect(controller.getSelectedBuilding()).toBeNull();
 
-    // Slot 3 has no building behind it yet, and a slot past the hotbar is not
+    // Slot 4 has no building behind it yet, and a slot past the hotbar is not
     // a slot at all. Neither may throw; both empty the hand.
-    controller.selectSlot(2);
     controller.selectSlot(3);
+    controller.selectSlot(4);
     expect(controller.getSelectedBuilding()).toBeNull();
     controller.selectSlot(HOTBAR_SLOTS + 1);
     expect(controller.getSelectedBuilding()).toBeNull();

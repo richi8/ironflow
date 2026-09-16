@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandProcessor } from '../../src/game/commands/command-processor.js';
 import { Simulation } from '../../src/game/simulation.js';
-import type { TileCoord } from '../../src/game/world/coordinates.js';
+import { EAST, NORTH, SOUTH, WEST, type TileCoord } from '../../src/game/world/coordinates.js';
 import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
 import { World } from '../../src/game/world/world.js';
 import { Camera } from '../../src/renderer/camera.js';
-import { InputManager, type CameraControl, type TilePicker } from '../../src/input/input-manager.js';
+import {
+  InputManager,
+  MAX_LINE_TILES,
+  beltLine,
+  type CameraControl,
+  type TilePicker,
+} from '../../src/input/input-manager.js';
 import { DEFAULT_KEYBINDINGS, rebind, type InputAction } from '../../src/input/keybindings.js';
 import { BUTTONS_LEFT, BUTTONS_MIDDLE, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT } from '../../src/input/mouse-input.js';
 
@@ -424,7 +430,9 @@ describe('selection', () => {
 });
 
 describe('the build tool', () => {
-  const BELT = { buildingId: 'belt', rotationCount: 4 } as const;
+  // A four-rotation building placed **one tile at a time**. It was called
+  // BELT until C13 made a belt the one thing that is not placed that way.
+  const MINER = { buildingId: 'miner', rotationCount: 4, lineBuild: false } as const;
 
   /**
    * A full press. `KeyboardInput` suppresses a second `keydown` without an
@@ -446,10 +454,10 @@ describe('the build tool', () => {
   }
 
   it('turns the left button into a build command while a building is held', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
 
-    expect(queued()).toEqual(['build belt 3,8 r0']);
+    expect(queued()).toEqual(['build miner 3,8 r0']);
   });
 
   it('leaves the empty hand mining, which is C10s job', () => {
@@ -458,34 +466,34 @@ describe('the build tool', () => {
   });
 
   it('places once per tile crossed by a drag, and never twice for one tile', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
     for (const x of [7, 12, 14, 25]) {
       canvas.dispatchEvent(pointerEvent('pointermove', { x, y: 5, buttons: BUTTONS_LEFT }));
     }
 
-    expect(queued()).toEqual(['build belt 0,0 r0', 'build belt 1,0 r0', 'build belt 2,0 r0']);
+    expect(queued()).toEqual(['build miner 0,0 r0', 'build miner 1,0 r0', 'build miner 2,0 r0']);
   });
 
   it('cycles rotation with the bound key, within the rotations the building has', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     for (const expected of [1, 2, 3, 0]) {
       press('KeyR');
       expect(input.buildRotation).toBe(expected);
     }
 
-    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1, lineBuild: false });
     press('KeyR');
     expect(input.buildRotation).toBe(0);
   });
 
   it('builds with the rotation on screen', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     press('KeyR');
     press('KeyR');
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
 
-    expect(queued()).toEqual(['build belt 0,0 r2']);
+    expect(queued()).toEqual(['build miner 0,0 r2']);
   });
 
   it('rotates nothing when the hand is empty', () => {
@@ -495,18 +503,18 @@ describe('the build tool', () => {
   });
 
   it('keeps the rotation when the same building is re-selected and drops it otherwise', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     press('KeyR');
 
-    input.setBuildTool({ ...BELT });
+    input.setBuildTool({ ...MINER });
     expect(input.buildRotation).toBe(1);
 
-    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1, lineBuild: false });
     expect(input.buildRotation).toBe(0);
   });
 
   it('puts the building down on the right button instead of demolishing', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
 
     expect(input.buildTool).toBeNull();
@@ -521,7 +529,7 @@ describe('the build tool', () => {
   });
 
   it('is dropped by the same key that clears a selection', () => {
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     document.dispatchEvent(keyEvent('keydown', 'Escape'));
     expect(input.buildTool).toBeNull();
   });
@@ -540,7 +548,7 @@ describe('the build tool', () => {
 
   it('does not move the selection while placing', () => {
     picker.entitiesAt.set('3,8', 7);
-    input.setBuildTool(BELT);
+    input.setBuildTool(MINER);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
     expect(input.selectedEntityId).toBeNull();
   });
@@ -560,7 +568,7 @@ describe('the build tool', () => {
       commands: simulation.commands,
     });
     input.attach();
-    input.setBuildTool({ buildingId: 'chest', rotationCount: 1 });
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1, lineBuild: false });
 
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
     expect(simulation.entities.size).toBe(0);
@@ -769,5 +777,182 @@ describe('keybindings are data', () => {
     expect(actions).toEqual([]);
 
     field.remove();
+  });
+});
+
+/**
+ * Drag-to-build belt lines. See ironflow.md C13 task 7.
+ *
+ * "Belts without drag-building are miserable to place", and the plan says so
+ * in as many words. What makes it more than a convenience is the *rotation*:
+ * a line laid one tile at a time faces whichever way the ghost happened to be
+ * turned, so a player laying a run east and then south has to stop and press
+ * R at the corner. The path decides instead, and the corner falls out of it.
+ */
+describe('laying a belt line', () => {
+  const BELT = { buildingId: 'belt', rotationCount: 4, lineBuild: true } as const;
+
+  /** Every command in the queue, as a short readable string. */
+  function queued(): string[] {
+    return commands.drain().map((c) => {
+      if (c.type === 'build') return `build ${c.buildingId} ${c.x},${c.y} r${c.rotation}`;
+      if (c.type === 'remove') return `remove ${c.x},${c.y}`;
+      return c.type;
+    });
+  }
+
+  /** Tile coordinates, in the picker's ten-pixel grid. */
+  function at(tileX: number, tileY: number): { x: number; y: number } {
+    return { x: tileX * 10 + 5, y: tileY * 10 + 5 };
+  }
+
+  describe('the path itself', () => {
+    it('faces every tile at the next one, and the last at the one before it', () => {
+      expect(beltLine({ x: 0, y: 0 }, { x: 3, y: 0 }, NORTH)).toEqual([
+        { x: 0, y: 0, rotation: EAST },
+        { x: 1, y: 0, rotation: EAST },
+        { x: 2, y: 0, rotation: EAST },
+        { x: 3, y: 0, rotation: EAST },
+      ]);
+    });
+
+    it('keeps the held rotation for a path of one tile', () => {
+      // A click with a belt held must place the belt the player can see under
+      // the cursor, not one turned to face a direction they never dragged in.
+      expect(beltLine({ x: 4, y: 4 }, { x: 4, y: 4 }, SOUTH)).toEqual([{ x: 4, y: 4, rotation: SOUTH }]);
+    });
+
+    it('turns the corner once, on the long axis first', () => {
+      expect(beltLine({ x: 0, y: 0 }, { x: 3, y: 2 }, NORTH)).toEqual([
+        { x: 0, y: 0, rotation: EAST },
+        { x: 1, y: 0, rotation: EAST },
+        { x: 2, y: 0, rotation: EAST },
+        // The corner tile faces the second leg, which is what makes items go
+        // round it rather than off the end of the first one.
+        { x: 3, y: 0, rotation: SOUTH },
+        { x: 3, y: 1, rotation: SOUTH },
+        { x: 3, y: 2, rotation: SOUTH },
+      ]);
+    });
+
+    it('walks the other axis first when that is the long one', () => {
+      expect(beltLine({ x: 0, y: 0 }, { x: 1, y: 3 }, NORTH).map((s) => `${s.x},${s.y}`)).toEqual([
+        '0,0',
+        '0,1',
+        '0,2',
+        '0,3',
+        '1,3',
+      ]);
+    });
+
+    it('runs backwards as happily as forwards', () => {
+      expect(beltLine({ x: 2, y: 2 }, { x: 0, y: 2 }, NORTH).map((s) => s.rotation)).toEqual([WEST, WEST, WEST]);
+      expect(beltLine({ x: 2, y: 2 }, { x: 2, y: 0 }, EAST).map((s) => s.rotation)).toEqual([NORTH, NORTH, NORTH]);
+    });
+
+    it('never asks for more tiles than the burst limit allows', () => {
+      expect(beltLine({ x: 0, y: 0 }, { x: 5000, y: 0 }, NORTH).length).toBe(MAX_LINE_TILES);
+    });
+  });
+
+  describe('the drag', () => {
+    it('lays one belt per tile, all facing the way the drag went', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(2, 0), buttons: BUTTONS_LEFT }));
+      // The tile under the cursor is still a guess — it is what becomes the
+      // corner if the player turns — so it waits for the drag to pass it.
+      expect(queued()).toEqual(['build belt 0,0 r1', 'build belt 1,0 r1']);
+
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(2, 0), button: BUTTON_LEFT, buttons: 0 }));
+      expect(queued()).toEqual(['build belt 2,0 r1']);
+    });
+
+    it('places a single belt, facing the ghost, for a press that never moves', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(3, 3), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      // Nothing yet: a line commits on the move, so that the anchor tile is
+      // never laid the wrong way round and immediately taken up again.
+      expect(queued()).toEqual([]);
+
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(3, 3), button: BUTTON_LEFT, buttons: 0 }));
+      expect(queued()).toEqual(['build belt 3,3 r0']);
+    });
+
+    it('asks for each tile once however many times the pointer crosses it', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      for (const tile of [1, 2, 2, 1, 2, 2]) {
+        canvas.dispatchEvent(pointerEvent('pointermove', { ...at(tile, 0), buttons: BUTTONS_LEFT }));
+      }
+
+      // The anchored path is recomputed on every move and almost all of it is
+      // already asked for. Without the de-duplication every tile after the
+      // first would come back 'occupied', one toast per frame (§7).
+      expect(queued()).toEqual(['build belt 0,0 r1', 'build belt 1,0 r1']);
+    });
+
+    it('turns the corner without ever taking a belt up again', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(2, 0), buttons: BUTTONS_LEFT }));
+      expect(queued()).toEqual(['build belt 0,0 r1', 'build belt 1,0 r1']);
+
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(2, 2), buttons: BUTTONS_LEFT }));
+      // (2,0) is the corner, and it is laid facing **south** the first time
+      // it is laid at all — there is no `remove` here, which is the whole
+      // point of holding the last tile back. A remove and a build in the same
+      // tick cannot work: C05 defers removal to cleanup, so the build would be
+      // refused as 'occupied' and the corner would be a hole.
+      expect(queued()).toEqual(['build belt 2,0 r2', 'build belt 2,1 r2']);
+    });
+
+    it('never enqueues a remove, however the drag wanders', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      for (const tile of [[2, 0], [2, 2], [1, 2], [0, 0], [3, 1], [3, 3]] as const) {
+        canvas.dispatchEvent(pointerEvent('pointermove', { ...at(tile[0], tile[1]), buttons: BUTTONS_LEFT }));
+      }
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(3, 3), button: BUTTON_LEFT, buttons: 0 }));
+
+      const all = queued();
+      expect(all.every((c) => c.startsWith('build belt'))).toBe(true);
+      // And never the same tile twice, whatever route the cursor took.
+      const tiles = all.map((c) => c.split(' ')[2]);
+      expect(new Set(tiles).size).toBe(tiles.length);
+    });
+
+    it('leaves the held rotation following the line, so the next click continues it', () => {
+      input.setBuildTool(BELT);
+      expect(input.buildRotation).toBe(NORTH);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(0, 3), buttons: BUTTONS_LEFT }));
+
+      expect(input.buildRotation).toBe(SOUTH);
+    });
+
+    it('starts a fresh line on the next press rather than extending the last one', () => {
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(2, 0), buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointerup', { ...at(2, 0), button: BUTTON_LEFT, buttons: 0 }));
+      queued();
+
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(5, 5), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(6, 5), buttons: BUTTONS_LEFT }));
+      expect(queued()).toEqual(['build belt 5,5 r1']);
+    });
+
+    it('changes nothing about the world by itself: every tile is a command', () => {
+      // C04's standing criterion, restated for the one gesture that enqueues
+      // more than one command at a time (§19 rule 16).
+      input.setBuildTool(BELT);
+      canvas.dispatchEvent(pointerEvent('pointerdown', { ...at(0, 0), button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { ...at(4, 3), buttons: BUTTONS_LEFT }));
+
+      for (const command of commands.drain()) {
+        expect(command.type).toBe('build');
+      }
+    });
   });
 });

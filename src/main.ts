@@ -14,11 +14,10 @@ import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
-import { describeEntities, describePlayer } from './renderer/entity-view.js';
+import { buildingSprite, describeBeltItems, describeEntities, describePlayer } from './renderer/entity-view.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, RenderState } from './renderer/render-state.js';
-import type { SpriteId } from './renderer/sprite-atlas.js';
 import { GameUI } from './ui/ui.js';
 
 /**
@@ -66,7 +65,7 @@ function describeOre(world: World, x: number, y: number): string {
 const START_TILE = Object.freeze({ x: 6, y: 6 });
 
 /** What the player starts carrying. See the note at the assignment below. */
-const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({ miner: 5, chest: 10 });
+const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({ miner: 5, belt: 100, chest: 10 });
 
 /** Fraction of the viewport the player may roam before the camera follows. */
 const FOLLOW_DEADZONE = 0.5;
@@ -117,8 +116,11 @@ function bootstrap(): void {
    *
    * C06 handed out fifty of everything, which was scaffolding to make "place a
    * building" reachable at all. This is the real thing: enough to get a first
-   * miner onto ore and a chest beside it, and not enough to cover the map
-   * without ever mining. It is still a **balance number** and still temporary
+   * miner onto ore, a run of belt away from it and a chest at the end, and not
+   * enough to cover the map without ever mining. A hundred belts is the odd
+   * one out — belts are cheap, they are spent a dozen at a time, and running
+   * out of them mid-drag is the one shortage that makes the game feel broken
+   * rather than constrained (C13). It is still a **balance number** and still temporary
    * in one respect — C16 makes buildings craftable, and a starting stock then
    * becomes a decision about the first five minutes rather than about whether
    * the game can be played at all.
@@ -136,6 +138,16 @@ function bootstrap(): void {
    * drawable names a sprite, and `game/**` may not know what a sprite is.
    */
   let renderEntities = describeEntities(simulation.entities, simulation.buildings);
+
+  /**
+   * Wall time since the first frame, in seconds. Belt chevrons and nothing else.
+   *
+   * §6 allows the renderer a clock and allows nothing else one. It is
+   * accumulated from the frame delta rather than read from `performance.now()`
+   * directly so that the pause button stops the chevrons with the belts —
+   * a paused factory whose belts are still visibly running would be lying.
+   */
+  let renderSeconds = 0;
 
   /* ------------------------------------------------------------------ *
    * Input (C04).
@@ -198,7 +210,9 @@ function bootstrap(): void {
       y: placement.y,
       width: placement.width,
       height: placement.height,
-      sprite: simulation.buildings.get(placement.buildingId).sprite as SpriteId,
+      // The same translation `describeEntities` makes for a placed building,
+      // so a belt ghost points the way the belt will actually run (C13).
+      sprite: buildingSprite(simulation.buildings.get(placement.buildingId), placement.rotation),
       valid: placement.valid,
       resourceTiles: placement.resourceTiles,
     };
@@ -231,11 +245,12 @@ function bootstrap(): void {
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
-    renderEntities = describeEntities(simulation.entities, simulation.buildings);
-
     const now = scheduler.now();
     const elapsedMs = (now - lastFrameUs) / 1000;
     lastFrameUs = now;
+    if (!game.isPaused()) renderSeconds += elapsedMs / 1000;
+
+    renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds);
 
     // Wall-clock smoothing of a presentation value. §6 permits exactly this and
     // nothing more: the camera is never serialized and no system reads it.
@@ -251,6 +266,9 @@ function bootstrap(): void {
     const state: RenderState = {
       world: simulation.world,
       entities: renderEntities,
+      // Belt items are described per frame like everything else, and kept out
+      // of `entities` so the picker cannot return one (§9: not entities).
+      items: describeBeltItems(simulation.entities, simulation.items),
       player,
       hover: input.hover,
       ghost: currentGhost(),

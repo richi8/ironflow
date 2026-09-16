@@ -41,12 +41,67 @@
  * property of the thing that owns the inventory (a chest definition, a recipe),
  * which is content, and §10 keeps content out of saves. `fromJSON` is therefore
  * given the capacity by its owner.
+ *
+ * ## The backing store is plain data, and it may belong to somebody else (C13)
+ *
+ * Both containers keep their contents in an `ItemSlots` — an array of
+ * `[itemId, count]` pairs, sorted by item id — rather than in a `Map`. That is
+ * what lets a **chest** have a real inventory: an entity is plain data that
+ * must survive `JSON.stringify` (C05), so it cannot hold one of these classes,
+ * but it can hold the array, and a container constructed over that array by
+ * reference gives a system the five verbs without a second copy of the stack
+ * arithmetic. `ChestEntity.contents` is the authoritative state; the container
+ * is a short-lived view over it, built where it is needed and thrown away.
+ *
+ * The array also removes the `Map` that C08 had to justify: there is nothing
+ * left whose iteration order could reach a decision (§6 R4), and a container
+ * holding two or three kinds of item scans a three-element array faster than
+ * it hashes a key.
  */
 
 import { FIRST_ITEM_ID, type ItemId } from '../registries/item-registry.js';
 
 /** Plain, sorted by numeric item id, and therefore byte-stable (§6 R4). */
 export type SerializedInventory = readonly (readonly [ItemId, number])[];
+
+/**
+ * A container's contents as plain data: `[itemId, count]` pairs, ascending by
+ * item id, with no zero counts in it.
+ *
+ * The mutable half of `SerializedInventory`, and the shape an entity stores
+ * (C13's `ChestEntity.contents`). Sorted because that is what makes two
+ * containers holding the same items serialize identically however they got
+ * there, which is C08's third acceptance criterion and, from C24, a save that
+ * compares equal after a round trip.
+ */
+export type ItemSlots = [ItemId, number][];
+
+/** How many of one item an `ItemSlots` holds. Zero for anything not in it. */
+export function slotsCount(contents: ItemSlots, itemId: ItemId): number {
+  for (const entry of contents) {
+    if (entry[0] === itemId) return entry[1];
+    if (entry[0] > itemId) return 0;
+  }
+  return 0;
+}
+
+/** Set one item's count, keeping the array sorted and free of zeroes. */
+function slotsSet(contents: ItemSlots, itemId: ItemId, count: number): void {
+  for (let i = 0; i < contents.length; i++) {
+    const entry = contents[i];
+    if (entry === undefined) continue;
+    if (entry[0] === itemId) {
+      if (count === 0) contents.splice(i, 1);
+      else entry[1] = count;
+      return;
+    }
+    if (entry[0] > itemId) {
+      if (count !== 0) contents.splice(i, 0, [itemId, count]);
+      return;
+    }
+  }
+  if (count !== 0) contents.push([itemId, count]);
+}
 
 /** How a slot inventory asks how big a stack of something is. */
 export type StackSizeLookup = (itemId: ItemId) => number;
@@ -89,7 +144,12 @@ function assertItemId(itemId: ItemId, label: string): void {
  * the same state.
  */
 abstract class ContentsInventory implements Inventory {
-  protected readonly counts = new Map<ItemId, number>();
+  /**
+   * The contents. Owned by this object, or borrowed from whatever does own it
+   * — an entity's plain-data field (C13). Either way it is the single copy:
+   * a container never caches a count beside the array it came from.
+   */
+  protected readonly contents: ItemSlots;
 
   /**
    * The class name, for failure messages. Written down rather than read from
@@ -97,13 +157,14 @@ abstract class ContentsInventory implements Inventory {
    */
   protected abstract readonly kind: string;
 
+  constructor(contents: ItemSlots) {
+    this.contents = contents;
+  }
+
   abstract spaceFor(itemId: ItemId): number;
 
-  /** What the subclass must do when a count changes. Slots, mostly. */
-  protected abstract onCountChanged(itemId: ItemId, before: number, after: number): void;
-
   count(itemId: ItemId): number {
-    return this.counts.get(itemId) ?? 0;
+    return slotsCount(this.contents, itemId);
   }
 
   canAdd(itemId: ItemId, amount: number): boolean {
@@ -122,9 +183,7 @@ abstract class ContentsInventory implements Inventory {
     const added = Math.min(amount, this.spaceFor(itemId));
     if (added === 0) return 0;
 
-    const before = this.count(itemId);
-    this.counts.set(itemId, before + added);
-    this.onCountChanged(itemId, before, before + added);
+    slotsSet(this.contents, itemId, this.count(itemId) + added);
     return added;
   }
 
@@ -137,24 +196,20 @@ abstract class ContentsInventory implements Inventory {
     const taken = Math.min(held, amount);
     if (taken === 0) return 0;
 
-    if (taken === held) {
-      this.counts.delete(itemId);
-    } else {
-      this.counts.set(itemId, held - taken);
-    }
-    this.onCountChanged(itemId, held, held - taken);
+    slotsSet(this.contents, itemId, held - taken);
     return taken;
   }
 
   isEmpty(): boolean {
-    return this.counts.size === 0;
+    return this.contents.length === 0;
   }
 
+  /**
+   * A copy, so a caller holding one cannot watch the container change under it
+   * — and, for a borrowed array, cannot reach the entity's own field.
+   */
   toJSON(): SerializedInventory {
-    const entries: [ItemId, number][] = [];
-    for (const [itemId, count] of this.counts) entries.push([itemId, count]);
-    entries.sort((a, b) => a[0] - b[0]);
-    return entries;
+    return this.contents.map((entry) => [entry[0], entry[1]] as [ItemId, number]);
   }
 }
 
@@ -193,14 +248,26 @@ export interface SlotInventoryOptions {
   /** How many slots. At least 1. */
   readonly slots: number;
   readonly stackSizeOf: StackSizeLookup;
+  /**
+   * The array to keep the contents in. Defaults to a fresh, empty one.
+   *
+   * Passed by whatever *owns* the contents — C13's chest hands over its own
+   * `contents` field, so the container writes straight into the entity's plain
+   * data and nothing has to be copied back. A container built this way is
+   * cheap and disposable: make one where it is needed, use it, drop it.
+   */
+  readonly contents?: ItemSlots;
 }
 
 /**
  * A chest, or the player's bag: `slots` slots, each holding one stack.
  *
- * Slot usage is tracked as a running total rather than recomputed, because
- * `spaceFor` is asked on every inserter's every tick and the alternative walks
- * the contents each time.
+ * `usedSlots` is walked rather than tracked. C08 tracked it as a running total
+ * because `spaceFor` is asked on every inserter's every tick; C13 made
+ * containers disposable views over an entity's own array, at which point a
+ * running total would have to be recomputed at every construction anyway — and
+ * the walk it would do is the walk below, over the two or three kinds of item
+ * a v1 container actually holds.
  */
 export class SlotInventory extends ContentsInventory {
   protected override readonly kind = 'SlotInventory';
@@ -209,10 +276,8 @@ export class SlotInventory extends ContentsInventory {
 
   private readonly stackSizeOf: StackSizeLookup;
 
-  private slotsUsed = 0;
-
   constructor(options: SlotInventoryOptions) {
-    super();
+    super(options.contents ?? []);
     if (!Number.isInteger(options.slots) || options.slots < 1) {
       throw new RangeError(`SlotInventory: slots must be a whole number above 0, got ${options.slots}.`);
     }
@@ -222,11 +287,13 @@ export class SlotInventory extends ContentsInventory {
 
   /** Slots currently occupied, with items packed as tightly as stacks allow. */
   get usedSlots(): number {
-    return this.slotsUsed;
+    let used = 0;
+    for (const entry of this.contents) used += slotsFor(entry[1], this.stackSizeOf(entry[0]));
+    return used;
   }
 
   get freeSlots(): number {
-    return this.slots - this.slotsUsed;
+    return this.slots - this.usedSlots;
   }
 
   /** Room in this item's part-filled stack, plus a full stack per free slot. */
@@ -235,11 +302,6 @@ export class SlotInventory extends ContentsInventory {
     const held = this.count(itemId);
     const roomInPartStack = slotsFor(held, stackSize) * stackSize - held;
     return roomInPartStack + this.freeSlots * stackSize;
-  }
-
-  protected override onCountChanged(itemId: ItemId, before: number, after: number): void {
-    const stackSize = this.stackSizeOf(itemId);
-    this.slotsUsed += slotsFor(after, stackSize) - slotsFor(before, stackSize);
   }
 
   static fromJSON(serialized: SerializedInventory, options: SlotInventoryOptions): SlotInventory {
@@ -257,6 +319,8 @@ function slotsFor(count: number, stackSize: number): number {
 export interface BufferInventoryOptions {
   /** How many of *each* item this buffer holds. At least 1. */
   readonly capacityPerItem: number;
+  /** The array to keep the contents in. See `SlotInventoryOptions.contents`. */
+  readonly contents?: ItemSlots;
 }
 
 /**
@@ -274,7 +338,7 @@ export class BufferInventory extends ContentsInventory {
   readonly capacityPerItem: number;
 
   constructor(options: BufferInventoryOptions) {
-    super();
+    super(options.contents ?? []);
     if (!Number.isInteger(options.capacityPerItem) || options.capacityPerItem < 1) {
       throw new RangeError(
         `BufferInventory: capacityPerItem must be a whole number above 0, got ${options.capacityPerItem}.`,
@@ -286,9 +350,6 @@ export class BufferInventory extends ContentsInventory {
   override spaceFor(itemId: ItemId): number {
     return this.capacityPerItem - this.count(itemId);
   }
-
-  /** Nothing to keep in step: capacity is per item, and the map holds it. */
-  protected override onCountChanged(): void {}
 
   static fromJSON(serialized: SerializedInventory, options: BufferInventoryOptions): BufferInventory {
     const inventory = new BufferInventory(options);

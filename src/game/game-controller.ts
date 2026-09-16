@@ -72,6 +72,14 @@ export const HOTBAR_SLOTS = 9;
 export interface HeldBuilding {
   readonly buildingId: string;
   readonly rotationCount: 1 | 2 | 4;
+  /**
+   * Is this building laid in lines by a click-drag? C13 task 7.
+   *
+   * Content decides — a belt is, because its definition says how fast it
+   * carries things — and the answer is resolved here because §4 will not let
+   * the input layer read the building table for itself.
+   */
+  readonly lineBuild: boolean;
 }
 
 /**
@@ -367,7 +375,14 @@ export class GameController {
 
     const miner = asMiner(entity);
     const mining = miner === null ? null : this.simulation.buildings.miningFor(entity.type);
-    const output = this.simulation.hands.outputOf(entity);
+    // C13: a chest has contents too, and more than one kind of them. The
+    // capacity beside each line is the miner's buffer cap, which is what turns
+    // "12" into "12/50" and puts `output_full` on screen before it happens; a
+    // chest fills by running out of *slots*, whatever is in them, so there is
+    // no per-item number to show and the row shows none.
+    const outputs = this.simulation.hands
+      .outputsOf(entity)
+      .map((stack) => this.stackView(stack.itemId, stack.count, mining?.bufferCapacity ?? null));
 
     return freeze({
       id: entity.id,
@@ -382,10 +397,7 @@ export class GameController {
       // the note in `views/building-view.ts`.
       progress: miner === null || mining === null ? null : miner.progressTicks / mining.ticksPerItem,
       inputs: EMPTY_STACKS,
-      outputs:
-        output === null
-          ? EMPTY_STACKS
-          : freeze([this.stackView(output.itemId, output.count, mining?.bufferCapacity ?? null)]),
+      outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
       // Measured for the selected machine only (C12 task 2). A machine asked
       // about in passing reads 0 rather than a figure from someone else's
       // window; a machine that produces nothing at all reads null.
@@ -492,7 +504,11 @@ export class GameController {
       return;
     }
     const definition = this.simulation.buildings.get(buildingId);
-    this.cursor.setBuildTool({ buildingId: definition.id, rotationCount: definition.rotationCount });
+    this.cursor.setBuildTool({
+      buildingId: definition.id,
+      rotationCount: definition.rotationCount,
+      lineBuild: definition.belt !== undefined,
+    });
   }
 
   /**

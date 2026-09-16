@@ -9,6 +9,7 @@ import {
   type Footprint,
 } from '../../src/game/entities/entity.js';
 import { EntityType } from '../../src/game/entities/entity-types.js';
+import { newChest, type ChestEntity } from '../../src/game/entities/chest-entity.js';
 import { MachineStatus } from '../../src/game/entities/machine-status.js';
 import { newMiner, minerOutput, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { Simulation } from '../../src/game/simulation.js';
@@ -424,7 +425,7 @@ describe('miner placement and views', () => {
     expect(Object.isFrozen(view?.outputs)).toBe(true);
 
     // A building with no system behind it is still honestly idle.
-    const chest = simulation.entities.create({ type: EntityType.Chest, x: 0, y: 0, rotation: NORTH });
+    const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     expect(controller.getBuildingView(chest.id)?.status).toBe('idle');
   });
 

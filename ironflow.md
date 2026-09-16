@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C12 complete.** Milestone B in progress. Next: C13 — belts. |
+| **Status** | **C13 complete.** Milestone B in progress. Next: C14 — inserters. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C13 — Belts** |
+| **First action** | Chunk **C14 — Inserters** |
 
 ---
 
@@ -736,6 +736,16 @@ belt tier 2:  4.0 tiles/s  x  4 items/tile  = 16.0 items/s
 
 These numbers are the anchor for all machine rates in §15. Change them and the
 whole content bible must be re-derived.
+
+**Implementation note (C13).** 256 units per tile over 30 ticks is 17.07 units
+per tick, and §6 R3 says that stores as the integer 17. A tier-1 belt therefore
+runs at 1.992 tiles/s and carries **7.97 items/s**, which is the 0.42% that
+C13's acceptance criterion allows ±1% for. The alternative — a sub-tile scale
+picked to divide the tick rate evenly, such as C10's 240 subtiles — was
+considered and rejected: it would put a number with no justification of its own
+in the table above to hide a rounding error 0.4% wide, and every rate in §15 is
+authored to a coarser resolution than that. `BeltConfig` in
+`registries/building-registry.ts` carries the same note beside the arithmetic.
 
 ### Required behaviours
 
@@ -2766,6 +2776,138 @@ same line in two orders, assert identical state after 600 ticks); throughput.
 
 **Out of scope.** Splitters (C17), underground belts (C22), belt networks (C29),
 two lanes (never, in v1).
+
+**Decisions taken while implementing this chunk.**
+
+- **Downstream-first is a cached post-order walk of the belt graph, not an id
+  walk.** A belt has at most one tile in front of it, so the graph has
+  out-degree one and the walk is chain-following: every belt is emitted after
+  the belt it feeds. The order is derived state — §10 lists belt topology as
+  exactly that — so it is rebuilt rather than persisted, and only when the set
+  of entities has changed. On an unchanged factory `BeltSystem` does no graph
+  work at all. The alternative, sorting by entity id, passes the movement and
+  hand-off tests and fails task 3's whole point: a belt whose downstream has
+  not yet moved shows a fuller tile than the tick will end with, items bunch by
+  a slot, and the line runs at a speed that depends on which end of it was
+  built first.
+- **`EntityStore` gained a `structureRevision` counter**, bumped by `create`
+  and by a `cleanup` that actually removed something. It is what tells a
+  derived index that the thing it indexes has changed, and it is **not**
+  authoritative state: never serialized, and a loaded world starts at zero with
+  every index rebuilt on its first tick, which is what §10's `rebuildDerived()`
+  means. A future `rotate` has to bump it too, which is the second reason the
+  base fields are readonly (C05) — the only way to turn a belt will be a store
+  method, and that method is where the line goes.
+- **A chest's inventory is an `ItemSlots` — a plain `[itemId, count]` array —
+  living on the entity, and `SlotInventory` became a view over one.** C12 left
+  this decision to C13 in as many words. An entity is plain data that must
+  survive `JSON.stringify` (C05), so it cannot hold a container class; C11
+  solved the same problem for a miner with a bare count, which works only
+  because a miner's buffer holds one kind of item. A chest holds anything. So
+  the containers in `items/inventory.ts` swapped their `Map` backing for a
+  sorted array and gained an optional `contents` option: the chest hands over
+  its own field, the container writes straight into authoritative state, and
+  there is one implementation of stack packing rather than two. The array also
+  retires the `Map` C08 had to justify — nothing left in a container has an
+  iteration order that could reach a decision (§6 R4) — and `usedSlots` is now
+  walked rather than tracked, because a container built per use would have to
+  recompute a running total at every construction anyway.
+- **Machines are unloaded onto belts at the end of phase 5, after every belt
+  has moved.** There is no inserter until C14 and the chain has to run, so a
+  machine with an output buffer drops **one item per tick** onto the first belt
+  it finds on its output side — `forEachOutputTile` walks the tiles just
+  outside the footprint on the side `rotation` faces, so a 2x2 miner tries both
+  of the tiles in front of it. Running it after the movement pass means an item
+  lands on a settled tile, which is the same promise §8 makes to C14's
+  inserters one phase later and for the same reason. Which machines have an
+  output is content (`definition.mining`, via `BuildingRegistry.outputBufferTypes`),
+  never an id (§19 rule 17); C15's furnace joins the list by gaining a recipe
+  output.
+- **Two belts nose to nose do not hand off.** Without the rule they trade the
+  same item back and forth every tick, which looks like a belt that has jammed
+  for no visible reason. Every other relative facing — including sideways,
+  which is §9's curve — is an ordinary hand-off.
+- **`RenderEntity` gained an optional `depthRow`.** An item is drawn at its real
+  position, which for the back half of a tile is a depth row *behind* the belt
+  carrying it, so the belt's own flat face painted over it for half of every
+  tile. Items now sort in their belt's row, where `RenderLayer` decides,
+  nudged by a tenth of a row so two items on one tile still overlap in the
+  right order. Everything else leaves the field out and gets the footprint's
+  near corner exactly as before (§5).
+- **Belt items are a separate list on `RenderState`, like the player.** The
+  entity array is also what `ScenePicker` searches, and §9 says belt items are
+  not entities: a pick landing on one would hand the inspector `NO_ENTITY`,
+  which means "nothing" everywhere else in the codebase.
+- **The chevron animation phase is baked into the sprite id** (`belt:1:5`).
+  `SpriteAtlas.draw` takes no time and giving it one would put a wall clock
+  behind the interface whose whole purpose is that C29 can swap the
+  implementation. The phase is computed render-side from elapsed wall time,
+  which §6 permits explicitly, and from the belt's *content* speed — so C22's
+  fast belt animates twice as fast without anything in the renderer learning
+  that a second tier exists. The clock is accumulated from the frame delta and
+  not read raw, so pausing stops the chevrons with the belts.
+- **Drag-to-build lays a tile only once its direction is final, and never
+  enqueues a `remove`.** A tile's rotation is decided by the tile *after* it,
+  so the last tile of the path is the only one still a guess — and it is
+  exactly the tile that becomes the corner when the player turns. Laying it
+  early means laying it the wrong way and taking it up again, and a `remove`
+  and a `build` on one tile in one tick **do not work**: C05 defers removal to
+  the cleanup phase, so the build that follows is honestly refused as
+  `'occupied'` and the corner is left as a hole. This was found by driving the
+  running game, not by a test. Holding the last tile back costs nothing — the
+  ghost is still drawn under the cursor — and the corner comes out facing the
+  way the player turned, first time. A press that never moves still places one
+  belt, on release, facing the ghost.
+
+**Deviations.**
+
+- **Task 2's `direction` and `speedTier` are not stored.** `Entity.rotation`
+  *is* the direction, and a second copy is a second thing to keep in step —
+  the one that drifts is the one the simulation reads. The speed is content on
+  `BuildingDefinition.belt`, exactly as C11 put a miner's rate on
+  `BuildingDefinition.mining` rather than on every miner, so C20's balance pass
+  does not have to migrate every belt in every save. C22's fast belt is a
+  content row taking the next free `EntityType`, which is what
+  `entity-types.ts` already says a new kind of entity does.
+- **Task 8's "interpolated position" is read as sub-tile, not inter-tick.** An
+  item is drawn `pos / 256` of the way across its tile, at the position the
+  simulation settled on. There is deliberately no extrapolation by the frame's
+  `alpha`: an item advances a fifteenth of a tile per tick at tier 1, which is
+  already smooth, and extrapolating would make every *blocked* item jitter
+  forward and snap back — at the one place on a belt a player is actually
+  looking.
+- **A chest can be taken from, which C12 assigned to C15.** C12's deviation
+  said `HandSystem.insert` waits for the furnace, and it still does. *Taking*
+  is different: C13 is the chunk that gives a chest contents, the inspector
+  already draws a TAKE button beside any output row, and a container that fills
+  and can never be emptied is not a container. `HandSystem.outputOf` became
+  `outputsOf`, returning a list, because a chest holds more than one kind of
+  thing.
+- **The player now starts with 100 belts** as well as 5 miners and 10 chests.
+  A balance number, and the odd one out on purpose: belts are cheap, they are
+  spent a dozen at a time, and running out mid-drag is the one shortage that
+  reads as the game being broken rather than as a constraint.
+- **The inspector shows a chest's contents with no capacity beside them.** A
+  miner's row says "12/50" because a per-item cap is what `output_full` counts
+  against; a chest fills by running out of *slots*, whatever is in them, so
+  there is no per-item number that would mean anything.
+
+**Noticed, not fixed.**
+
+- A closed loop of belts has no last tile, so there is no downstream-first
+  order for it to have. The walk breaks the cycle at whichever belt it entered
+  from, which is deterministic for a given layout and store but is the one case
+  where the break point depends on entity id — and therefore on build order. A
+  loop that feeds only itself carries nothing anywhere, so nothing observable
+  rides on it. C18's determinism tests are where this would have to be
+  revisited if a loop ever gains an exit.
+- `describeBeltItems` allocates one object per item per frame, which at §12's
+  eight thousand items is eight thousand allocations a frame. It is the same
+  shape `describeEntities` already has and the same answer applies: C28
+  measures it and C29 makes both incremental.
+- The page requests `/favicon.ico` and gets a 404 on every load. It is the only
+  console error in normal play and it predates this chunk; `index.html` names
+  no icon.
 
 ---
 
