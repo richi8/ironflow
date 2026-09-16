@@ -4,9 +4,9 @@
  * §13 gives the UI three update rates: a few things poll on a timer, and
  * everything else updates "on change event only". This union is that event.
  *
- * There are three members and each has a real producer and a real consumer in
- * this chunk — §19 rule 10 forbids the fourth, invented for a panel that does
- * not exist. `'rejected'` is produced by the command processor's rejection
+ * Each member has a real producer and a real consumer in the chunk that added
+ * it — §19 rule 10 forbids one invented for a panel that does not exist.
+ * `'rejected'` is produced by the command processor's rejection
  * list and consumed by the toasts; `'buildMenuChanged'` is produced by the
  * controller noticing that the affordability, stock or selection behind the
  * build menu differs from the last frame, and consumed by the toolbar and the
@@ -19,15 +19,29 @@
  * inside a simulation phase, which §13 forbids outright.
  */
 
+import type { Alert } from './alert.js';
 import type { Command, CommandRejectionReason } from '../commands/command.js';
 
-export type GameEventType = 'rejected' | 'buildMenuChanged' | 'pauseChanged';
+export type GameEventType = 'rejected' | 'alert' | 'buildMenuChanged' | 'pauseChanged';
 
 /** A command did not happen, and here is the reason a player can be shown. */
 export interface CommandRejectedEvent {
   readonly type: 'rejected';
   readonly command: Command;
   readonly reason: CommandRejectionReason;
+}
+
+/**
+ * The world stopped doing something, and the player has to be told (C11).
+ *
+ * The counterpart to `'rejected'`: that one says an instruction did not
+ * happen, this one says something that *was* happening has stopped. A
+ * machine that silently stops is the same bug as a silently refused command
+ * (§7), one tick later.
+ */
+export interface AlertEvent {
+  readonly type: 'alert';
+  readonly alert: Alert;
 }
 
 /**
@@ -46,7 +60,7 @@ export interface PauseChangedEvent {
   readonly paused: boolean;
 }
 
-export type GameEvent = CommandRejectedEvent | BuildMenuChangedEvent | PauseChangedEvent;
+export type GameEvent = CommandRejectedEvent | AlertEvent | BuildMenuChangedEvent | PauseChangedEvent;
 
 /** The event a given type name carries. Lets `subscribe` narrow its callback. */
 export type GameEventOf<T extends GameEventType> = Extract<GameEvent, { type: T }>;

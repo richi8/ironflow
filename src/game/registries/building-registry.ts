@@ -15,6 +15,7 @@
  */
 
 import { UNIT_FOOTPRINT, assertFootprint, type Footprint } from '../entities/entity.js';
+import { TPS } from '../simulation-clock.js';
 import { entityTypeName, isEntityType, type EntityType } from '../entities/entity-types.js';
 import type { ItemStack } from '../items/item-stack.js';
 import { isBuildable, isTileType, tileProperties, type TileType } from '../world/tile.js';
@@ -51,6 +52,44 @@ export interface PlacementRules {
   readonly requiresResource?: boolean;
 }
 
+/**
+ * What a building extracts from the ground, as content authors it. C11 task 2.
+ *
+ * Its presence is what makes a building a miner — `entities/building-init.ts`
+ * branches on this field and on nothing else — so an electric miner or a
+ * second tier is a table entry rather than a code change.
+ */
+export interface MiningProperties {
+  /**
+   * Items extracted per simulated second. §15's anchor: 0.5 at tier 1.
+   *
+   * Authored in items per second because that is the unit §15's whole balance
+   * table is written in, and converted to an integer tick count exactly once,
+   * at registry-build time, as §6 R3 requires.
+   */
+  readonly itemsPerSecond: number;
+  /**
+   * How many items the output buffer holds before the miner stalls.
+   *
+   * Small on purpose. Backpressure from day one (C11 task 3) is only visible
+   * if a miner with nowhere to put its ore fills up inside a play session.
+   */
+  readonly bufferCapacity: number;
+}
+
+/**
+ * The same, in the integers a system actually runs on.
+ *
+ * Built once per registry, never authored and never serialized: it is content
+ * (§10), so C20 retuning `itemsPerSecond` changes every existing save's miners
+ * rather than leaving them on the old rate.
+ */
+export interface MiningConfig {
+  /** Exactly `Math.round(TPS / itemsPerSecond)`. At least 1 (§6 R3). */
+  readonly ticksPerItem: number;
+  readonly bufferCapacity: number;
+}
+
 export interface BuildingDefinition {
   readonly id: string;
   readonly name: string;
@@ -77,6 +116,8 @@ export interface BuildingDefinition {
    */
   readonly buildCost: readonly ItemStack[];
   readonly placement: PlacementRules;
+  /** Present only on buildings that extract from the ground (C11). */
+  readonly mining?: MiningProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -92,6 +133,7 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   Object.freeze(definition.placement.onTerrain);
   for (const stack of definition.buildCost) Object.freeze(stack);
   Object.freeze(definition.buildCost);
+  if (definition.mining !== undefined) Object.freeze(definition.mining);
   return Object.freeze(definition);
 }
 
@@ -121,6 +163,21 @@ function validate(definition: BuildingDefinition): void {
     }
   }
 
+  const mining = definition.mining;
+  if (mining !== undefined) {
+    if (!Number.isFinite(mining.itemsPerSecond) || mining.itemsPerSecond <= 0) {
+      throw new Error(`BuildingRegistry: ${where} mines ${mining.itemsPerSecond} items/s, which is not a rate.`);
+    }
+    if (ticksPerItem(mining) < 1) {
+      throw new Error(
+        `BuildingRegistry: ${where} mines ${mining.itemsPerSecond} items/s, which is faster than one item per tick.`,
+      );
+    }
+    if (!Number.isInteger(mining.bufferCapacity) || mining.bufferCapacity < 1) {
+      throw new Error(`BuildingRegistry: ${where} has a buffer of ${mining.bufferCapacity}; it must be whole and above 0.`);
+    }
+  }
+
   if (definition.placement.onTerrain.length === 0) {
     throw new Error(`BuildingRegistry: ${where} accepts no terrain at all, so it could never be placed.`);
   }
@@ -136,6 +193,17 @@ function validate(definition: BuildingDefinition): void {
   }
 }
 
+/**
+ * Seconds per item as an exact tick count (§6 R3).
+ *
+ * `Math.round`, as §6 specifies, so a rate whose period is not a whole number
+ * of ticks lands on the nearest one rather than accumulating a fractional
+ * remainder that no two machines would agree on.
+ */
+function ticksPerItem(mining: MiningProperties): number {
+  return Math.round(TPS / mining.itemsPerSecond);
+}
+
 export class BuildingRegistry {
   /**
    * Definition order, which is menu order and hotkey order. The array is the
@@ -146,6 +214,12 @@ export class BuildingRegistry {
   private readonly byId = new Map<string, BuildingDefinition>();
 
   private readonly byType = new Map<EntityType, BuildingDefinition>();
+
+  /**
+   * Mining content, converted to ticks once (§6 R3). Keyed by entity type
+   * because the mining system iterates entities, and an entity carries a type.
+   */
+  private readonly miningByType = new Map<EntityType, MiningConfig>();
 
   constructor(definitions: readonly BuildingDefinition[]) {
     const frozen: BuildingDefinition[] = [];
@@ -166,6 +240,12 @@ export class BuildingRegistry {
       frozen.push(value);
       this.byId.set(value.id, value);
       this.byType.set(value.entityType, value);
+      if (value.mining !== undefined) {
+        this.miningByType.set(
+          value.entityType,
+          Object.freeze({ ticksPerItem: ticksPerItem(value.mining), bufferCapacity: value.mining.bufferCapacity }),
+        );
+      }
     }
 
     this.definitions = Object.freeze(frozen);
@@ -196,6 +276,17 @@ export class BuildingRegistry {
       throw new Error(`BuildingRegistry: no building defines entity type ${type}.`);
     }
     return definition;
+  }
+
+  /**
+   * How this kind of building mines, or null if it does not. C11.
+   *
+   * Null rather than a throw: the mining system asks about whatever is in the
+   * miner bucket, and "this building does not mine" is an ordinary answer
+   * rather than a content error.
+   */
+  miningFor(type: EntityType): MiningConfig | null {
+    return this.miningByType.get(type) ?? null;
   }
 
   /**

@@ -14,6 +14,7 @@
  * message the player never got to read.
  */
 
+import type { Alert, AlertType } from '../game/views/alert.js';
 import type { CommandRejectionReason } from '../game/commands/command.js';
 
 /** How long a toast stays up. Long enough to read twice, short enough to forgive. */
@@ -49,7 +50,23 @@ export function rejectionMessage(reason: CommandRejectionReason): string {
   return REJECTION_TEXT[reason];
 }
 
-type ToastKind = 'reject' | 'info';
+/**
+ * What a player is told when the world stops doing something (C11 task 5).
+ *
+ * Exhaustive by type, exactly as the rejection table is: a machine that stops
+ * silently is the same bug as a command that fails silently, and the sentence
+ * has to name the thing that stopped *and* what to do about it — "a miner has
+ * run out of ore" is a fact; "move it to a fresh patch" is the instruction.
+ */
+const ALERT_TEXT: Readonly<Record<AlertType, (alert: Alert) => string>> = Object.freeze({
+  miner_no_resource: (alert) => `Miner at ${alert.x}, ${alert.y} has run out of ore — move it to a fresh patch.`,
+});
+
+export function alertMessage(alert: Alert): string {
+  return ALERT_TEXT[alert.type](alert);
+}
+
+type ToastKind = 'reject' | 'warn' | 'info';
 
 interface Toast {
   readonly element: HTMLElement;

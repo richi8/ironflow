@@ -7,17 +7,26 @@
  * next chunk has to widen.
  *
  * **Status must always explain a stall** (§13, pillar 3) — never a bare
- * "idle" where "no_input" is the truth. In C07 nothing can run at all: no
- * machine has a recipe, a buffer or a power connection, so every building is
- * genuinely idle and `'idle'` is the honest answer. C11 gives miners
- * `'running'` and `'output_full'`, C15 gives furnaces the rest.
+ * "idle" where "no_input" is the truth. C11 makes that real for the first
+ * time: a miner reports `'running'`, `'output_full'` or `'no_resource'`, and a
+ * building with no system behind it — a chest — is still honestly `'idle'`.
+ * C15 gives furnaces the rest.
  */
 
 import type { EntityId } from '../entities/entity.js';
+import type { MachineStatusName } from '../entities/machine-status.js';
 import type { ItemStack } from '../items/item-stack.js';
 import type { Rotation } from '../world/coordinates.js';
 
-export type MachineStatus = 'running' | 'no_power' | 'no_input' | 'output_full' | 'no_recipe' | 'idle';
+/**
+ * The status names, straight from the enum machines actually store.
+ *
+ * C07 wrote this union out by hand and C11 gave the simulation a stored
+ * status, at which point two lists of the same words would be two lists to
+ * keep in step — and the one that drifts is the one the player reads.
+ * `entities/machine-status.ts` is the table; this is its name.
+ */
+export type MachineStatus = MachineStatusName;
 
 export interface MachineView {
   readonly id: EntityId;

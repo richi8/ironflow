@@ -20,7 +20,8 @@
 
 import type { CommandRejectionReason } from '../commands/command.js';
 import type { EntityStore } from '../entities/entity-store.js';
-import { footprintExtent, forEachFootprintTile } from '../entities/entity.js';
+import { initialBuildingState } from '../entities/building-init.js';
+import { footprintExtent, forEachFootprintTile, type Footprint } from '../entities/entity.js';
 import type { ItemCounts } from '../items/item-stack.js';
 import { BuildingRegistry, type BuildingDefinition } from '../registries/building-registry.js';
 import { TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
@@ -111,12 +112,12 @@ export class BuildSystem {
 
     const definition = this.buildings.get(buildingId);
     this.inventory.take(definition.buildCost);
-    this.entities.create({
-      type: definition.entityType,
-      x,
-      y,
-      rotation: BuildingRegistry.normalizeRotation(definition, rotation),
-    });
+    // What kind of state a new building starts with is `building-init.ts`'s
+    // job, not this file's: a miner's progress counter and buffer are no more
+    // a placement rule than its sprite is (see the file header).
+    this.entities.create(
+      initialBuildingState(definition, x, y, BuildingRegistry.normalizeRotation(definition, rotation)),
+    );
     return null;
   }
 
@@ -142,12 +143,30 @@ export class BuildSystem {
   }
 
   private hasResource(x: number, y: number, definition: BuildingDefinition, facing: Rotation): boolean {
-    let found = false;
-    forEachFootprintTile(x, y, definition.size, facing, (tileX, tileY) => {
-      if (this.world.getResourceAmount(tileX, tileY) > 0) found = true;
-    });
-    return found;
+    return countResourceTiles(this.world, x, y, definition.size, facing) > 0;
   }
+}
+
+/**
+ * How many tiles of a footprint have ore left on them.
+ *
+ * Shared with the ghost preview, which shows the count while a miner is held
+ * (C11 task 4): "may this be placed" and "how much will it cover" are the same
+ * question asked with different precision, and answering them in two places is
+ * how a green ghost ends up promising four tiles over a patch with three.
+ */
+export function countResourceTiles(
+  world: World,
+  x: number,
+  y: number,
+  footprint: Footprint,
+  facing: Rotation,
+): number {
+  let count = 0;
+  forEachFootprintTile(x, y, footprint, facing, (tileX, tileY) => {
+    if (world.getResourceAmount(tileX, tileY) > 0) count += 1;
+  });
+  return count;
 }
 
 /** Does the whole footprint fit inside the coordinates a tile key can pack? */

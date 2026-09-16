@@ -1,3 +1,4 @@
+import { AlertLog } from './alerts.js';
 import { CommandProcessor } from './commands/command-processor.js';
 import type { Command, CommandRejectionReason } from './commands/command.js';
 import { BUILDINGS } from './data/buildings.js';
@@ -8,7 +9,8 @@ import { BUILD_RANGE_TILES, PlayerState } from './player/player-state.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
-import { BuildSystem } from './systems/build-system.js';
+import { BuildSystem, countResourceTiles } from './systems/build-system.js';
+import { MiningSystem } from './systems/mining-system.js';
 import { PlayerSystem } from './systems/player-system.js';
 import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
@@ -93,7 +95,18 @@ export class Simulation {
 
   private readonly builder: BuildSystem;
 
+  private readonly miningSystem: MiningSystem;
+
   private readonly playerSystem: PlayerSystem;
+
+  /**
+   * What the world has to tell the player (C11 task 5).
+   *
+   * Not authoritative state and never serialized: systems record here inside a
+   * tick, the controller empties it once the frame is over, and nothing in
+   * `game/` ever reads it back. See `alerts.ts`.
+   */
+  readonly alerts = new AlertLog();
 
   /**
    * The command queue (§7). Owned here because §7 puts validation inside the
@@ -121,6 +134,13 @@ export class Simulation {
       entities: this.entities,
       buildings: this.buildings,
       inventory: this.player.materials,
+    });
+    this.miningSystem = new MiningSystem({
+      world: this.world,
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+      alerts: this.alerts,
     });
     this.playerSystem = new PlayerSystem({
       world: this.world,
@@ -178,6 +198,25 @@ export class Simulation {
     return reachable ? null : 'out_of_reach';
   }
 
+  /**
+   * How many tiles of ore this placement would cover, or null for a building
+   * that does not care. Read-only, and safe to call per frame.
+   *
+   * C11 task 4: "the ghost preview shows how many tiles it will cover". It is
+   * asked of the simulation rather than computed by the UI for the same reason
+   * `checkPlacement` is — the world is authoritative about what is under a
+   * tile, and a preview that counted for itself would be a second answer to
+   * the question the placement rule already asks.
+   */
+  resourceTilesUnder(buildingId: string, x: number, y: number, rotation: Rotation): number | null {
+    if (!this.buildings.has(buildingId)) return null;
+    const definition = this.buildings.get(buildingId);
+    if (definition.placement.requiresResource !== true) return null;
+
+    const facing = BuildingRegistry.normalizeRotation(definition, rotation);
+    return countResourceTiles(this.world, x, y, definition.size, facing);
+  }
+
   /** Ticks elapsed since this world was created. Authoritative; serialized. */
   getTick(): number {
     return this.tickCount;
@@ -215,7 +254,13 @@ export class Simulation {
       if (reason !== null) this.commands.reject(command, reason);
     }
 
-    // Phases 2-7 arrive with the chunks listed above.
+    // Phase 3 — mining. Miners extract into their own buffers (C11). It runs
+    // before production so ore mined this tick is smeltable this tick, and
+    // after the command phase so a miner placed this frame starts on the tick
+    // it was built rather than the one after.
+    this.miningSystem.tick();
+
+    // Phases 2 and 4-7 arrive with the chunks listed above.
 
     // Phase 8 — player. Movement and manual mining (C10). It runs after every
     // machine so that the world a step of walking is judged against is the one

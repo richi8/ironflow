@@ -422,6 +422,10 @@ body {
   border-left-color: var(--if-danger);
 }
 
+.if-toast--warn {
+  border-left-color: var(--if-warn);
+}
+
 .if-toast--info {
   border-left-color: var(--if-blue);
 }

@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C10 complete.** Milestone B in progress. Next: C11 — miner. |
+| **Status** | **C11 complete.** Milestone B in progress. Next: C12 — inspector & view models. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C11 — Miner** |
+| **First action** | Chunk **C12 — Inspector & view models** |
 
 ---
 
@@ -981,6 +981,20 @@ until C22; a field that is always `null` is a promise the view cannot keep. The
 HUD still draws both tiles from §11's icon set, dimmed, so the bar does not gain
 two tiles in the middle later — the placeholder is one string in the panel, and
 C21 deletes it by giving the tile something to read.
+
+**Implementation note (C11).** Two additions to the sketch above.
+
+- **`status` gained `'no_resource'`**, and the union is no longer written out
+  here or in the view: `game/entities/machine-status.ts` holds a numeric enum
+  that machines store and a table of these names, and `MachineView['status']`
+  is that table's type. Two hand-written lists of the same words is one list
+  too many, and the one that drifts is the one the player reads.
+- **"Systems emit events" is now real**, in the smallest form that has a
+  producer and a consumer: `AlertLog`. A system records an `Alert` inside a
+  tick, `GameController.pump()` collects it after the frame and emits a
+  `'alert'` game event, and the toasts render it. C11's producer is a miner
+  that has run out of ore; a machine that stops silently is the same bug as a
+  command that fails silently (§7), one tick later.
 
 Never write to the DOM inside a simulation phase. Systems emit events; the
 controller batches them in `cleanup`; the UI consumes them at its own rate.
@@ -2444,6 +2458,103 @@ rate in ticks; build-range validation; frame-rate independence of movement.
 buffer-full stall and resume; depletion transition.
 
 **Out of scope.** Power (C21), speed modules, mining productivity research.
+
+**Decisions taken while implementing this chunk.**
+
+- **What makes a building a miner is content, not an id.** `BuildingDefinition`
+  gained an optional `mining: { itemsPerSecond, bufferCapacity }`, and its
+  *presence* is the only test anything performs: `building-init.ts` branches on
+  it, `MiningSystem` asks the registry for it, and there is still no
+  `if (id === 'miner')` anywhere (§19 rule 17). C21's electric miner and C22's
+  tier 2 are a table entry each. The rate is authored in items per second —
+  the unit §15's whole balance table is written in — and converted to
+  `ticksPerItem` **once, at registry-build time**, exactly as §6 R3 requires.
+- **`entities/building-init.ts` is a third job.** C05's store takes whatever
+  fields it is given and C06's build system decides whether a building may
+  stand somewhere; neither knows a miner has a progress counter, and neither
+  should. Turning a definition into the initial state of one instance is its
+  own small file, and it is where C13's belts and C15's furnaces add a line.
+- **The output buffer is a count, not a `BufferInventory`.** C08's containers
+  are classes, and an entity is plain data that must survive
+  `JSON.stringify` (C05) — so a buffer object cannot go on one. A miner holds
+  exactly one kind of item, so an item id beside the count would be a second
+  copy of `resourceType`: `resourceItemId(miner.resourceType)` *is* what is in
+  the buffer, always. That is an invariant rather than a coincidence, and it is
+  what forces the adoption rule below.
+- **A miner adopts its resource on its first tick, not at placement**, and may
+  adopt a different ore under the same footprint — **but only while its buffer
+  is empty**. One place decides what a miner may mine, so the ghost and the
+  machine cannot disagree; and because the buffer names no item, switching with
+  ore still inside would silently transmute it. A miner on a mixed patch
+  therefore works the iron out, reports `no_resource` until something empties
+  it (C14), and then takes up the copper.
+- **`MachineStatus` is a numeric enum, complete on day one**, in
+  `entities/machine-status.ts`. Numeric for the reason `EntityType` is: it is
+  written into every machine in the save and compared once per machine per
+  tick, so existing numbers may never be reassigned. Complete because a type
+  that grows a member per chunk is one every save migration has to re-learn —
+  C11 uses four of the seven. C07's hand-written string union in
+  `views/building-view.ts` is now an alias for the same table's names, which is
+  also where `'no_resource'` — a status §13 never listed — came from.
+- **Status is stored although it is derivable.** §10 would normally call it
+  derived, and it is recomputed from scratch every tick; what cannot be
+  recomputed is the *transition*, and the transition is what task 5 asks for —
+  one alert when a miner runs dry, not one per tick. Recomputing it every tick
+  is also what keeps a loaded save honest, whatever was written into it.
+- **Progress is kept through `output_full` and discarded on `no_resource`.**
+  The asymmetry is deliberate and is the chunk's least obvious decision. C14's
+  inserter empties a buffer a few ticks after it fills, so a miner that reset
+  its progress on every stall would sit at a full buffer producing nothing —
+  a miner that works alone and stops the moment it is automated. A miner with
+  no ore left, by contrast, has nothing to be partway through, which is the
+  answer C10 already gave for the player's manual mining.
+- **Alerts are split across two files, and the split is §4.** `Alert` is a view
+  model and lives in `game/views/alert.ts`, because the UI renders it and §4
+  lets the UI import a view model and nothing else — the boundary test in
+  `tests/unit/ui-boundary.test.ts` is what makes that concrete. `AlertLog` is
+  the mutable queue a system writes to inside a tick, so it lives in
+  `game/alerts.ts` and the UI never sees it. The same split §7 already makes
+  between `CommandRejection` and the processor that records one.
+- **`footprintTileAt` and `footprintTileCount` were added to `entity.ts`.**
+  Random access into exactly the row-major order `forEachFootprintTile` walks,
+  so the round-robin cursor cannot address tiles in an order nothing else in
+  the game can predict — and so a miner does not allocate an array of four
+  coordinates per tick inside a simulation phase (§16). A test asserts the two
+  orders agree at every rotation.
+- **Every balance number is named once**, as in C10: `itemsPerSecond` and
+  `bufferCapacity` are content in `data/buildings.ts`, so C20's pass is a
+  one-line change and no existing save carries the old rate.
+
+**Deviations.**
+
+- **Task 1's "mining every resource tile under its footprint" is narrower than
+  it reads.** A miner mines every covered tile of *its own* `resourceType`,
+  round-robin by tile index. The field is in the task list, and a buffer that
+  mixed two ores could not say what was in it — see the adoption decision above.
+- **The ghost's count is `n/m ore`, and it is a `PlacementView` field.** Task 4
+  asks the preview to show how many tiles it will cover;
+  `PlacementView.resourceTiles` is that number, `null` for a building that does
+  not mine, because a chest covering no ore is not a chest that will produce
+  nothing. The simulation answers it with the same `countResourceTiles` the
+  placement rule uses, so a green ghost cannot promise four tiles over a patch
+  with three. The label is drawn at a **fixed pixel size**, like C10's mining
+  ring and for the same reason, anchored on the footprint's north corner — tile
+  point `(x, y)`, asked of the camera rather than derived from tile dimensions
+  (§5).
+- **C12's `MachineView` is filled in early, except the rate.** Status, progress
+  and the output stack exist as authoritative state the moment C11 lands, and
+  the acceptance criterion "reports `output_full`" wants a path to the player.
+  `ratePerMinute` stays 0: C12 measures it as a rolling average over 300 ticks,
+  and a number nobody has measured should not look measured.
+- **A `machine` row was added to the debug overlay.** Not in the task list, and
+  the same reasoning as C09's ore row and C10's player row: §20 asks for every
+  acceptance criterion to be verified in the running application, and "the
+  miner stalled on screen" is only half of that without the status behind it.
+  C12's inspector is where it becomes player-facing.
+- **The HUD's alert tile now counts alerts as well as rejections.** It counted
+  rejections because they were the only thing there was to count; from the
+  player's side both are the same event — the game had to tell them something
+  was wrong.
 
 ---
 

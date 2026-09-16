@@ -27,4 +27,14 @@ export interface PlacementView {
   readonly valid: boolean;
   /** Why not, when `valid` is false. Null when the placement would be accepted. */
   readonly reason: CommandRejectionReason | null;
+  /**
+   * How many tiles of the footprint have ore under them, or null for a
+   * building that does not mine (C11 task 4).
+   *
+   * Null rather than zero, because they are different facts: a chest covering
+   * no ore is not a chest that will produce nothing. The renderer draws the
+   * number beside the ghost so a 2x2 miner can be lined up on four tiles
+   * rather than two before it is paid for.
+   */
+  readonly resourceTiles: number | null;
 }

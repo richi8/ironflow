@@ -134,6 +134,44 @@ export function forEachFootprintTile(
   }
 }
 
+/**
+ * The `index`th tile of a placement, in the same row-major order
+ * `forEachFootprintTile` visits.
+ *
+ * The random-access half of the walk above, and it exists because C11's miner
+ * round-robins over its covered tiles: it needs *one* tile per item, chosen by
+ * a stored index, and building an array of four coordinates per miner per tick
+ * to pick one of them is allocation in a simulation phase. Sharing the order
+ * with the walk is the point — a cursor that disagreed with the iteration
+ * order would mine tiles in an order nothing else in the game could predict.
+ *
+ * `index` is taken modulo the tile count, so a cursor may be advanced without
+ * being wrapped by its owner and a rotation that shrinks nothing still lands
+ * inside the footprint.
+ */
+export function footprintTileAt(
+  x: number,
+  y: number,
+  footprint: Footprint,
+  rotation: Rotation,
+  index: number,
+): TileCoord {
+  assertFootprint(footprint);
+  if (!Number.isInteger(index) || index < 0) {
+    throw new RangeError(`footprintTileAt: index must be a non-negative integer, got ${index}.`);
+  }
+  const extent = footprintExtent(footprint, rotation);
+  const wrapped = index % (extent.width * extent.height);
+  return { x: x + (wrapped % extent.width), y: y + Math.floor(wrapped / extent.width) };
+}
+
+/** How many tiles a placement covers. */
+export function footprintTileCount(footprint: Footprint, rotation: Rotation): number {
+  assertFootprint(footprint);
+  const extent = footprintExtent(footprint, rotation);
+  return extent.width * extent.height;
+}
+
 /** The tiles a placement covers, as coordinates. For tests and the inspector. */
 export function footprintTiles(
   x: number,

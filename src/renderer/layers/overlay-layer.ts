@@ -11,7 +11,7 @@
 
 import type { TileCoord } from '../../game/world/coordinates.js';
 import type { Camera } from '../camera.js';
-import { color } from '../palette.js';
+import { FONT_STACK, color } from '../palette.js';
 import type { GhostView, PlayerRenderView, RenderState } from '../render-state.js';
 import { TILE_HALF_WIDTH, groundFacePath, type SpriteAtlas } from '../sprite-atlas.js';
 
@@ -38,6 +38,15 @@ const RANGE_SEGMENTS = 48;
 
 /** How solid the build-range circle's fill is. Soft, per C10 task 5. */
 const RANGE_FILL_ALPHA = 0.07;
+
+/** Size of the ghost's ore-count label, in CSS pixels. Fixed: it is a readout. */
+const GHOST_LABEL_SIZE = 12;
+
+/** How far above the footprint's north corner the label sits, in CSS pixels. */
+const GHOST_LABEL_OFFSET = 8;
+
+/** Weight of the label's outline, which is what keeps it readable over ore. */
+const GHOST_LABEL_OUTLINE = 3;
 
 /** Radius of the mining progress ring, in world pixels at zoom 1. */
 const MINING_RING_RADIUS = TILE_HALF_WIDTH * 0.42;
@@ -178,5 +187,43 @@ export class OverlayLayer {
     ctx.strokeStyle = ghost.valid ? color('ok') : color('danger');
     ctx.lineWidth = Math.max(1, OUTLINE_WIDTH * camera.zoom);
     ctx.stroke();
+
+    if (ghost.resourceTiles !== null) {
+      this.drawResourceCount(ctx, camera, ghost, ghost.resourceTiles);
+    }
+  }
+
+  /**
+   * How many of the tiles under a miner actually have ore on them (C11 task 4).
+   *
+   * Drawn at a **fixed pixel size**, like the mining ring and for the same
+   * reason: it is a readout rather than part of the world, and a number that
+   * shrinks with the zoom is one the player cannot read at the moment they are
+   * lining a miner up. It is anchored on the footprint's north corner, which
+   * is tile-space point `(x, y)` — asked of the camera rather than derived
+   * from the tile dimensions, because §5 keeps the projection in one file.
+   */
+  private drawResourceCount(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    ghost: GhostView,
+    covered: number,
+  ): void {
+    const north = camera.worldToScreen(ghost.x, ghost.y);
+    const text = `${covered}/${ghost.width * ghost.height} ore`;
+
+    ctx.font = `${GHOST_LABEL_SIZE}px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    // Outlined rather than boxed: a panel behind the text would hide the very
+    // tiles being counted, which are directly under it.
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = GHOST_LABEL_OUTLINE;
+    ctx.strokeStyle = color('bg-deep');
+    ctx.strokeText(text, north.x, north.y - GHOST_LABEL_OFFSET);
+
+    ctx.fillStyle = covered > 0 ? color('accent-high') : color('danger');
+    ctx.fillText(text, north.x, north.y - GHOST_LABEL_OFFSET);
   }
 }

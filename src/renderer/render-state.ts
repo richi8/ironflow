@@ -130,6 +130,14 @@ export interface GhostView {
   readonly sprite: SpriteId;
   /** Drives the colour: §11's `--if-ghost-valid` or `--if-ghost-invalid`. */
   readonly valid: boolean;
+  /**
+   * Ore tiles under the footprint, or null for a building that does not mine.
+   *
+   * C11 task 4 asks the preview to show how many tiles a miner will cover,
+   * because a 2x2 miner lined up on two ore tiles instead of four runs at half
+   * rate for an hour and nothing on screen says so until it does.
+   */
+  readonly resourceTiles: number | null;
 }
 
 /**

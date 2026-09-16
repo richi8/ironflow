@@ -40,7 +40,7 @@ import type { GameController } from '../game/game-controller.js';
 
 import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
-import { Notifications, rejectionMessage } from './notifications.js';
+import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
 import { Toolbar } from './toolbar.js';
 
 /** §13's HUD rate: counters, power, research. */
@@ -107,6 +107,12 @@ export class GameUI {
       // each produces exactly one toast.
       this.controller.subscribe('rejected', (event) => {
         this.notifications.push(rejectionMessage(event.reason), 'reject');
+      }),
+      // C11: the other half of "never fail silently" — a machine that stops.
+      // Warned rather than rejected: nothing the player did was refused, and
+      // the factory is still running, minus one miner.
+      this.controller.subscribe('alert', (event) => {
+        this.notifications.push(alertMessage(event.alert), 'warn');
       }),
       this.controller.subscribe('buildMenuChanged', () => {
         const view = this.controller.getBuildMenuView();

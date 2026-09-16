@@ -15,6 +15,7 @@ import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
 import { describeEntities, describePlayer } from './renderer/entity-view.js';
+import type { MachineView } from './game/views/building-view.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, RenderState } from './renderer/render-state.js';
@@ -73,6 +74,21 @@ function overflow(value: number, min: number, max: number): number {
   if (value < min) return value - min;
   if (value > max) return value - max;
   return 0;
+}
+
+/**
+ * The machine under the cursor, for the debug overlay (C11).
+ *
+ * C12's inspector is the panel this becomes; until then it is how a miner's
+ * status, progress and buffer are checked against what the world is doing,
+ * which is what §20 asks for — every acceptance criterion verified in the
+ * running application rather than only in a test.
+ */
+function describeMachine(view: MachineView | null): string {
+  if (view === null) return '—';
+  const progress = `${Math.round(view.progress * 100)}%`;
+  const held = view.outputs.map((stack) => `${stack.itemId} x${stack.count}`).join(', ');
+  return `${view.name} ${view.status} ${progress}${held === '' ? '' : ` -> ${held}`}`;
 }
 
 /** The player, for the debug overlay. See the row it fills in. */
@@ -197,6 +213,7 @@ function bootstrap(): void {
       height: placement.height,
       sprite: simulation.buildings.get(placement.buildingId).sprite as SpriteId,
       valid: placement.valid,
+      resourceTiles: placement.resourceTiles,
     };
   }
 
@@ -289,6 +306,9 @@ function bootstrap(): void {
         // (C12) and an inventory panel are where this becomes player-facing;
         // until then it is how the subtile arithmetic is checked by eye.
         player: describePlayerState(controller.getPlayerView()),
+        // C11's readout: what the machine under the cursor is doing, and why
+        // it is not. C12's inspector is where this becomes player-facing.
+        machine: describeMachine(input.hoverEntity === null ? null : controller.getBuildingView(input.hoverEntity)),
       },
       elapsedMs,
     );

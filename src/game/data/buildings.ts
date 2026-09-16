@@ -42,6 +42,11 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     rotationCount: 4,
     buildCost: [{ itemId: 'miner', count: 1 }],
     placement: { onTerrain: ANY_BUILDABLE_TERRAIN, requiresResource: true },
+    // §15's tier-1 anchor: 0.5 items/s, which is 60 ticks per item exactly.
+    // The buffer is fifty — a hundred seconds of production, so a miner with
+    // nowhere to send its ore stalls inside a play session rather than in
+    // theory (C11 task 3). Both are **balance numbers** for C20's pass.
+    mining: { itemsPerSecond: 0.5, bufferCapacity: 50 },
     sprite: 'building:extraction:MI:2x2:2',
   },
   {

@@ -41,6 +41,8 @@
 import type { Command } from './commands/command.js';
 import type { EntityId } from './entities/entity.js';
 import { footprintExtent } from './entities/entity.js';
+import { machineStatusName } from './entities/machine-status.js';
+import { asMiner, minerOutput } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { BuildingRegistry, type BuildingDefinition } from './registries/building-registry.js';
 import type { Simulation } from './simulation.js';
@@ -123,7 +125,13 @@ export class GameController {
   private readonly cursor: BuildCursor;
   private readonly listeners = new Map<GameEventType, Set<Listener>>();
 
-  /** Rejections shown this session. The HUD's alert count; see `HudView`. */
+  /**
+   * Rejections and alerts shown this session. The HUD's alert count.
+   *
+   * One counter for both, because it counts the same thing from the player's
+   * side: how many times the game had to tell them something was wrong. C11
+   * adds the second producer — a miner that ran out of ore.
+   */
   private alerts = 0;
 
   /**
@@ -170,6 +178,13 @@ export class GameController {
     for (const rejection of this.simulation.commands.takeRejections()) {
       this.alerts += 1;
       this.emit({ type: 'rejected', command: rejection.command, reason: rejection.reason });
+    }
+
+    // C11: what the world stopped doing, recorded inside a tick and told to
+    // the UI now the frame is over — the same pull the rejections above are.
+    for (const alert of this.simulation.alerts.take()) {
+      this.alerts += 1;
+      this.emit({ type: 'alert', alert });
     }
 
     const signature = this.buildMenuSignature();
@@ -288,16 +303,26 @@ export class GameController {
     if (entity === undefined) return null;
     const definition = this.simulation.buildings.forEntityType(entity.type);
 
+    const miner = asMiner(entity);
+    const mining = miner === null ? null : this.simulation.buildings.miningFor(entity.type);
+    const output = miner === null ? null : minerOutput(miner);
+
     return freeze({
       id: entity.id,
       buildingId: definition.id,
       name: definition.name,
-      // Nothing in C07 can run: no recipes, no buffers, no power. See the
-      // note in `views/building-view.ts` about §13's "never a bare idle".
-      status: 'idle' as const,
-      progress: 0,
+      // A building with no system behind it — a chest — is honestly idle. A
+      // miner says which of C11's three things it is doing, which is §13's
+      // "status must always explain a stall" becoming true for the first time.
+      status: miner === null ? ('idle' as const) : machineStatusName(miner.status),
+      // Derived from the tick count every frame, never stored (§10). The
+      // denominator is content, so a `null` config is 0 rather than a divide
+      // by zero (§6 R7).
+      progress: miner === null || mining === null ? 0 : miner.progressTicks / mining.ticksPerItem,
       inputs: EMPTY_STACKS,
-      outputs: EMPTY_STACKS,
+      outputs: output === null ? EMPTY_STACKS : freeze([freeze(output)]),
+      // C12 measures this as a rolling average over 300 ticks; until then a
+      // rate nobody has computed is 0 rather than a number that looks measured.
       ratePerMinute: 0,
       x: entity.x,
       y: entity.y,
@@ -331,6 +356,9 @@ export class GameController {
       rotation,
       valid: reason === null,
       reason,
+      // C11 task 4: how much ore a miner would actually sit on. Null for
+      // everything that does not mine — see `PlacementView`.
+      resourceTiles: this.simulation.resourceTilesUnder(definition.id, tile.x, tile.y, rotation),
     });
   }
 
