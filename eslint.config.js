@@ -94,12 +94,45 @@ export default tseslint.config(
           property: 'now',
           message: 'ironflow.md §6 R1: wall-clock time is not authoritative state. Inject a clock if you need timing.',
         },
+        // C18 completes §6 R1's list. The three above are the ones C00 knew
+        // about; these are the rest of the sentence — "crypto.getRandomValues,
+        // navigator.*, Intl.*, locale-sensitive sorting" — and each of them
+        // differs between two machines running the same save.
+        {
+          object: 'crypto',
+          property: 'getRandomValues',
+          message: 'ironflow.md §6 R2: use the seeded PRNG from game/rng.ts.',
+        },
+        {
+          property: 'localeCompare',
+          message: 'ironflow.md §6 R1: locale-sensitive ordering differs by machine. Compare ids or numbers.',
+        },
+        {
+          property: 'toLocaleString',
+          message: 'ironflow.md §6 R1: locale-sensitive formatting belongs in the UI, not in the simulation.',
+        },
+        {
+          property: 'toLocaleDateString',
+          message: 'ironflow.md §6 R1: locale-sensitive formatting belongs in the UI, not in the simulation.',
+        },
+        {
+          property: 'toLocaleTimeString',
+          message: 'ironflow.md §6 R1: locale-sensitive formatting belongs in the UI, not in the simulation.',
+        },
       ],
       'no-restricted-syntax': [
         'error',
         {
           selector: "NewExpression[callee.name='Date']",
           message: 'ironflow.md §6 R1: no wall-clock time in the simulation core.',
+        },
+        // `no-restricted-globals` does not see `Intl` — it is neither a browser
+        // API nor a declared global in this config — so the member access is
+        // matched directly. `new Intl.Collator()` is the shape that matters:
+        // it is how locale-sensitive sorting gets into a codebase (§6 R1).
+        {
+          selector: "MemberExpression[object.name='Intl']",
+          message: 'ironflow.md §6 R1: Intl is locale-sensitive and therefore machine-dependent. Keep it in the UI.',
         },
       ],
     },

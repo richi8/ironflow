@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C17 complete — one belt feeds two, exactly evenly, for ever.** Next: C18 — simulation hardening and determinism tests. **C18 is a gate.** |
+| **Status** | **C18 complete — §6 is a tested invariant. The gate is open.** Next: C19 — procedural world generation. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C18 — Simulation hardening & determinism tests** |
+| **First action** | Chunk **C19 — Procedural world generation** |
 
 ---
 
@@ -479,6 +479,25 @@ The RNG **stream position is authoritative state** and must be serialized.
 Worldgen uses a *separate, positionally-derived* stream — `hash(seed, cx, cy)` —
 so that generating world chunks in a different order still yields the same world.
 Never let worldgen consume the simulation stream.
+
+**Implementation note (C18).** The snippet above returns a *closure*, and a
+closure hides `s` — which is precisely the value the next sentence requires to
+be serialized. `game/rng.ts` therefore ships the same arithmetic on a class:
+`Rng` exposes `state` (the 32-bit word, which *is* the stream position, because
+mulberry32 keeps nothing else) and `Rng.fromState` resumes from it.
+`createRng(seed)` is kept, over the same object, for a caller that wants
+numbers and has no state to persist. Two other things the snippet leaves
+implicit are now fixed: a seed is normalised through `toUint32`, which
+**throws** on `NaN` and `Infinity` rather than letting `>>> 0` turn two
+different worlds into seed 0; and `nextInt(bound)` multiplies rather than takes
+a modulus, because a modulus over a non-power-of-two bound is biased toward the
+low values in a way a worldgen balance pass would chase for a day.
+
+**Nothing draws from the stream yet.** Every decision in the simulation as of
+C18 is a round-robin or a counter, deliberately. The *seed* is real state from
+C18 — `Simulation.seed`, chosen in `main.ts`, folded into the determinism hash
+— so that the day C19's generator draws from a stream, the tests are already
+watching it.
 
 **R3 — Progress is counted in integer ticks, never accumulated floats.**
 
@@ -3722,6 +3741,173 @@ so future regressions are visible.
 
 **Out of scope.** Replay recording (a natural follow-on, but not v1).
 
+**What the audits found.**
+
+Tasks 2 and 3 are audits, and the honest answer to both is *nothing to fix* —
+which is worth writing down, because "we looked" and "there was nothing there"
+are different claims and only the first one is a task.
+
+- **R3, float accumulation.** `grep` for `dt`, `delta` and `deltaTime` under
+  `src/game/` returns matches in **comments only**. Every duration in the game
+  is authored in seconds in `data/` and converted to an integer tick count once
+  at registry-build time (`ticksPerItem`, `unitsPerTick`, `inserterConfig`,
+  `CraftDurations`), which is §6 R3's rule already structural. The one place
+  real time enters the game is `SimulationClock`, and C00 had already made its
+  accumulator an integer.
+- **R4, `Map`/`Set` iteration.** No simulation system iterates one. The three
+  places that come close are all deliberate and all documented where they
+  stand: `EntityStore.cleanup` walks a `Uint8Array` of touched types rather
+  than a `Set` of them, `BeltSystem.rebuildOrder` uses a `Map` for lookup and
+  never traverses it, and `ItemCounts.toJSON` sorts its keys. The registries
+  hold `Map`s that are lookup tables and are never walked — each of them has an
+  ascending, enum-derived array beside it for exactly that reason.
+
+Both are now **guarded rather than merely audited**:
+`tests/determinism/source-rules.test.ts` scans the source for the shapes each
+rule forbids, in the same form `projection-boundary.test.ts` guards §5. An
+audit protects the day it was done; a scan protects every day after it.
+
+**Decisions taken while implementing this chunk.**
+
+- **The state hash is a test fixture, not `src/game/save/`.** C24 owns the real
+  serializer, and §14's save is a *different document*: world deltas rather
+  than whole world chunks, a schema version, migrations. Hashing the save would
+  make the determinism tests blind to exactly the bug §6 R8 exists to catch — a
+  field the serializer forgot hashes the same before and after. `state-hash.ts`
+  therefore walks live state from an explicitly listed set of roots, so adding
+  authoritative state without adding it there is one visible omission rather
+  than a silent one, and the two checks stay independent when C24 lands.
+
+- **Canonical means sorted, not `JSON.stringify`.** Three properties are load-
+  bearing and `JSON.stringify` has none of them: it writes object keys in
+  *insertion* order (so the same entity built in a different sequence would
+  hash differently), it normalises `-0` to `0` (so a hash built on it is blind
+  to the one value §6 R7 calls the quietest), and it turns `NaN` and `Infinity`
+  into `null`. `canonicalize` sorts keys, writes `-0` as `-0`, and writes the
+  two non-finite values by name.
+
+- **Build-order independence is asked of an id-free projection.** It has to be,
+  and the reason is §6 R5 rather than a weakness in the test: ids are monotonic
+  and never reused, so laying the same factory in a different order genuinely
+  produces a different set of them, and a hash including ids would report that
+  difference instead of the one being asked about. `hashLayout` keys entities
+  by tile and drops `id` — but keeps `nextEntityId`, so a layout that quietly
+  leaked one is still caught. A companion test asserts the two orders *do*
+  differ under `hashState`, so the comparison cannot become vacuous.
+
+- **A scenario is a number of ticks, and the harness clamps to it.** A frame
+  carries up to `MAX_STEPS_PER_FRAME` ticks, so a loop driven by frames cannot
+  land on an exact tick count: the jittery pattern sails two ticks past ten
+  thousand where the steady one stops on it. §6's contract is stated in ticks
+  and §8 is explicit that wall-clock time away costs nothing, so
+  `ScriptedSimulation` stops stepping once the scenario's tick budget is spent
+  and the loop keeps running around it. Commands are likewise placed on
+  **ticks**, not on frames — enqueued inside the tick they are due on — because
+  "enqueue before each frame" would land a command on a different tick under a
+  different pattern, and the frame-pattern test would then fail for a reason
+  that has nothing to do with the simulation.
+
+- **The command script holds no entity ids.** §7's union has three members that
+  name one — `rotate`, `setRecipe`, `takeItems` — and none of them can appear
+  in a script shared by two build orders, for the reason above. They are
+  covered by C12's and C16's tests, where the entity is the subject rather than
+  the variable. What is left still exercises the queue, validation, a
+  placement, a removal, walking and the world being mined.
+
+- **The reference factory is created, not built from commands.** A build
+  command is checked against the player's reach (C10), so a 507-entity factory
+  would have to be built by walking the player up and down it for thousands of
+  ticks before the measurement could start — a test of `movePlayer`. Creating
+  the layout directly is also the shape a loaded save arrives in.
+
+- **`World.forEachLoadedChunk` was added, sorted.** The hash has to fold the
+  world in without *generating* it, and `forEachChunkInBounds` generates by
+  design. The only other way to enumerate was the `Map`, which iterates by
+  insertion — so a world explored westward and the same world loaded from a
+  save would have handed out their chunks in different sequences. Sorting by
+  packed key makes the order a coordinate order. §14's save wants the same
+  method for the same reason.
+
+**Deviations.**
+
+- **The benchmark harness is not `--outputJson` / `--compare`.** Vitest 5
+  replaced the benchmark API this project was written against: `bench` is no
+  longer a module export, benchmarks are ordinary tests that take a `bench`
+  from the test context, and the CLI has neither flag. The committed baseline
+  is therefore one JSON file per case under `tests/bench/baseline/`, written by
+  `bench`'s own `writeResult` and read back as `bench.from(...)` rows in the
+  comparison table. `npm run bench` prints current against baseline;
+  `npm run bench:baseline` overwrites it and is the only thing that does, so a
+  regression cannot quietly become the new normal on the next run.
+
+- **Benchmarks do not run under `npm test` and assert nothing.** A benchmark's
+  result is a property of the machine, and a suite that failed because a laptop
+  was on battery is a suite people learn to ignore. §12's budgets are asserted
+  at C28, against the profiler C28 builds; C18's job is the harness and a
+  baseline a person can read.
+
+- **"Tick cost per system" is measured as a factory made of one thing.** The
+  systems are private to `Simulation` and widening that surface for a
+  measurement would be the wrong trade — and calling a system outside its phase
+  order would measure something the game never does. Each case is a whole tick
+  over 1,000 entities of one kind; `reference factory (mixed)` is the mixture
+  and is the row that maps onto §12's tick budget.
+
+**Acceptance, as tested.**
+
+- **10,000 ticks of a 500-entity factory, identical across 10 runs.** 507
+  entities in 39 cells — miner, four belts, splitter, two belts, chest,
+  inserter, furnace, inserter, chest — so every system in the game is inside
+  the measurement. Ten runs, one hash. Two companion tests keep it honest: a
+  different command script and a different tick count each produce a
+  *different* hash, so a comparison that had stopped depending on either would
+  fail rather than pass quietly.
+- **Frame-pattern independence.** Steady 60 Hz, jitter between 5 ms and 120 ms,
+  and one two-second stall all produce the same hash. A fourth test asserts the
+  three patterns really are different: steady runs 0 or 1 ticks a frame and
+  never two, jitter spreads across 0–4 and needs less than half the frames, and
+  the stall hits §8's step cap exactly once.
+- **Build-order independence.** The factory laid forwards and backwards
+  produces the same layout hash after 10,000 ticks — and a different *state*
+  hash, which is the guard that the first comparison is not vacuous.
+- **No `Math.random` / `Date.now` / `performance.now` under `src/game/`**, plus
+  the rest of §6 R1's sentence — `crypto`, `navigator`, `Intl`, locale-
+  sensitive sorting and formatting — checked file by file, with a test that the
+  patterns themselves match the shapes they claim to and miss the shapes that
+  are fine. The ESLint rules gained the same members and were verified to fire.
+- **Every number in a serialized state is finite, and none is `-0`**, after a
+  ten-thousand-tick run. Beside it, a test that `forEachNumber` would find one.
+- `tests/unit/rng.test.ts` covers §6 R2: the same seed gives the same stream,
+  the position round-trips through JSON and resumes exactly, a seed is
+  normalised to 32 bits, `NaN` is refused rather than silently becoming 0, and
+  the distribution is flat to within 5% over 100,000 draws.
+- **The harness was checked against a real defect**: a `Math.random()` inserted
+  into `MiningSystem.tick` that skips a tick 0.2% of the time fails all three
+  core determinism tests. An earlier attempt that wrote only to a private field
+  nothing read failed *none* of them, which is the right answer and is why the
+  mutation was made to touch authoritative state.
+
+**Noticed, not fixed.**
+
+- **Miners are the most expensive system per entity, by five times.** The
+  baseline reads 34.0 ms for 50 ticks of 500 miners and 500 chests against
+  7.5 ms for 1,000 belt tiles — about 1.3 µs per miner-tick against 0.15 µs
+  per belt-tick. §19 rule 20 says profile before optimising, and this *is* the
+  profiling; acting on it is C28's, which is the chunk that owns §12's budgets
+  and a profiler that can say where inside a miner's tick the time goes.
+- **The RNG has no consumer.** It is §6 R2's named artifact and C18 task 1 asks
+  for it, and it is honestly an abstraction ahead of its use — the narrowest
+  the plan permits, and C19 is the chunk that uses it. If C19 slips, this is
+  the thing to re-read rule 10 about.
+- **§6 R8's save round-trip is still C24's.** C18 proves the simulation is
+  deterministic; it cannot prove a save carries everything, because it does not
+  go through a save. The hash is built so that C24's test can compare a loaded
+  world against it directly.
+- **The determinism suite costs about 8 seconds**, most of the whole test run.
+  That is 10,000 ticks run fourteen times, and it is the price of the gate
+  being real. If it becomes a problem the answer is a shorter default with the
+  full run behind a flag, not a smaller factory.
+
 ---
 
 ## C19 — Procedural world generation
@@ -4550,6 +4736,7 @@ full chain producing data cores -> lab -> research complete    (C22)
 
 1. `no-dom-in-game.test.ts` (C00) — protects the architecture.
 2. Determinism rerun hash (C18) — protects the simulation.
+   (`tests/determinism/determinism.test.ts`, with the harness beside it.)
 3. Save round-trip equality (C24) — protects saves.
 4. The C15 vertical-slice chain — protects the game.
    (`tests/integration/vertical-slice.test.ts`, written in C15.)

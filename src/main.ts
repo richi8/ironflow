@@ -93,6 +93,18 @@ function describePlayerState(view: PlayerView): string {
   return `${where}, ${bag}, mining ${view.mining.x},${view.mining.y} ${Math.round(view.mining.progress * 100)}%`;
 }
 
+/**
+ * The world seed (§6 R2, §10, §14).
+ *
+ * One fixed number while worldgen is still C19's playground generator, which
+ * ignores it. It is passed anyway rather than left to default, because a
+ * composition root that lets a piece of authoritative state default is a
+ * composition root that has not decided — and the day the generator starts
+ * reading it, "which seed is this world?" must already have an answer the save
+ * can carry.
+ */
+const WORLD_SEED = 0x1f0f10;
+
 function bootstrap(): void {
   const canvas = requireElement<HTMLCanvasElement>('#game');
   const uiRoot = requireElement<HTMLElement>('#ui');
@@ -104,7 +116,11 @@ function bootstrap(): void {
   const world = new World(createPlaygroundGenerator());
   // The simulation builds its own registry from `data/buildings.ts` and hands
   // the entity store the footprint lookup that comes with it (C05, C06).
-  const simulation = new Simulation({ world });
+  // The seed is chosen here because §4 makes the composition root the place
+  // decisions are wired; it is authoritative state from C18 (§6 R2, §10) and
+  // becomes a *player* decision at C25's new-game dialog, at which point this
+  // constant is what that dialog replaces.
+  const simulation = new Simulation({ world, seed: WORLD_SEED });
   simulation.player.setTilePosition(START_TILE.x, START_TILE.y);
   const scheduler = new BrowserFrameScheduler();
 

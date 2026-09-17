@@ -232,6 +232,35 @@ export class World {
    * the same world chunks in the same sequence regardless of what the `Map`
    * happens to hold (§6 R4).
    */
+  /**
+   * Visit every world chunk that has actually been generated, in a fixed order.
+   *
+   * The counterpart to `forEachChunkInBounds`: that one is driven by a
+   * rectangle and **generates**, this one is driven by what exists and creates
+   * nothing. Two callers want exactly that — C18's determinism hash, which has
+   * to fold the world into a number without inventing terrain by looking at
+   * it, and §14's save, which writes the world chunks that diverge from what
+   * the generator would produce and regenerates the rest.
+   *
+   * **Ascending by packed key**, sorted rather than taken in the `Map`'s
+   * order. §6 R4 is the whole reason this method exists: a `Map` iterates in
+   * *insertion* order, so a world explored westward and the same world loaded
+   * from a save would hand out their chunks in different sequences, and
+   * anything that hashed or serialized them would disagree with itself across
+   * a reload. `chunkKey` packs `(cx, cy)` into one integer, so sorting the
+   * keys is a coordinate order and not an arbitrary one.
+   *
+   * The sort is why this is not a hot path and is not meant to be: it is for
+   * saving and for hashing, both of which happen between ticks.
+   */
+  forEachLoadedChunk(visit: ChunkVisitor): void {
+    const keys = [...this.chunks.keys()].sort((a, b) => a - b);
+    for (const key of keys) {
+      const chunk = this.chunks.get(key);
+      if (chunk !== undefined) visit(chunk);
+    }
+  }
+
   forEachChunkInBounds(bounds: TileBounds, visit: ChunkVisitor): void {
     // An empty rectangle, per the `TileBounds` convention. Without this, a
     // zero-size viewport would still generate the world chunk under the origin.

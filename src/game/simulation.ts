@@ -10,6 +10,7 @@ import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
 import { ProductionCounters } from './production.js';
+import { Rng, toUint32 } from './rng.js';
 import { RECIPES } from './data/recipes.js';
 import { RecipeRegistry } from './registries/recipe-registry.js';
 import { CraftDurations } from './registries/craft-durations.js';
@@ -34,6 +35,16 @@ import type { World } from './world/world.js';
  */
 export interface SimulationOptions {
   readonly world: World;
+  /**
+   * The world seed (§6 R2, §10, §14). Defaulted to 0 so the hundreds of tests
+   * that care about belts and not about worldgen need not invent one.
+   *
+   * It is authoritative from C18 onward even though nothing draws from the
+   * stream yet: §14 saves the seed, C19's generator takes it, and folding it
+   * into the state from this chunk means the determinism harness is already
+   * watching it when the first random number is drawn.
+   */
+  readonly seed?: number;
   /**
    * Content. Defaulted rather than required so a test that cares about ticks
    * and not about buildings can say `new Simulation({ world })`, and so there
@@ -181,10 +192,33 @@ export class Simulation {
    */
   readonly commands = new CommandProcessor();
 
+  /**
+   * The seed this world was made from. Authoritative (§10), never changes.
+   *
+   * A 32-bit unsigned integer, normalised once here, so that "the seed the
+   * player typed" and "the seed the save carries" are the same number however
+   * it was written down.
+   */
+  readonly seed: number;
+
+  /**
+   * The simulation's random stream (§6 R2). Its **position** is authoritative
+   * state and is serialized with the world; the generator itself is not.
+   *
+   * Nothing draws from it yet — every decision in the game today is a
+   * round-robin or a counter, deliberately — and C19's worldgen will use a
+   * separate positionally-derived stream rather than this one, so that
+   * generating world chunks in a different order still yields the same world.
+   * See `rng.ts`.
+   */
+  readonly rng: Rng;
+
   private tickCount = 0;
 
   constructor(options: SimulationOptions) {
     this.world = options.world;
+    this.seed = toUint32(options.seed ?? 0);
+    this.rng = new Rng(this.seed);
     this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
     this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
     this.items = options.items ?? new ItemRegistry(ITEMS);

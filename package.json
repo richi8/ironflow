@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench --run --reporter=verbose",
+    "bench:baseline": "IRONFLOW_BENCH_BASELINE=1 vitest bench --run --reporter=verbose",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test"
   },
