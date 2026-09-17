@@ -72,8 +72,8 @@
 import {
   BELT_MAX_POSITION,
   asBelt,
-  beltAccept,
-  beltEntryPosition,
+  laneAccept,
+  laneEntryPosition,
   type BeltEntity,
 } from '../entities/belt-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
@@ -340,7 +340,7 @@ export class InserterSystem {
     if (target === undefined) return false;
 
     const belt = asBelt(target);
-    if (belt !== null) return beltEntryPosition(belt, BELT_MAX_POSITION) >= 0;
+    if (belt !== null) return laneEntryPosition(belt.items, BELT_MAX_POSITION) >= 0;
 
     return (inputPortOf(target, this.ports)?.spaceFor(itemId) ?? 0) > 0;
   }
@@ -354,7 +354,7 @@ export class InserterSystem {
     // As far forward as it fits, which is still behind everything already on
     // the tile — the same entry `belt-system.ts` gives a machine unloading,
     // so an item handed to a belt never has to cross a tile it was never on.
-    if (belt !== null) return beltAccept(belt, inserter.heldItem, BELT_MAX_POSITION);
+    if (belt !== null) return laneAccept(belt.items, inserter.heldItem, BELT_MAX_POSITION);
 
     return inputPortOf(target, this.ports)?.give(inserter.heldItem, 1) === 1;
   }

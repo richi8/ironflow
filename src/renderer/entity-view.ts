@@ -14,11 +14,17 @@
  * ones — is deleted by this chunk.
  */
 
-import { BELT_TILE_UNITS, type BeltEntity } from '../game/entities/belt-entity.js';
+import { BELT_TILE_UNITS, type BeltItem, type BeltEntity } from '../game/entities/belt-entity.js';
 import type { EntityStore } from '../game/entities/entity-store.js';
 import { NO_ENTITY, footprintExtent, type Entity } from '../game/entities/entity.js';
 import { EntityType } from '../game/entities/entity-types.js';
 import { asInserter, inserterArmPosition, type InserterEntity } from '../game/entities/inserter-entity.js';
+import {
+  SPLITTER_LANES,
+  splitterTile,
+  type SplitterEntity,
+  type SplitterSide,
+} from '../game/entities/splitter-entity.js';
 import type {
   BuildingDefinition,
   BuildingRegistry,
@@ -37,6 +43,7 @@ import {
   inserterSprite,
   itemSprite,
   playerSprite,
+  splitterSprite,
   type SpriteId,
 } from './sprite-atlas.js';
 
@@ -50,7 +57,10 @@ import {
  * (§19 rule 17), which is the same test `building-init.ts` makes.
  */
 function layerFor(definition: BuildingDefinition): RenderLayer {
-  if (definition.belt !== undefined) return RenderLayer.Belt;
+  // A splitter lies as flat as the belt it sits in, and for the same reason:
+  // a belt line running past a building must go under it, and the items on
+  // that line over it (C17).
+  if (definition.belt !== undefined || definition.splitter !== undefined) return RenderLayer.Belt;
   // An inserter's arm reaches over the tiles either side of it, so it draws
   // after everything else in its own depth row — including an item sitting on
   // the belt it is reaching into.
@@ -70,6 +80,7 @@ function layerFor(definition: BuildingDefinition): RenderLayer {
  */
 export function buildingSprite(definition: BuildingDefinition, rotation: Rotation, phase = 0): SpriteId {
   if (definition.belt !== undefined) return beltSprite(rotation, phase);
+  if (definition.splitter !== undefined) return splitterSprite(rotation, phase);
   // An inserter at rest, which is what a ghost is: the arm is over the source
   // side and the hand is empty. A *placed* one is drawn from its own state —
   // see `inserterSpriteFor`, which this is deliberately not, because a ghost
@@ -90,6 +101,18 @@ export function buildingSprite(definition: BuildingDefinition, rotation: Rotatio
 function inserterSpriteFor(inserter: InserterEntity, config: InserterConfig): SpriteId {
   const swing = Math.round(inserterArmPosition(inserter, config) * INSERTER_SWING_STEPS);
   return inserterSprite(inserter.rotation, swing, inserter.heldItem !== NO_ITEM);
+}
+
+/**
+ * How fast this building's chevrons run, or null if it has none (C17).
+ *
+ * A belt and a splitter answer the same way because a splitter's lane runs at
+ * the belt's speed — an item does not change pace crossing into one — and
+ * asking content rather than the entity type means C22's fast splitter
+ * animates correctly without this file hearing about it.
+ */
+function carrierSpeed(definition: BuildingDefinition): number | null {
+  return definition.belt?.tilesPerSecond ?? definition.splitter?.tilesPerSecond ?? null;
 }
 
 /**
@@ -145,7 +168,8 @@ export function describeEntities(
   store.forEach((entity) => {
     const definition = buildings.forEntityType(entity.type);
     const extent = footprintExtent(definition.size, entity.rotation);
-    const phase = definition.belt === undefined ? 0 : beltPhase(definition.belt.tilesPerSecond, seconds);
+    const speed = carrierSpeed(definition);
+    const phase = speed === null ? 0 : beltPhase(speed, seconds);
     out.push({
       id: entity.id,
       x: entity.x,
@@ -171,7 +195,8 @@ export function describeEntities(
 const ITEM_DEPTH_NUDGE = 0.1;
 
 /**
- * Every item riding a belt, as drawables. See §9 and C13 task 8.
+ * Every item riding a belt or a splitter, as drawables. See §9, C13 task 8
+ * and C17 task 4.
  *
  * Items are **not entities** (§9): they have no id, they are not in the store,
  * and they are not in the list the picker searches. What they have is a belt,
@@ -186,34 +211,64 @@ const ITEM_DEPTH_NUDGE = 0.1;
  * `alpha` would make every *blocked* item jitter forward and snap back — the
  * one place on a belt a player is actually looking.
  */
-export function describeBeltItems(store: EntityStore, items: ItemRegistry): RenderEntity[] {
+export function describeBeltItems(
+  store: EntityStore,
+  buildings: BuildingRegistry,
+  items: ItemRegistry,
+): RenderEntity[] {
   const out: RenderEntity[] = [];
 
   for (const belt of store.byType<BeltEntity>(EntityType.Belt)) {
-    const step = DIRECTION_OFFSETS[belt.rotation];
-    if (step === undefined) continue;
-    const depthAxis = step.x + step.y;
+    describeLane(out, belt.items, belt.x, belt.y, belt.rotation, items);
+  }
 
-    for (const item of belt.items) {
-      if (!items.isItemId(item.itemId)) continue;
-      const along = item.pos / BELT_TILE_UNITS - 0.5;
-      // The anchor a drawable carries is its footprint's north-west corner and
-      // the layer adds half the footprint back, so half a tile comes off here
-      // — the same round trip the player's drawable makes.
-      out.push({
-        id: NO_ENTITY,
-        x: belt.x + step.x * along,
-        y: belt.y + step.y * along,
-        width: 1,
-        height: 1,
-        sprite: itemSprite(items.byId(item.itemId).id),
-        layer: RenderLayer.ItemOnBelt,
-        depthRow: belt.x + belt.y + ITEM_DEPTH_NUDGE * depthAxis * along,
-      });
+  // A splitter's two lanes are drawn exactly as a belt's, each centred on its
+  // own footprint tile — which is what makes the line read as continuous
+  // across it (C17 task 4). The tile comes from the same content footprint the
+  // simulation walks, so the picture and the geometry cannot disagree.
+  for (const splitter of store.byType<SplitterEntity>(EntityType.Splitter)) {
+    const size = buildings.forEntityType(splitter.type).size;
+    for (let side = 0; side < SPLITTER_LANES; side++) {
+      const lane = splitter.lanes[side as SplitterSide];
+      if (lane === undefined) continue;
+      const tile = splitterTile(splitter, size, side as SplitterSide);
+      describeLane(out, lane, tile.x, tile.y, splitter.rotation, items);
     }
   }
 
   return out;
+}
+
+/** Every item in one lane, as drawables centred on the tile that carries it. */
+function describeLane(
+  out: RenderEntity[],
+  lane: readonly BeltItem[],
+  tileX: number,
+  tileY: number,
+  rotation: Rotation,
+  items: ItemRegistry,
+): void {
+  const step = DIRECTION_OFFSETS[rotation];
+  if (step === undefined) return;
+  const depthAxis = step.x + step.y;
+
+  for (const item of lane) {
+    if (!items.isItemId(item.itemId)) continue;
+    const along = item.pos / BELT_TILE_UNITS - 0.5;
+    // The anchor a drawable carries is its footprint's north-west corner and
+    // the layer adds half the footprint back, so half a tile comes off here
+    // — the same round trip the player's drawable makes.
+    out.push({
+      id: NO_ENTITY,
+      x: tileX + step.x * along,
+      y: tileY + step.y * along,
+      width: 1,
+      height: 1,
+      sprite: itemSprite(items.byId(item.itemId).id),
+      layer: RenderLayer.ItemOnBelt,
+      depthRow: tileX + tileY + ITEM_DEPTH_NUDGE * depthAxis * along,
+    });
+  }
 }
 
 /**

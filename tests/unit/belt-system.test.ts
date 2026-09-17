@@ -5,7 +5,7 @@ import {
   BELT_SLOTS_PER_TILE,
   BELT_SLOT_SPACING,
   BELT_TILE_UNITS,
-  beltAccept,
+  laneAccept,
   newBelt,
   type BeltEntity,
 } from '../../src/game/entities/belt-entity.js';
@@ -135,7 +135,7 @@ describe('belt movement', () => {
     const simulation = new Simulation({ world: flatWorld() });
     const [belt] = layLine(simulation, 0, 0, EAST, 3);
     if (belt === undefined) throw new Error('no belt');
-    beltAccept(belt, simulation.items.idOf('iron_ore'), 0);
+    laneAccept(belt.items, simulation.items.idOf('iron_ore'), 0);
 
     for (let tick = 1; tick <= 5; tick++) {
       simulation.tick();
@@ -147,7 +147,7 @@ describe('belt movement', () => {
     const simulation = new Simulation({ world: flatWorld() });
     const [first, second] = layLine(simulation, 0, 0, EAST, 3);
     if (first === undefined || second === undefined) throw new Error('no belt');
-    beltAccept(first, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
+    laneAccept(first.items, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
 
     simulation.tick();
     // It left the first tile and arrived on the second one carrying exactly
@@ -163,7 +163,7 @@ describe('belt movement', () => {
     const head = belts[0];
     const tail = belts[3];
     if (head === undefined || tail === undefined) throw new Error('no belt');
-    beltAccept(head, simulation.items.idOf('iron_ore'), 0);
+    laneAccept(head.items, simulation.items.idOf('iron_ore'), 0);
 
     // Three whole tiles to cross, from position 0.
     const expected = Math.ceil((3 * BELT_TILE_UNITS) / UNITS_PER_TICK);
@@ -185,7 +185,7 @@ describe('belt blocking and compaction', () => {
     const { simulation, belts } = deadEnd();
     const last = belts[2];
     if (last === undefined) throw new Error('no belt');
-    beltAccept(last, simulation.items.idOf('iron_ore'), 0);
+    laneAccept(last.items, simulation.items.idOf('iron_ore'), 0);
 
     run(simulation, 200);
     expect(positions(last)).toEqual([BELT_MAX_POSITION]);
@@ -196,7 +196,7 @@ describe('belt blocking and compaction', () => {
     const last = belts[2];
     if (last === undefined) throw new Error('no belt');
     const iron = simulation.items.idOf('iron_ore');
-    for (let i = 0; i < BELT_SLOTS_PER_TILE; i++) beltAccept(last, iron, BELT_MAX_POSITION);
+    for (let i = 0; i < BELT_SLOTS_PER_TILE; i++) laneAccept(last.items, iron, BELT_MAX_POSITION);
 
     run(simulation, 200);
     expect(positions(last)).toEqual([
@@ -212,7 +212,7 @@ describe('belt blocking and compaction', () => {
     const [belt] = layLine(simulation, 0, 0, EAST, 1);
     if (belt === undefined) throw new Error('no belt');
     const iron = simulation.items.idOf('iron_ore');
-    for (let i = 0; i < 20; i++) beltAccept(belt, iron, BELT_MAX_POSITION);
+    for (let i = 0; i < 20; i++) laneAccept(belt.items, iron, BELT_MAX_POSITION);
 
     expect(belt.items.length).toBe(BELT_SLOTS_PER_TILE);
     run(simulation, 100);
@@ -228,7 +228,7 @@ describe('belt blocking and compaction', () => {
     // Feed the head as fast as it will take anything, for long enough that the
     // block has to travel the whole line backwards to reach it.
     for (let tick = 0; tick < 400; tick++) {
-      while (beltAccept(head, iron, BELT_MAX_POSITION)) {
+      while (laneAccept(head.items, iron, BELT_MAX_POSITION)) {
         /* saturate */
       }
       simulation.tick();
@@ -248,7 +248,7 @@ describe('belt hand-off', () => {
     const east = simulation.entities.create<BeltEntity>(newBelt(0, 0, EAST));
     const south = simulation.entities.create<BeltEntity>(newBelt(1, 0, SOUTH));
     const below = simulation.entities.create<BeltEntity>(newBelt(1, 1, SOUTH));
-    beltAccept(east, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
+    laneAccept(east.items, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
 
     simulation.tick();
     expect(east.items.length).toBe(0);
@@ -262,7 +262,7 @@ describe('belt hand-off', () => {
     const simulation = new Simulation({ world: flatWorld() });
     const east = simulation.entities.create<BeltEntity>(newBelt(0, 0, EAST));
     const west = simulation.entities.create<BeltEntity>(newBelt(1, 0, WEST));
-    beltAccept(east, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
+    laneAccept(east.items, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
 
     run(simulation, 50);
     // Neither belt passes to the other, so the item waits at the seam instead
@@ -275,7 +275,7 @@ describe('belt hand-off', () => {
     const simulation = new Simulation({ world: oreWorld(2, 0, 100) });
     const belt = simulation.entities.create<BeltEntity>(newBelt(1, 0, EAST));
     simulation.entities.create<MinerEntity>(newMiner(2, 0, NORTH));
-    beltAccept(belt, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
+    laneAccept(belt.items, simulation.items.idOf('iron_ore'), BELT_MAX_POSITION);
 
     run(simulation, 50);
     expect(positions(belt)).toEqual([BELT_MAX_POSITION]);
@@ -289,7 +289,7 @@ describe('belts into containers', () => {
     const chest = simulation.entities.create<ChestEntity>(newChest(3, 0, NORTH));
     const head = belts[0];
     if (head === undefined) throw new Error('no belt');
-    beltAccept(head, simulation.items.idOf('iron_ore'), 0);
+    laneAccept(head.items, simulation.items.idOf('iron_ore'), 0);
 
     run(simulation, 200);
     expect(chest.contents).toEqual([[simulation.items.idOf('iron_ore'), 1]]);
@@ -312,7 +312,7 @@ describe('belts into containers', () => {
     if (head === undefined) throw new Error('no belt');
 
     for (let tick = 0; tick < 400; tick++) {
-      while (beltAccept(head, iron, BELT_MAX_POSITION)) {
+      while (laneAccept(head.items, iron, BELT_MAX_POSITION)) {
         /* saturate */
       }
       simulation.tick();
@@ -341,7 +341,7 @@ describe('belt ordering', () => {
     const iron = simulation.items.idOf('iron_ore');
 
     for (let tick = 0; tick < 600; tick++) {
-      while (beltAccept(head, iron, BELT_MAX_POSITION)) {
+      while (laneAccept(head.items, iron, BELT_MAX_POSITION)) {
         /* saturate */
       }
       simulation.tick();
@@ -366,7 +366,7 @@ describe('belt ordering', () => {
       if (head === undefined) throw new Error('no belt');
       const iron = simulation.items.idOf('iron_ore');
       for (let tick = 0; tick < 600; tick++) {
-        while (beltAccept(head, iron, BELT_MAX_POSITION)) {
+        while (laneAccept(head.items, iron, BELT_MAX_POSITION)) {
           /* saturate */
         }
         simulation.tick();
@@ -389,7 +389,7 @@ describe('belt throughput', () => {
 
     const feed = (ticks: number): void => {
       for (let tick = 0; tick < ticks; tick++) {
-        while (beltAccept(head, iron, BELT_MAX_POSITION)) {
+        while (laneAccept(head.items, iron, BELT_MAX_POSITION)) {
           /* saturate */
         }
         simulation.tick();
@@ -458,7 +458,7 @@ describe('belt performance', () => {
     }
     let placed = 0;
     for (const belt of belts) {
-      while (placed < 8000 && beltAccept(belt, iron, BELT_MAX_POSITION)) placed += 1;
+      while (placed < 8000 && laneAccept(belt.items, iron, BELT_MAX_POSITION)) placed += 1;
       if (placed >= 8000) break;
     }
     expect(belts.length).toBe(12000);

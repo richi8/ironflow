@@ -68,6 +68,7 @@ const START_TILE = Object.freeze({ x: 6, y: 6 });
 const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
   miner: 5,
   belt: 100,
+  splitter: 10,
   inserter: 20,
   furnace: 10,
   assembler: 3,
@@ -133,8 +134,11 @@ function bootstrap(): void {
    * 1.6 and is the first number here that comes out of the content table
    * rather than out of the feel of the thing (C15). Three assemblers is the
    * same arithmetic one step along: §15 says a gear assembler needs 3.2 plate
-   * furnaces, so ten furnaces feed three of them (C16). All of them are
-   * **balance numbers**, and all of them are still temporary in one respect —
+   * furnaces, so ten furnaces feed three of them (C16). Ten splitters is
+   * two per miner, which is the number it takes to fan one ore line out to
+   * four consumers — one split, then a split of each half — and the first
+   * layout the player has to think about rather than the last (C17). All of
+   * them are **balance numbers**, and all of them are still temporary in one respect —
    * §15's building recipes make buildings craftable, and a starting stock then
    * becomes a decision about the first five minutes rather than about whether
    * the game can be played at all.
@@ -282,7 +286,7 @@ function bootstrap(): void {
       entities: renderEntities,
       // Belt items are described per frame like everything else, and kept out
       // of `entities` so the picker cannot return one (§9: not entities).
-      items: describeBeltItems(simulation.entities, simulation.items),
+      items: describeBeltItems(simulation.entities, simulation.buildings, simulation.items),
       player,
       hover: input.hover,
       ghost: currentGhost(),

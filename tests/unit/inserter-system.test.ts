@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BELT_MAX_POSITION,
-  beltAccept,
+  laneAccept,
   newBelt,
   type BeltEntity,
 } from '../../src/game/entities/belt-entity.js';
@@ -82,7 +82,7 @@ describe('the inserter cycle', () => {
     const belt = simulation.entities.create<BeltEntity>(newBelt(1, 0, EAST));
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
     const chest = simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     // Tick 1 begins the cycle: the source has an item and the chest has room.
     simulation.tick();
@@ -120,8 +120,8 @@ describe('the inserter cycle', () => {
     const chest = simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
 
     // Two items waiting, so the second cycle starts the tick the first ends.
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     run(simulation, CONFIG.ticksPerItem);
     expect(stored(chest)).toBe(1);
@@ -186,7 +186,7 @@ describe('an inserter that cannot finish', () => {
 
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
     chest.contents = [[IRON, slots * simulation.items.get('iron_ore').stackSize]];
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     run(simulation, CONFIG.ticksPerItem * 3);
 
@@ -203,7 +203,7 @@ describe('an inserter that cannot finish', () => {
     const belt = simulation.entities.create<BeltEntity>(newBelt(1, 0, EAST));
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
     simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     simulation.tick();
     expect(inserter.state).toBe(InserterState.Pickup);
@@ -221,7 +221,7 @@ describe('an inserter that cannot finish', () => {
     const belt = simulation.entities.create<BeltEntity>(newBelt(1, 0, EAST));
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
     simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
-    beltAccept(belt, IRON, BELT_MAX_POSITION);
+    laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     // Far enough in that the item is out of the belt and in the hand.
     run(simulation, CONFIG.pickupTicks + 1);

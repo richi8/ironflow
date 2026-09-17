@@ -15,6 +15,7 @@
  */
 
 import { BELT_TILE_UNITS } from '../entities/belt-entity.js';
+import { SPLITTER_LANES } from '../entities/splitter-entity.js';
 import { UNIT_FOOTPRINT, assertFootprint, type Footprint } from '../entities/entity.js';
 import { TPS } from '../simulation-clock.js';
 import { ENTITY_TYPE_COUNT, entityTypeName, isEntityType, type EntityType } from '../entities/entity-types.js';
@@ -117,6 +118,36 @@ export interface BeltProperties {
  * can justify in §9's contract table to hide a rounding error nobody can see.
  */
 export interface BeltConfig {
+  /** Fixed-point units an item advances each tick. `1..BELT_TILE_UNITS - 1`. */
+  readonly unitsPerTick: number;
+  /** What the content table said, kept for the renderer's chevron animation. */
+  readonly tilesPerSecond: number;
+}
+
+/**
+ * How fast a splitter carries things, as content authors it. C17 task 1.
+ *
+ * Its presence is what makes a building a splitter — `building-init.ts`
+ * branches on this field and on nothing else — so C22's fast splitter is a
+ * table entry rather than a code change. It is a separate field from `belt`
+ * rather than a flag on it because the two buildings are different *shapes*:
+ * a belt is one tile with one way out, a splitter is two tiles with two, and
+ * `belt-system.ts` has to know which it is holding before it can move an item
+ * off the end of it.
+ */
+export interface SplitterProperties {
+  /** Tiles per second through each of its two lanes. §9's tier-1 anchor: 2.0. */
+  readonly tilesPerSecond: number;
+}
+
+/**
+ * The same, in the integers the belt system runs on.
+ *
+ * Identical arithmetic to `BeltConfig`, because a splitter lane *is* a belt
+ * lane (see `entities/splitter-entity.ts`) and an item that changed speed as
+ * it crossed the seam would bunch up on one side of it.
+ */
+export interface SplitterConfig {
   /** Fixed-point units an item advances each tick. `1..BELT_TILE_UNITS - 1`. */
   readonly unitsPerTick: number;
   /** What the content table said, kept for the renderer's chevron animation. */
@@ -254,6 +285,8 @@ export interface BuildingDefinition {
   readonly mining?: MiningProperties;
   /** Present only on buildings that carry items along themselves (C13). */
   readonly belt?: BeltProperties;
+  /** Present only on buildings that fork one lane into two (C17). */
+  readonly splitter?: SplitterProperties;
   /** Present only on buildings that move items between their neighbours (C14). */
   readonly inserter?: InserterProperties;
   /** Present only on buildings that hold items for the player (C13). */
@@ -277,6 +310,7 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   Object.freeze(definition.buildCost);
   if (definition.mining !== undefined) Object.freeze(definition.mining);
   if (definition.belt !== undefined) Object.freeze(definition.belt);
+  if (definition.splitter !== undefined) Object.freeze(definition.splitter);
   if (definition.inserter !== undefined) Object.freeze(definition.inserter);
   if (definition.storage !== undefined) Object.freeze(definition.storage);
   if (definition.production !== undefined) Object.freeze(definition.production);
@@ -325,22 +359,21 @@ function validate(definition: BuildingDefinition): void {
   }
 
   const belt = definition.belt;
-  if (belt !== undefined) {
-    if (!Number.isFinite(belt.tilesPerSecond) || belt.tilesPerSecond <= 0) {
-      throw new Error(`BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which is not a speed.`);
-    }
-    const units = unitsPerTick(belt);
-    if (units < 1) {
+  if (belt !== undefined) checkCarrierSpeed(belt.tilesPerSecond, where);
+
+  const splitter = definition.splitter;
+  if (splitter !== undefined) {
+    checkCarrierSpeed(splitter.tilesPerSecond, where);
+    // Every geometry helper in `entities/splitter-entity.ts` reads "one tile
+    // deep, `SPLITTER_LANES` across" off the rotation alone: the tile in front
+    // of a side is one step along the facing, and the tile behind it is one
+    // step back. A deeper footprint would make both of those wrong for the far
+    // row and the error would show up as items vanishing at a seam, so the
+    // shape is refused here rather than discovered there.
+    const { width, height } = definition.size;
+    if (width !== SPLITTER_LANES || height !== 1) {
       throw new Error(
-        `BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which is under one fixed-point unit per tick.`,
-      );
-    }
-    if (units >= BELT_TILE_UNITS) {
-      // An item that advances a whole tile in one tick would step straight
-      // over the tile in front without ever being on it — so blocking, curves
-      // and hand-off would all be decided by a tile the item never visited.
-      throw new Error(
-        `BuildingRegistry: ${where} moves ${belt.tilesPerSecond} tiles/s, which skips whole tiles in one tick.`,
+        `BuildingRegistry: ${where} splits, so it must be ${SPLITTER_LANES}x1 unrotated; it is ${width}x${height}.`,
       );
     }
   }
@@ -417,8 +450,35 @@ function ticksPerItem(mining: MiningProperties): number {
 }
 
 /** Tiles per second as whole fixed-point units per tick (§6 R3). See `BeltConfig`. */
-function unitsPerTick(belt: BeltProperties): number {
-  return Math.round((belt.tilesPerSecond * BELT_TILE_UNITS) / TPS);
+function unitsPerTick(tilesPerSecond: number): number {
+  return Math.round((tilesPerSecond * BELT_TILE_UNITS) / TPS);
+}
+
+/**
+ * A belt or a splitter's speed, checked once for both (C17).
+ *
+ * One function rather than two copies, because the two buildings carry items
+ * with the same arithmetic and a rule that held for only one of them would be
+ * a rule the other could break.
+ */
+function checkCarrierSpeed(tilesPerSecond: number, where: string): void {
+  if (!Number.isFinite(tilesPerSecond) || tilesPerSecond <= 0) {
+    throw new Error(`BuildingRegistry: ${where} moves ${tilesPerSecond} tiles/s, which is not a speed.`);
+  }
+  const units = unitsPerTick(tilesPerSecond);
+  if (units < 1) {
+    throw new Error(
+      `BuildingRegistry: ${where} moves ${tilesPerSecond} tiles/s, which is under one fixed-point unit per tick.`,
+    );
+  }
+  if (units >= BELT_TILE_UNITS) {
+    // An item that advances a whole tile in one tick would step straight over
+    // the tile in front without ever being on it — so blocking, curves and
+    // hand-off would all be decided by a tile the item never visited.
+    throw new Error(
+      `BuildingRegistry: ${where} moves ${tilesPerSecond} tiles/s, which skips whole tiles in one tick.`,
+    );
+  }
 }
 
 /** How many timed stages one inserter cycle has. See `InserterConfig`. */
@@ -466,6 +526,9 @@ export class BuildingRegistry {
 
   /** Belt content, converted to fixed-point units per tick once (§6 R3). */
   private readonly beltByType = new Map<EntityType, BeltConfig>();
+
+  /** Splitter content, converted the same way and for the same reason (C17). */
+  private readonly splitterByType = new Map<EntityType, SplitterConfig>();
 
   /** Inserter content, converted to whole stage lengths once (§6 R3). */
   private readonly inserterByType = new Map<EntityType, InserterConfig>();
@@ -518,7 +581,19 @@ export class BuildingRegistry {
       if (value.belt !== undefined) {
         this.beltByType.set(
           value.entityType,
-          Object.freeze({ unitsPerTick: unitsPerTick(value.belt), tilesPerSecond: value.belt.tilesPerSecond }),
+          Object.freeze({
+            unitsPerTick: unitsPerTick(value.belt.tilesPerSecond),
+            tilesPerSecond: value.belt.tilesPerSecond,
+          }),
+        );
+      }
+      if (value.splitter !== undefined) {
+        this.splitterByType.set(
+          value.entityType,
+          Object.freeze({
+            unitsPerTick: unitsPerTick(value.splitter.tilesPerSecond),
+            tilesPerSecond: value.splitter.tilesPerSecond,
+          }),
         );
       }
       if (value.inserter !== undefined) {
@@ -590,6 +665,16 @@ export class BuildingRegistry {
   }
 
   /**
+   * How this kind of building forks a lane, or null if it is not a splitter
+   * (C17). Null rather than a throw, for the reason `beltFor` gives: the belt
+   * system asks about whatever is in front of a belt, and "that is not a
+   * splitter" is an ordinary answer.
+   */
+  splitterFor(type: EntityType): SplitterConfig | null {
+    return this.splitterByType.get(type) ?? null;
+  }
+
+  /**
    * How this kind of building moves items, or null if it is not an inserter
    * (C14). Null rather than a throw, for the reason `beltFor` gives.
    */
@@ -654,9 +739,13 @@ export class BuildingRegistry {
   /**
    * The next rotation `R` should offer for this building.
    *
-   * Cycles within `rotationCount`, so a chest never leaves north and a 1×2
-   * splitter only ever faces north or east. Keeping this beside the definition
-   * means the input layer can cycle a ghost without knowing what a splitter is.
+   * Cycles within `rotationCount`, so a chest never leaves north. C06 wrote
+   * the splitter in as the other example — "a 1×2 splitter only ever faces
+   * north or east" — and C17 gave it four: its shape repeats every half turn
+   * but its *direction* does not, and a splitter that could not push south
+   * would be unusable on half the belt lines in a factory. Keeping this beside
+   * the definition means the input layer can cycle a ghost without knowing
+   * what a splitter is.
    */
   static cycleRotation(definition: BuildingDefinition, current: Rotation): Rotation {
     const next = (current + 1) % definition.rotationCount;

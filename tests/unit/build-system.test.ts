@@ -67,11 +67,18 @@ function testWorld(): World {
   });
 }
 
-/** A 1×2 building, so the extent swap has something non-square to swap. */
+/**
+ * A 1×2 building, so the extent swap has something non-square to swap.
+ *
+ * It borrows a §15 entity type nothing has implemented yet, and moved from
+ * `Splitter` to `PowerPole` when C17 made the splitter real: the point of the
+ * fixture is a rotation-count of 2 and a non-square footprint, neither of
+ * which any shipped building has.
+ */
 const PIPE: BuildingDefinition = {
   id: 'pipe',
   name: 'Pipe',
-  entityType: EntityType.Splitter,
+  entityType: EntityType.PowerPole,
   category: 'logistics',
   size: { width: 1, height: 2 },
   rotationCount: 2,
@@ -108,6 +115,7 @@ describe('BuildingRegistry', () => {
     expect(new BuildingRegistry(BUILDINGS).all().map((d) => d.id)).toEqual([
       'miner',
       'belt',
+      'splitter',
       'inserter',
       'furnace',
       'assembler',

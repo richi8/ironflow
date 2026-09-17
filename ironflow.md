@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C16 complete — the factory makes its own intermediates: ore → plate → gear, unattended, at §15's rate.** Next: C17 — splitters and belt routing. |
+| **Status** | **C17 complete — one belt feeds two, exactly evenly, for ever.** Next: C18 — simulation hardening and determinism tests. **C18 is a gate.** |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C17 — Splitters & belt routing** |
+| **First action** | Chunk **C18 — Simulation hardening & determinism tests** |
 
 ---
 
@@ -3533,6 +3533,155 @@ counter persistence; determinism across build order.
 
 **Out of scope.** Priority splitters, filter splitters.
 
+**Decisions taken while implementing this chunk.**
+
+- **A splitter is a belt, twice over, and lives in the belt system.** §8's
+  phase list has a `belts` phase and no splitter phase, and §9 puts "splitter
+  round-robin" in the *belt model's* own list of required behaviours. Both are
+  taken literally: `entities/splitter-entity.ts` holds two lanes of §9's
+  ordinary belt items, and `belt-system.ts` advances them with the loop it
+  advances a belt tile with. The word the file uses for what it moves is a
+  **carrier** — anything content gives a `tilesPerSecond` to. Splitting it into
+  a second system was considered and rejected for one concrete reason: the
+  downstream-first order is **one graph** spanning both kinds, and two systems
+  would each hold half of an order neither could compute.
+
+- **The cached order became a real depth-first walk.** C13's version followed a
+  chain, because a belt has exactly one tile in front of it. A splitter has
+  two, so the walk gained a per-node edge cursor. Everything else about it is
+  unchanged — still post-order, still keyed on `structureRevision`, still no
+  graph work on a factory that has not been edited.
+
+- **Two cursors, and one sentence governing both.** `outputCursor` says which
+  side a leaving item tries first; `inputCursor` says which lane is advanced
+  first. Both obey **"a cursor advances when the thing it pointed at was
+  used"**, and all three of this chunk's acceptance criteria fall out of that
+  rather than being coded for one at a time. Balanced output is strict
+  alternation. A blocked side is tried, fails, and does *not* take its turn, so
+  every later item repeats the same failed try and the same successful
+  fallback — 100% down the free side at the full belt rate. A merge alternates
+  between its two inputs, and a lane that is empty keeps its favour rather than
+  burning it, so a dead input never costs the live one a turn. The second
+  cursor is what task 3 asks for and is invisible until two belts feed one
+  splitter; without it lane 0 wins every contested tick and starves lane 1.
+
+- **A splitter accepts items across its back edge and nowhere else.** §15 gives
+  it two inputs, and `splitterSideFedFrom` is what makes that a rule rather
+  than a description. A belt running into its flank backs up, which is what a
+  belt pointed at the side of any other machine does. The same geometry is what
+  keeps two splitters nose to nose from trading an item across the seam and
+  back every tick: the tile an item would return from is on the far side of the
+  other machine, so it is never an input tile. `facesBack` covers that hazard
+  for two belts; here the shape covers it and no flag is needed.
+
+- **`beltAccept` and `beltEntryPosition` became `laneAccept` and
+  `laneEntryPosition`, over the array rather than the belt.** A belt tile has
+  one lane and a splitter has two, and they are the same thing: four slots of
+  fixed-point positions that items compact along. Writing the rule once, over
+  the array, is what lets one loop advance both — and it is why an item
+  crossing into a splitter keeps the position it carried over the boundary
+  instead of being re-derived at the seam. Two names for one concept was the
+  alternative and is how the copies start.
+
+**Deviations.**
+
+- **The splitter has four rotations, not the two §15's "1×2" suggests.**
+  `building-registry.ts` predicted this in C06 — "a 1×2 splitter only ever
+  faces north or east" — and it is wrong: a splitter's *shape* repeats every
+  half turn but its **direction** does not. With two rotations it could only
+  ever push north and east, so no belt line running south or west could use
+  one, which is half the layout puzzle this chunk exists to create. The comment
+  in the registry now says so where it used to say the opposite.
+
+- **The footprint is authored `{ width: 2, height: 1 }`.** §15 writes "1×2",
+  which is a shape rather than an orientation. Two across the flow and one deep
+  is the only reading that works: every geometry helper in
+  `splitter-entity.ts` reads "the tile in front of this side" off the rotation
+  alone, and a footprint deeper than one tile would make that wrong for the far
+  row. The registry **refuses** any other size for a building with a `splitter`
+  field, so the assumption is enforced rather than remembered.
+
+- **`splitter` is its own content field rather than a flag on `belt`.** They
+  carry the same `tilesPerSecond` and convert it with the same arithmetic, but
+  a belt is one tile with one way out and a splitter is two tiles with two, and
+  `belt-system.ts` has to know which it is holding before it can move an item
+  off the end. The speed *check* is shared (`checkCarrierSpeed`), because a
+  rule that held for only one of them is a rule the other could break.
+
+- **The splitter runs at the belt's 2.0 tiles/s**, which is a **balance
+  number** for C20 but not an arbitrary one: a splitter slower than its belt is
+  a throughput cliff in the middle of a line the player cannot see, and one
+  faster would make splitting a line speed it up. §9's anchor carries straight
+  through it, so an item does not change pace crossing the seam.
+
+- **Neither an inserter nor a miner can load a splitter directly.** §15 counts
+  a miner's output straight onto a belt and everything else through an
+  inserter, and §17's required chain is `belt -> splitter -> 2 belts -> 2
+  chests`: a splitter is a **belt fitting**, fed by belts. Making an inserter's
+  destination work would have meant making its *source* work too — which is a
+  third round-robin, over which lane it reaches into — and that is scope this
+  chunk does not need. Listed under "noticed, not fixed" because a player will
+  eventually point an inserter at one.
+
+- **The starting kit gained ten splitters**, which is two per miner: the number
+  it takes to fan one ore line out to four consumers, one split and then a
+  split of each half. A **balance number** for C20. The splitter also takes
+  hotbar slot 3, pushing the inserter and everything after it along one —
+  `data/buildings.ts` is in §15's table order and says so.
+
+**Acceptance, as tested.**
+
+- `tests/integration/belt-splitter-chests.test.ts` is §17's required C17 chain,
+  built from `build` commands with a miner on the end of it. Twenty simulated
+  minutes unattended: both chests fill to within one item of each other, every
+  ore mined is in a chest or still in flight, the same factory with one branch
+  never built delivers exactly the same total down the one branch it has, two
+  full chests stall the line back through the splitter to the miner, and two
+  identical builds produce identical state.
+- `tests/unit/splitter.test.ts` carries the four tests the chunk names.
+  **Split ratio**: a saturated belt into a splitter with two outputs delivers
+  1,108 items as 554/554. **Blocked output**: everything goes down the free
+  side, and the count matches a plain belt line of the same length to within
+  one item — no throughput loss. **Round-robin counter persistence**: a factory
+  run 400 ticks, serialized through JSON at the halfway mark and rebuilt from
+  that data alone, is byte-identical to one that never stopped — which is only
+  true because both cursors are fields on the entity. **Build order**: the same
+  line laid from the feed end and from the chest end is the same state after
+  900 ticks. Beside them: the back-edge-only input rule, backpressure into the
+  feeding belt, the footprint geometry at all four rotations, and the
+  registry's refusal of a splitter that is not two across and one deep.
+- `tests/unit/splitter-view.test.ts` covers task 4 — the part of it that is a
+  fact rather than a picture. The splitter draws in the **belt** layer, takes
+  its rotated extent (2×1 north, 1×2 east), names a real sprite at every
+  rotation including the ghost's, runs on the belt's chevron cycle because it
+  runs at the belt's speed, and the items inside it are drawn on their own
+  footprint tiles beside the items on the belts — which is what makes the lane
+  read as continuous through it.
+- **In the running game**: the splitter is in the build menu at slot 3, places
+  from the hotbar in line with a belt run, and draws as one two-tile plate with
+  a chevron lane through each half and a structure-coloured edge — with no
+  console errors or warnings.
+
+**Noticed, not fixed.**
+
+- **An inserter pointed at a splitter waits for ever, silently.** The
+  destination has no port, so the inserter never picks anything up. It is not
+  wrong — a splitter is fed by belts — but "nothing happens" is the failure
+  mode §7 and pillar 3 exist to prevent, and the fix is either a port or a
+  placement-time warning. Neither is C17's.
+- **A splitter's inspector panel is empty**, exactly as a belt's is: it has no
+  ports, so the view model carries no contents. What a player would want to see
+  is which way the next item is going, which is the one cursor the UI has no
+  word for yet.
+- **The procedural atlas has no test that executes a `draw`.** `drawSplitter`
+  is covered by the browser run and by nothing else; a throw inside any of the
+  atlas's draw functions would reach a player before it reached the suite. That
+  predates this chunk — no sprite has ever been drawn in a test — and it is
+  C29's to settle when the image-backed atlas arrives.
+- **`describeBeltItems` now walks two entity buckets and allocates per item.**
+  Still the wrong shape for §12's reference factory, still C28's to measure and
+  C29's to make incremental — the note C06 first wrote, unchanged.
+
 ---
 
 ## C18 — Simulation hardening & determinism tests
@@ -4259,7 +4408,7 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 |---|---|---|---|---|
 | `miner` | 2×2 | 4 gear, 2 circuit, 4 iron_plate | 90 kW *(C21)* | needs ≥1 resource tile under footprint |
 | `belt` | 1×1 | 1 gear + 1 iron_plate → **2 belts** | — | 4 rotations, 8 items/s |
-| `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | deterministic round-robin |
+| `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | 4 rotations, deterministic round-robin, 8 items/s per lane (C17) |
 | `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | 13 kW | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
 | `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
@@ -4392,7 +4541,7 @@ miner -> belt -> chest                            (C13)
 miner -> belt -> inserter -> chest                (C14)
 miner -> belt -> inserter -> furnace -> inserter -> chest      (C15)
 ore -> smelt -> assemble -> chest                 (C16, tests/integration/ore-to-gears.test.ts)
-belt -> splitter -> 2 belts -> 2 chests           (C17)
+belt -> splitter -> 2 belts -> 2 chests           (C17, tests/integration/belt-splitter-chests.test.ts)
 full chain with power browning out                (C21)
 full chain producing data cores -> lab -> research complete    (C22)
 ```

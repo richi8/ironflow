@@ -15,12 +15,12 @@
  * that make them do something.
  *
  * C13 adds the third, the belt, and gives the chest the insides §15 always
- * said it had. C14 adds the fourth, the inserter. All of them are one field
- * each — `belt`, `storage`, `inserter` — because what a building *is* is
- * decided by the content it carries and never by its id (§19 rule 17): the
- * whole of "this thing moves items along itself" is `tilesPerSecond`, the
- * whole of "this thing holds items" is `slots`, and the whole of "this thing
- * hands items to its neighbour" is `itemsPerSecond`.
+ * said it had. C14 adds the fourth, the inserter, and C17 the splitter. All of
+ * them are one field each — `belt`, `storage`, `inserter`, `splitter` —
+ * because what a building *is* is decided by the content it carries and never
+ * by its id (§19 rule 17): the whole of "this thing moves items along itself"
+ * is `tilesPerSecond`, the whole of "this thing holds items" is `slots`, and
+ * the whole of "this thing hands items to its neighbour" is `itemsPerSecond`.
  *
  * C15's furnace and C16's assembler are the fifth and sixth, and they are the
  * proof of that rule rather than another instance of it: they differ from one
@@ -29,7 +29,8 @@
  *
  * The order is §15's building table order, and it is also menu and hotkey
  * order — which is why the inserter goes between the belt and the chest
- * rather than on the end.
+ * rather than on the end, and why C17's splitter pushes it along a slot
+ * rather than being appended.
  */
 
 import { EntityType } from '../entities/entity-types.js';
@@ -84,6 +85,33 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     // The rotation is appended by the renderer, which is the only layer
     // allowed to know that `belt:1` names a picture — see `entity-view.ts`.
     sprite: 'belt',
+  },
+  {
+    id: 'splitter',
+    name: 'Splitter',
+    entityType: EntityType.Splitter,
+    category: 'logistics',
+    // Two tiles across the flow and one deep, which is §15's "1x2" written the
+    // way `footprintExtent` reads it: at rotation 0 the splitter faces north
+    // and its two lanes sit side by side along X. The registry refuses any
+    // other shape, because every geometry helper in `splitter-entity.ts`
+    // depends on "one tile deep".
+    size: { width: 2, height: 1 },
+    // Four, not the two §15's shape suggests. A splitter has a *direction*,
+    // not just an orientation: with two rotations it could only ever push
+    // north and east, so a belt line running south or west could never use
+    // one — which is half the layout puzzle C17 exists to create.
+    rotationCount: 4,
+    buildCost: [{ itemId: 'splitter', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // The same speed as the belt it sits in, and for a reason rather than for
+    // symmetry: a splitter slower than its belt would be a throughput cliff in
+    // the middle of a line the player cannot see, and one faster would make
+    // splitting a line *speed it up*. §9's 2.0 tiles/s carries through it.
+    splitter: { tilesPerSecond: 2.0 },
+    // The rotation and the chevron phase are appended by the renderer, exactly
+    // as they are for the belt above — see `entity-view.ts`.
+    sprite: 'splitter',
   },
   {
     id: 'inserter',

@@ -16,6 +16,7 @@
  * terrain:<name>                              terrain:grass
  * resource:<name>:<fullness 0-3>              resource:iron:2
  * belt:<rotation 0-3>[:<phase 0-7>]           belt:1:5
+ * splitter:<rotation 0-3>[:<phase 0-7>]       splitter:1:5
  * inserter:<rotation 0-3>:<swing 0-16>[:h]    inserter:2:8:h
  * item:<item id>                              item:iron_ore
  * player:<idle|walk|work>:<facing 0-3>        player:walk:1
@@ -159,6 +160,19 @@ export function beltSprite(rotation: Rotation, phase = 0): SpriteId {
 }
 
 /**
+ * The sprite for a splitter facing `rotation`, on the same chevron cycle (C17).
+ *
+ * Its own namespace rather than a belt with a footprint, because what it draws
+ * is not a wider belt: it is one plate with **two** lanes running through it,
+ * and C17 task 4 asks for the lane to read as continuous across it. The
+ * footprint is implied by the rotation — two tiles across the flow, one deep —
+ * which is the same fact `data/buildings.ts` states and the registry enforces.
+ */
+export function splitterSprite(rotation: Rotation, phase = 0): SpriteId {
+  return `splitter:${rotation}:${phase}`;
+}
+
+/**
  * How many arm positions one inserter swing is quantised to. C14 task 7.
  *
  * The same arrangement as `BELT_CHEVRON_PHASES`, for the same reason: the
@@ -249,6 +263,7 @@ export type SpriteDescriptor =
       readonly rise: number;
     }
   | { readonly kind: 'belt'; readonly rotation: Rotation; readonly phase: number }
+  | { readonly kind: 'splitter'; readonly rotation: Rotation; readonly phase: number }
   | {
       readonly kind: 'inserter';
       readonly rotation: Rotation;
@@ -335,7 +350,7 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     return Object.freeze({ kind: 'resource' as const, fill: color(token), bucket: Number(text) });
   }
 
-  if (namespace === 'belt' && (parts.length === 2 || parts.length === 3)) {
+  if ((namespace === 'belt' || namespace === 'splitter') && (parts.length === 2 || parts.length === 3)) {
     // Matched as text, not with `Number`: `Number('')` is 0, so `belt:` would
     // otherwise parse as a perfectly good north-facing belt.
     const text = parts[1] ?? '';
@@ -345,7 +360,7 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     const phaseText = parts[2] ?? '0';
     if (!/^\d+$/.test(phaseText)) return MISSING;
     return Object.freeze({
-      kind: 'belt' as const,
+      kind: namespace,
       rotation: Number(text) as Rotation,
       phase: Number(phaseText) % BELT_CHEVRON_PHASES,
     });
@@ -506,6 +521,9 @@ export class ProceduralAtlas implements SpriteAtlas {
         return;
       case 'belt':
         drawBelt(ctx, sx, sy, zoom, sprite.rotation, sprite.phase);
+        return;
+      case 'splitter':
+        drawSplitter(ctx, sx, sy, zoom, sprite.rotation, sprite.phase);
         return;
       case 'inserter':
         drawInserter(ctx, sx, sy, zoom, sprite.rotation, sprite.swing, sprite.holding);
@@ -678,7 +696,26 @@ function drawBelt(
   phase: number,
 ): void {
   fillFace(ctx, sx, sy, 1, 1, zoom, color('panel-high'));
+  drawLane(ctx, sx, sy, zoom, rotation, phase, 0);
+}
 
+/**
+ * One lane of chevrons, `across` tiles to the side of `(sx, sy)`.
+ *
+ * Split out of `drawBelt` by C17, because a splitter is two of these on one
+ * plate: the lane is the thing that repeats, and drawing it from one function
+ * is what makes task 4's "the belt lane drawn continuously through it" true by
+ * construction rather than by matching two sets of constants by eye.
+ */
+function drawLane(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  rotation: Rotation,
+  phase: number,
+  across: number,
+): void {
   const forward = DIRECTION_OFFSETS[rotation];
   const sideways = DIRECTION_OFFSETS[(rotation + 1) % 4];
   if (forward === undefined || sideways === undefined) return;
@@ -687,6 +724,9 @@ function drawBelt(
   const fy = (forward.x * EAST_STEP.y + forward.y * SOUTH_STEP.y) * zoom;
   const gx = (sideways.x * EAST_STEP.x + sideways.y * SOUTH_STEP.x) * zoom;
   const gy = (sideways.x * EAST_STEP.y + sideways.y * SOUTH_STEP.y) * zoom;
+
+  const cx = sx + gx * across;
+  const cy = sy + gy * across;
 
   ctx.strokeStyle = color('accent');
   ctx.lineWidth = Math.max(1, 1.5 * zoom);
@@ -697,11 +737,52 @@ function drawBelt(
   for (let i = 0; i < CHEVRON_COUNT; i++) {
     const along = CHEVRON_ORIGIN + i * CHEVRON_SPACING + slide;
     ctx.beginPath();
-    ctx.moveTo(sx + fx * along - gx * CHEVRON_HALF_WIDTH, sy + fy * along - gy * CHEVRON_HALF_WIDTH);
-    ctx.lineTo(sx + fx * (along + CHEVRON_HEAD), sy + fy * (along + CHEVRON_HEAD));
-    ctx.lineTo(sx + fx * along + gx * CHEVRON_HALF_WIDTH, sy + fy * along + gy * CHEVRON_HALF_WIDTH);
+    ctx.moveTo(cx + fx * along - gx * CHEVRON_HALF_WIDTH, cy + fy * along - gy * CHEVRON_HALF_WIDTH);
+    ctx.lineTo(cx + fx * (along + CHEVRON_HEAD), cy + fy * (along + CHEVRON_HEAD));
+    ctx.lineTo(cx + fx * along + gx * CHEVRON_HALF_WIDTH, cy + fy * along + gy * CHEVRON_HALF_WIDTH);
     ctx.stroke();
   }
+}
+
+/** How far each of a splitter's two lanes sits from the middle, in tiles. */
+const SPLITTER_LANE_OFFSET = 0.5;
+
+/**
+ * A splitter: one plate two tiles wide, with a belt lane running through each
+ * half of it. C17 task 4.
+ *
+ * The footprint is not a parameter because it is implied by the facing — two
+ * tiles across the flow and one deep, which is what `data/buildings.ts` says
+ * and what the building registry refuses to let content contradict. An odd
+ * rotation therefore swaps the extent, exactly as `footprintExtent` does for
+ * the entity itself, and this is the renderer arriving at the same answer from
+ * the same fact rather than being told it twice.
+ *
+ * The edge is stroked in the structure colour so that two belts and a splitter
+ * are distinguishable at a glance: the lanes are deliberately identical, since
+ * an item does not change speed crossing into one, and the outline is the only
+ * thing that says a decision is being made here.
+ */
+function drawSplitter(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  rotation: Rotation,
+  phase: number,
+): void {
+  const across = rotation === 1 || rotation === 3;
+  const width = across ? 1 : 2;
+  const height = across ? 2 : 1;
+
+  fillFace(ctx, sx, sy, width, height, zoom, color('panel-high'));
+  groundFacePath(ctx, sx, sy, width, height, zoom);
+  ctx.strokeStyle = color('blue');
+  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.stroke();
+
+  drawLane(ctx, sx, sy, zoom, rotation, phase, 0 - SPLITTER_LANE_OFFSET);
+  drawLane(ctx, sx, sy, zoom, rotation, phase, SPLITTER_LANE_OFFSET);
 }
 
 /** The inserter's base, as a fraction of a tile and in rise units. */

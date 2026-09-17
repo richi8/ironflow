@@ -1,5 +1,6 @@
 /**
- * The belt, and the items riding it. See ironflow.md §9 and C13 tasks 1–2.
+ * The belt, the items riding it, and the lane they ride in. See ironflow.md §9,
+ * C13 tasks 1–2 and C17.
  *
  * §9 is decided up front because it ripples through inserters, throughput,
  * balance and the renderer, and this file is §9's table turned into types:
@@ -23,12 +24,22 @@
  *
  * ## The list is front-first, and that is an invariant
  *
- * `items[0]` is the item nearest the belt's output end (the largest `pos`) and
+ * `items[0]` is the item nearest the lane's output end (the largest `pos`) and
  * each entry after it is at least `BELT_SLOT_SPACING` behind. Every function
  * here and in `belt-system.ts` depends on it: the system advances items in
  * that order so an item can never pass the one in front of it (§9's blocking
- * requirement), and `beltAccept` puts an arriving item on the end because
+ * requirement), and `laneAccept` puts an arriving item on the end because
  * arriving is what happens at the *back*.
+ *
+ * ## A lane is not a belt (C17)
+ *
+ * `laneEntryPosition` and `laneAccept` take the **array**, not the belt. A
+ * belt tile has one lane and C17's splitter has two, and both are the same
+ * thing: four slots of fixed-point positions that items compact along. Writing
+ * the rule once, over the array, is what lets `belt-system.ts` advance a
+ * splitter's lane with the belt's own loop rather than with a second copy of
+ * it that would have to be kept in step — and an item crossing from a belt
+ * into a splitter keeps its position rather than being re-derived at the seam.
  *
  * ## What is not here
  *
@@ -94,7 +105,7 @@ export function asBelt(entity: Entity): BeltEntity | null {
 }
 
 /**
- * Where an item entering this belt would actually land, or `-1` for no room.
+ * Where an item entering this lane would actually land, or `-1` for no room.
  *
  * `desired` is where the caller would *like* it — the position it carried over
  * the tile boundary for a hand-off, or the exit edge for a machine dropping
@@ -103,25 +114,26 @@ export function asBelt(entity: Entity): BeltEntity | null {
  * the one rule that keeps a tile to four items and stops an arriving item
  * materialising on top of one that is already there.
  */
-export function beltEntryPosition(belt: BeltEntity, desired: number): number {
-  const last = belt.items[belt.items.length - 1];
+export function laneEntryPosition(items: readonly BeltItem[], desired: number): number {
+  const last = items[items.length - 1];
   const room = last === undefined ? BELT_MAX_POSITION : last.pos - BELT_SLOT_SPACING;
   const pos = Math.min(desired, room);
   return pos < 0 ? -1 : pos;
 }
 
 /**
- * Put an item on the back of a belt if it fits. Returns whether it did.
+ * Put an item on the back of a lane if it fits. Returns whether it did.
  *
- * The single way anything enters a belt — a hand-off from the tile behind
- * (C13 task 4) and a machine unloading onto it both come through here — so
- * "four to a tile" and "front-first order" are properties of one function
- * rather than of every caller's care.
+ * The single way anything enters a belt or a splitter — a hand-off from the
+ * tile behind (C13 task 4), an inserter's hand, a machine unloading and a
+ * splitter choosing a side (C17) all come through here — so "four to a tile"
+ * and "front-first order" are properties of one function rather than of every
+ * caller's care.
  */
-export function beltAccept(belt: BeltEntity, itemId: ItemId, desired: number): boolean {
-  const pos = beltEntryPosition(belt, desired);
+export function laneAccept(items: BeltItem[], itemId: ItemId, desired: number): boolean {
+  const pos = laneEntryPosition(items, desired);
   if (pos < 0) return false;
-  belt.items.push({ itemId, pos });
+  items.push({ itemId, pos });
   return true;
 }
 
