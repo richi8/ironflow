@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C15 complete — the §20 milestone gate after C15 is passed: the vertical slice runs unattended.** Milestone B complete. Next: C16 — assembler and multi-input recipes. |
+| **Status** | **C16 complete — the factory makes its own intermediates: ore → plate → gear, unattended, at §15's rate.** Next: C17 — splitters and belt routing. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C16 — Assembler & multi-input recipes** |
+| **First action** | Chunk **C17 — Splitters & belt routing** |
 
 ---
 
@@ -561,6 +561,13 @@ export type Command =
   | { type: 'mineTile';   x: number; y: number }
   | { type: 'stopMining' };                      // added in C10, see below
 ```
+
+**Implementation note (C16).** `setRecipe` joined them there. It is the player
+reaching into a machine — it hands the ingredients of the old recipe back
+(C16 task 2) and it needs the same reach the other two need — rather than
+anything `production-system.ts` does, which is run every machine every tick
+with no idea where anybody is standing. It is refused with `unknown_recipe`
+for an id no recipe has and `not_accepted` for a building that cannot run one.
 
 **Implementation note (C12).** `takeItems` and `insertItems` are owned by
 `game/systems/hand-system.ts` — the player reaching into a machine, in phase 1
@@ -2200,8 +2207,11 @@ stability, buffer-vs-slot semantics.
   registered items only when C16 gives them recipes — a `SlotInventory` keys on
   numeric ids and asks the registry for a stack size, so it has nothing to say
   about them. Registering building items now would be implementing C16's
-  content table early (§19 rule 4). **C16 is where the bag becomes a
-  `SlotInventory`**, and C10 is where it moves onto the player.
+  content table early (§19 rule 4). C10 is where it moves onto the player.
+  *(C16 was named here as the chunk that would merge the two and it is not:
+  C16 adds `gear`, `copper_wire` and `circuit`, none of which is a building
+  item. §15's building recipes are what forces the merge, and they are still
+  unscheduled — C20's content pass is where they land.)*
 - **`Simulation.items` is now the `ItemRegistry`**, parallel to
   `Simulation.buildings`, and the player's bag moved to `Simulation.inventory`.
   The registry is constructed in the simulation even though no system reads it
@@ -2400,9 +2410,10 @@ rate in ticks; build-range validation; frame-rate independence of movement.
 - **The player carries two containers for one more chunk.** A `SlotInventory`
   of real items and the C06 `ItemCounts` bag of building materials. That is not
   a design, it is C08's recorded deviation arriving on schedule: a build cost is
-  paid in `miner` and `chest`, which are not registered items until C16 gives
-  them recipes. **C16 merges them.** `Simulation.inventory` is now an alias for
-  the bag on the player, so the one name survives the move.
+  paid in `miner` and `chest`, which are not registered items until something
+  gives them recipes. `Simulation.inventory` is now an alias for the bag on the
+  player, so the one name survives the move. *(C16 was named here as the chunk
+  that merges them; it did not — see C08's note above and C16's deviations.)*
 - **A player standing somewhere invalid may move anywhere.** Three lines against
   a soft-lock: a building placed on top of the player, or a save whose terrain
   changed, would otherwise refuse every candidate position forever. Movement
@@ -2675,6 +2686,11 @@ a known production sequence; frozen view models.
   a panel into `innerHTML = ''`. Four rows per section, built at mount and
   hidden when unused; C16 is the chunk that could produce a machine with more
   ingredients than that, and it is the chunk that would raise the number.
+  *(C16's widest recipe takes two, and §15's widest ever takes three, so four
+  stands. What C16 did add is the recipe picker, which is **not** a fixed pool:
+  how many choices a machine has is a property of the machine rather than of
+  what is happening inside it, so the grid is rebuilt when the choices change
+  and never on a repaint.)*
 - **Manual transfer is its own system, `systems/hand-system.ts`.** The exact
   parallel of `BuildSystem`: it owns one pair of commands end to end, including
   their refusals, and C15's furnace adds an arm there rather than widening the
@@ -3191,8 +3207,11 @@ and no DOM**.
   holding both ore and stone must choose the same recipe after a reload as
   before it — §6 R6's "resolve contention by id" applied to items rather than
   entities. `RecipeRegistry.forInput` refuses to answer at all when two
-  recipes in a category want the same ingredient, which is how the same index
-  will serve C16's player-chosen crafting without a special case for it.
+  recipes in a category want the same ingredient. *(That was expected to be all
+  C16's player-chosen crafting needed, and it was not: ambiguity decides which
+  recipe an item names and cannot make a choice survive an empty buffer, so
+  C16 added `recipeSelection` to the building. The index is unchanged and the
+  furnace still uses it exactly as described here.)*
 
 - **Fuel is a property of the item, not of the furnace.** `fuelSeconds: 8` sits
   on coal in `data/items.ts`, so C21's generator burns the same coal for the
@@ -3299,7 +3318,9 @@ and no DOM**.
   is both, and no item in v1 is both. If C20 ever makes something smeltable
   that also burns, that line is the one to look at.
 - The inspector has no INSERT button, so `insertItems` is reachable only from
-  a command. C16 builds the recipe panel and is the natural place for it.
+  a command. *(C16 built the recipe panel and did **not** add the button: a
+  machine's input is emptied by `setRecipe`, which is the case that made the
+  ingredients unreachable. See C16's "noticed, not fixed".)*
 
 ---
 
@@ -3339,6 +3360,150 @@ recipe switching; the no-special-cases property, verified by a test that adds a
 synthetic 3-input recipe at runtime and expects it to work.
 
 **Out of scope.** Modules, beacons, productivity.
+
+**Decisions taken while implementing this chunk.**
+
+- **Who chooses a machine's recipe is content, not a category.** C15 expected
+  `RecipeRegistry.forInput`'s ambiguity to carry this — "smelting happens to be
+  unambiguous, crafting happens not to be" — and it does not, for two reasons
+  the table makes plain. `copper_plate` names exactly one crafting recipe, so
+  an assembler beside a copper belt would quietly start making wire; and a
+  player's choice has to survive an **empty** buffer, which no fact about
+  ingredients can decide. So `ProductionProperties` gained
+  `recipeSelection: 'auto' | 'player'`. A furnace reads its buffer and drops
+  its recipe when the ore runs out, exactly as in C15; an assembler is told,
+  and keeps it until it is told otherwise. `production-system.ts` branches on
+  that field and still contains no building's name.
+
+- **A machine that knows what it is making accepts only that recipe's
+  ingredients.** C15's input port asked the *category*, which was the same
+  answer while every machine picked its own recipe. It stops being the same
+  answer the moment a machine is told: a gear assembler beside a copper belt
+  would fill fifty slots with plates it will never spend, and the player would
+  read a full buffer under the words "missing ingredients". This is C14 task
+  6's rule — an inserter waits rather than silting a machine up — now that a
+  machine can say which is which. A machine with no recipe yet falls back to
+  the category if it auto-selects, and to **nothing** if the choice is the
+  player's: until it is told, "will you want this?" has no answer that is not
+  a guess.
+
+- **`setRecipe` is a hand action, in `hand-system.ts`.** It reaches into a
+  machine and takes the ingredients out (task 2), which is what that system
+  is: the player, standing next to something, in phase 1, because somebody
+  clicked. `production-system.ts` runs every machine every tick and has never
+  heard of the player. Reach is required for the reason `takeItems` requires
+  it, and the refusals are that system's existing vocabulary —
+  `unknown_entity`, `out_of_reach`, `unknown_recipe` for an id no recipe has,
+  `not_accepted` for a building that cannot run one.
+
+- **Switching a recipe refunds the craft in progress, not only the buffer.**
+  C15 takes a craft's ingredients when it *starts*, so a machine switched
+  half-way through would lose real items rather than only time. Both come back
+  — into the player's bag as far as it will take them, the rest left in the
+  machine — and the switch is refused before anything moves if the refund has
+  nowhere at all to go. The **fuel** buffer is untouched: coal is coal whatever
+  the machine is making. Choosing the recipe a machine is already on is a
+  no-op, so a panel that re-sends its own selection cannot empty a machine.
+
+- **`MachineStatus.NoRecipe` is produced at last**, by a machine whose choice
+  is the player's and who has not made one. An auto machine with nothing
+  resolvable still says `no_input`: "feed me" and "decide" are different
+  instructions, and pillar 3 is about which one the player can act on.
+
+**Deviations.**
+
+- **Task 5's rounded duration is stored in a content table, not on the
+  machine.** The task says "at recipe-selection time, and stored"; it is
+  computed once at startup for every (machine type, recipe) pair, in
+  `registries/craft-durations.ts`, and looked up. Both satisfy the part that is
+  load-bearing — the division happens once and a tick compares two integers —
+  and the difference shows up exactly once, when C20 retunes a recipe or a
+  speed: a number written into an entity is written into the save with it, so
+  every assembler built before the retune would keep the old rate for ever and
+  the factory would produce two different numbers depending on when each
+  machine was placed. `MiningConfig` in `building-registry.ts` decided this
+  first, in the same words, and a second answer to the same question is what a
+  save migration is made of.
+
+- **`craftingSpeed` is on every machine, including the furnace**, which
+  declares 1.0. §15 gives a crafting speed only to the assembler; making it
+  optional would have hidden a real property of a building behind a default,
+  and "a furnace's smelting times are already the times a furnace takes" is
+  worth one line of content saying so. §15's anchors now name it.
+
+- **C16 ships task 4's three recipes and no more.** §15 has five processing
+  crafting recipes; `make_frame` and `make_data_core` wait for C22's lab,
+  because their *consumer* does, and a recipe no player has a reason to run is
+  content C20 cannot balance. This is the rule `data/items.ts` already
+  follows, and it is why `gear`, `copper_wire` and `circuit` arrive here while
+  `frame` and `data_core` do not. The **building** recipes wait too, and for a
+  different reason: they need the player's materials bag and their slot
+  inventory to become one thing, which is a change to how a build cost is
+  *paid* rather than to what an assembler can make. C15's note in
+  `simulation.ts` predicted C16 would do it; it does not, and the note now
+  says so.
+
+- **The picker has no `unlocked` field.** Task 3 says "unlocked recipes", and
+  every recipe is unlocked until C22 — so the controller filters and the panel
+  lists what it is handed. A field that is `true` for every row in every
+  machine for six chunks is §13's "a view model carries only what exists"
+  broken for the sake of a word.
+
+- **"Ingredient icons" are the count and the name.** §11 puts eight inline
+  SVGs in `ui/icons.ts` and no item art anywhere; item sprites belong to the
+  canvas atlas and to C29. The chip the picker draws is what a player reads
+  and what will hold a real icon beside it when there is one.
+
+- **The starting kit gained three assemblers**, which is §15's arithmetic one
+  step along from C15's ten furnaces: a gear assembler needs 3.2 plate
+  furnaces, so ten furnaces feed three. A **balance number** for C20.
+
+- **The assembler's two buffer capacities are 50**, the furnace's numbers, for
+  the furnace's reason: a ceiling per ingredient is what makes backpressure
+  reach the belt (§9). **Balance numbers.**
+
+**Acceptance, as tested.**
+
+- `tests/integration/ore-to-gears.test.ts` is §17's required C16 chain —
+  `ore -> smelt -> assemble -> chest` — built as C15's vertical slice with an
+  assembler on the end: two mining chains, a furnace, an assembler set to
+  `make_gear` by command, and a chest. Twenty simulated minutes unattended,
+  gears at 0.15625/s ±2% over the second ten, which is §15's "1 gear assembler
+  needs 3.2 plate furnaces" observed from the other end. Nothing is lost —
+  every plate smelted is a gear, an ingredient in a buffer, a pair in the fire
+  or an item in a hand — a full chest stalls the line back through the
+  assembler and the furnace to the miner, an assembler with no recipe stops the
+  line and says why, and two identical builds produce identical state.
+- `tests/unit/assembler.test.ts` carries the three tests the chunk names:
+  multi-input atomicity (three wires and no plate is a wait, not a partial
+  take), recipe switching (nothing lost, mid-craft included, and a no-op when
+  it is the same recipe), and the no-special-cases property — a synthetic
+  three-ingredient recipe built at runtime into a registry `data/recipes.ts`
+  has never contained, which crafts in exactly the ticks the division predicts.
+- `tests/unit/inspector.dom.test.ts` covers the picker: every crafting recipe
+  offered with its ingredients and rate, none offered for a furnace or a miner,
+  a click that dispatches a command and changes nothing until a tick judges it,
+  a second click on the chosen one that clears it, and no DOM rebuilt while the
+  machine runs.
+- `tests/unit/sprite-atlas.test.ts` gained a guard C16 wanted and every earlier
+  chunk could have used: every building and every item in the content tables
+  draws as something, rather than as the magenta marker a typo would produce.
+
+**Noticed, not fixed.**
+
+- **`ProductionRate`'s window is still 300 ticks** (C15's note). An assembler
+  at 0.5 gears a second reads it far better than a furnace does, so the
+  problem is now visibly one of *slow* machines rather than of the window.
+  Still C20's.
+- **A machine's input buffer has no TAKE button.** `setRecipe` empties it, so
+  nothing is trapped in practice — but ingredients left behind because the
+  player's bag was full can only be recovered by switching the recipe twice.
+  The port split in `items/item-port.ts` is deliberate (an inserter must never
+  steal a machine's ingredients), so the fix is a player-only source rather
+  than widening `outputPortOf`.
+- **Nothing consumes a `gear` or a `circuit` yet.** They bank up in a chest
+  until §15's building recipes or C22's lab give them somewhere to go, which
+  is the shape of the tech tree rather than a gap in this chunk.
 
 ---
 
@@ -3996,6 +4161,8 @@ inserter std      = 1.0 items/s        inserter fast = 2.5 items/s
 miner tier 1      = 0.5 items/s
 manual mining     = 0.5 items/s        (C10; 60 ticks per item)
 assembler tier 1  = crafting speed 0.5
+furnace           = crafting speed 1.0 (C16; smelting times are already a
+                                        furnace's, so its speed is the identity)
 player walk       = 4.0 tiles/s        (C10; 32 subtiles/tick of 240)
 player mine reach = 6 tiles            player build reach = 8 tiles
 player bag        = 30 slots
@@ -4019,7 +4186,16 @@ player bag        = 30 slots
 | `frame` | Structural Frame | 50 | intermediate |
 | `data_core` | Data Core | 200 | science |
 
-13 items. Add the 14th only if a recipe needs it.
+13 items. Add the 14th only if a recipe needs it. Eleven of them exist: C16
+adds `gear`, `copper_wire` and `circuit` with the recipes that make them, and
+`frame` and `data_core` wait for C22's lab, which is what consumes them.
+
+**Recipe selection.** A machine either reads its own input buffer and runs
+whatever the items in it name (`auto` — the furnace) or makes what the player
+told it and nothing else, through an empty buffer included (`player` — the
+assembler). It is a field on the building, `recipeSelection`, because neither
+the recipe nor its category can decide it: `copper_plate` names exactly one
+crafting recipe, and an assembler fed one must still wait to be told (C16).
 
 **Fuel.** `coal` burns for **8 s** in any machine with a fuel buffer. It is a
 property of the item (`fuelSeconds` in `data/items.ts`), not of the furnace, so
@@ -4037,11 +4213,17 @@ C21's generator burns it for the same eight seconds without a table of its own
 | `make_gear` | 2 `iron_plate` | 1 `gear` | 1.0 s | assembler |
 | `make_wire` | 1 `copper_plate` | 2 `copper_wire` | 0.5 s | assembler |
 | `make_circuit` | 3 `copper_wire` + 1 `iron_plate` | 1 `circuit` | 1.0 s | assembler |
+<!-- The three above ship in C16. `make_frame` and `make_data_core` wait for
+     C22's lab, which is what consumes what they make. -->
 | `make_frame` | 2 `steel` + 4 `brick` | 1 `frame` | 4.0 s | assembler |
 | `make_data_core` | 1 `gear` + 1 `copper_plate` | 1 `data_core` | 2.5 s | assembler |
 | `make_belt` | 1 `gear` + 1 `iron_plate` | 2 `belt` | 0.5 s | assembler |
 | `make_inserter` | 1 `gear` + 1 `circuit` + 1 `iron_plate` | 1 `inserter` | 0.5 s | assembler |
 | `make_miner` | 4 `gear` + 2 `circuit` + 4 `iron_plate` | 1 `miner` | 2.0 s | assembler |
+
+A time in this table is the **recipe's own**. What a machine takes is that
+divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
+`make_gear` is 1.0 s and a tier-1 assembler takes 60 ticks over it.
 
 The last three are examples of the **building recipes**: every building in the
 table below has one, taking exactly the ingredients in its "crafted from" column.
@@ -4081,7 +4263,7 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | 13 kW | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
 | `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
-| `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | 150 kW | recipe selectable, speed 0.5 |
+| `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | 150 kW | recipe selectable, speed 0.5; buffers 50 in / 50 out, 4 rotations (C16) |
 | `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s |
 | `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8, supply area 5 |
 | `lab` | 3×3 | 10 gear, 10 circuit, 4 frame | 180 kW | consumes data cores |
@@ -4209,7 +4391,7 @@ miner -> chest                                    (C11)
 miner -> belt -> chest                            (C13)
 miner -> belt -> inserter -> chest                (C14)
 miner -> belt -> inserter -> furnace -> inserter -> chest      (C15)
-ore -> smelt -> assemble -> chest                 (C16)
+ore -> smelt -> assemble -> chest                 (C16, tests/integration/ore-to-gears.test.ts)
 belt -> splitter -> 2 belts -> 2 chests           (C17)
 full chain with power browning out                (C21)
 full chain producing data cores -> lab -> research complete    (C22)

@@ -166,9 +166,13 @@ describe('the shipped item table', () => {
       'copper_plate',
       'steel',
       'brick',
+      'gear',
+      'copper_wire',
+      'circuit',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);
+    expect(registry.stackSizeOf(registry.idOf('copper_wire'))).toBe(200);
   });
 
   it('burns coal for §15’s eight seconds, and nothing else at all', () => {

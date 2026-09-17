@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { BUILDINGS } from '../../src/game/data/buildings.js';
+import { EAST, NORTH, SOUTH, WEST, type Rotation } from '../../src/game/world/coordinates.js';
+import { buildingSprite } from '../../src/renderer/entity-view.js';
+import { ITEMS } from '../../src/game/data/items.js';
 import {
   NOMINAL_RESOURCE_AMOUNT,
   RESOURCE_BUCKET_COUNT,
@@ -264,6 +268,42 @@ describe('the palette mirrors tokens.css', () => {
   it('mirrors nothing that tokens.css does not declare', () => {
     for (const name of Object.keys(PALETTE)) {
       expect(declared.has(name), `--if-${name} is in the palette but not in tokens.css`).toBe(true);
+    }
+  });
+});
+
+/**
+ * Every sprite the content tables name (C16).
+ *
+ * The atlas draws a magenta marker rather than throwing on an id it cannot
+ * parse, which is the right behaviour in a frame and the wrong one in a test
+ * suite: a building added with a typo in its sprite id would ship, and the
+ * first anybody heard of it would be a magenta box where the assembler is.
+ * This is the check that makes it a content error at build time instead.
+ */
+describe('the shipped content draws', () => {
+  it.each(BUILDINGS.map((building) => [building.id, building]))('%s has a sprite', (_id, building) => {
+    // Through `buildingSprite`, because that is the path a frame takes: a
+    // belt's content sprite is the *stem* `belt` and only `entity-view.ts` is
+    // allowed to know it becomes `belt:2` (§4). Asking the atlas about the
+    // stem would be asking it a question the renderer never asks.
+    const rotations: readonly Rotation[] = [NORTH, EAST, SOUTH, WEST];
+    for (const rotation of rotations) {
+      expect(describeSprite(buildingSprite(building, rotation)).kind).not.toBe('missing');
+    }
+  });
+
+  it.each(ITEMS.map((item) => [item.id, item.sprite]))('%s has a sprite', (_id, sprite) => {
+    expect(describeSprite(sprite).kind).toBe('item');
+  });
+
+  it('gives every item a colour of its own family, never the fallback grey', () => {
+    // An item whose name does not reach a palette token draws as muted text,
+    // which is legible and anonymous — fine as a guard, wrong as an answer for
+    // something the player sorts by colour on a belt.
+    for (const item of ITEMS) {
+      const sprite = describeSprite(item.sprite);
+      expect(sprite.kind === 'item' && sprite.fill, item.id).not.toBe(color('text-muted'));
     }
   });
 });

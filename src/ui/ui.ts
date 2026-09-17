@@ -95,6 +95,12 @@ export class GameUI {
         const selected = this.controller.getSelection();
         if (selected !== null) this.controller.takeItems(selected, itemId, count);
       },
+      // C16, and the same arrangement: the panel names a recipe, the
+      // controller knows which machine that means, and the simulation decides.
+      onSetRecipe: (recipeId) => {
+        const selected = this.controller.getSelection();
+        if (selected !== null) this.controller.setRecipe(selected, recipeId);
+      },
       onClose: () => this.controller.clearSelection(),
     });
   }

@@ -4,6 +4,8 @@ import { DetachedCursor, GameController } from '../../src/game/game-controller.j
 import { Game } from '../../src/game/game.js';
 import { newChest, type ChestEntity } from '../../src/game/entities/chest-entity.js';
 import { MACHINE_STATUS_COUNT, machineStatusName } from '../../src/game/entities/machine-status.js';
+import { newMachine, type MachineEntity } from '../../src/game/entities/machine-entity.js';
+import { EntityType } from '../../src/game/entities/entity-types.js';
 import { newMiner, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.js';
@@ -367,9 +369,118 @@ describe('no rebuild, and no reach into the game', () => {
   });
 });
 
+describe('the recipe picker (C16)', () => {
+  /** An assembler clear of the miner, close enough for the player to reach. */
+  function assembler(): MachineEntity {
+    return harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.Assembler, PATCH.x + 2, PATCH.y + 2, NORTH),
+    );
+  }
+
+  function buttons(): HTMLButtonElement[] {
+    return [...harness.root.querySelectorAll<HTMLButtonElement>('.if-recipe')];
+  }
+
+  function picker(): HTMLElement {
+    return query<HTMLElement>('.if-inspector__recipes');
+  }
+
+  it('offers every recipe the machine could run, and none for a machine that chooses', () => {
+    select(assembler().id);
+
+    expect(picker().hidden).toBe(false);
+    expect(buttons().map((button) => button.dataset['recipe'])).toEqual([
+      'make_gear',
+      'make_wire',
+      'make_circuit',
+    ]);
+    // The ingredients and the rate, which is what task 3 asks the grid to show.
+    expect(buttons()[0]?.textContent).toContain('2 Iron Plate');
+    expect(buttons()[0]?.textContent).toContain('30 /min');
+
+    // A miner runs no recipes at all, and a furnace picks its own: neither
+    // gets a grid of buttons that would not mean anything.
+    select(harness.miner.id);
+    expect(picker().hidden).toBe(true);
+  });
+
+  it('sets a recipe by dispatching a command and nothing else', () => {
+    const machine = assembler();
+    select(machine.id);
+    settle();
+
+    buttons()[1]?.click();
+    // The click queued a command; the machine is unchanged until a tick
+    // judges it (§7), exactly as the take button is.
+    expect(machine.recipe).toBe(0);
+    expect(harness.simulation.commands.pending).toBe(1);
+
+    runTicks(1);
+    settle();
+    expect(harness.simulation.recipes.byId(machine.recipe).id).toBe('make_wire');
+    expect(buttons()[1]?.getAttribute('aria-pressed')).toBe('true');
+    expect(buttons()[0]?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('clears the recipe when the chosen one is clicked again', () => {
+    const machine = assembler();
+    select(machine.id);
+    buttons()[0]?.click();
+    runTicks(1);
+    settle();
+
+    buttons()[0]?.click();
+    runTicks(1);
+    settle();
+    expect(machine.recipe).toBe(0);
+    expect(buttons()[0]?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('rebuilds no buttons while the machine runs', () => {
+    const machine = assembler();
+    machine.input.push([harness.simulation.items.idOf('iron_plate'), 60]);
+    select(machine.id);
+    buttons()[0]?.click();
+    runTicks(2);
+
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((batch) => records.push(...batch));
+    observer.observe(picker(), { childList: true, subtree: true, characterData: true, attributes: true });
+
+    runTicks(300);
+    records.push(...observer.takeRecords());
+    observer.disconnect();
+
+    let touched = 0;
+    for (const record of records) {
+      touched += record.addedNodes.length + record.removedNodes.length;
+    }
+    // §13: the grid is built when the choices change, and the ten repaints a
+    // second that follow move nothing.
+    expect(touched).toBe(0);
+  });
+
+  it('shows what a furnace chose for itself, without offering a choice', () => {
+    const furnace = harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.Furnace, PATCH.x + 6, PATCH.y, NORTH),
+    );
+    furnace.input.push([harness.simulation.items.idOf('iron_ore'), 4]);
+    furnace.fuel.push([harness.simulation.items.idOf('coal'), 1]);
+    runTicks(2);
+    select(furnace.id);
+    settle();
+
+    expect(picker().hidden).toBe(true);
+    // It still says what it is making — the choice is simply not the
+    // player's, so it is a line rather than a grid.
+    expect(query<HTMLElement>('.if-inspector__making').hidden).toBe(false);
+    expect(text('.if-inspector__making')).toContain('Iron Plate');
+  });
+});
+
 describe('the row pool', () => {
   it('is built once and hidden rather than created per stack', () => {
-    const inspector = new Inspector({ onTake: () => {}, onClose: () => {} });
+    const inspector = new Inspector({ onTake: () => {}, onSetRecipe: () => {}, onClose: () => {} });
     const root = document.createElement('div');
     inspector.mount(root);
 

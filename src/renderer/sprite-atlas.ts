@@ -374,12 +374,13 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
     const itemId = parts[1] ?? '';
     if (itemId.length === 0) return MISSING;
     // An item's colour is the colour of the thing it came out of the ground
-    // as: `iron_ore` and `iron_plate` are both `--if-iron`, which is what
-    // makes a belt of iron read as one line whatever stage it is at. C29
-    // replaces this with real icons; until then a plate is the same colour
-    // drawn flat, because a flat sheet is what a plate is.
+    // as: `iron_ore` and `iron_plate` are both `--if-iron`, and C16's
+    // `copper_wire` is `--if-copper`, which is what makes a belt of one metal
+    // read as one line whatever stage it is at. C29 replaces this with real
+    // icons; until then a plate is the same colour drawn flat, because a flat
+    // sheet is what a plate is.
     const flat = itemId.endsWith('_plate');
-    const token = itemId.replace(/_(ore|plate)$/, '');
+    const token = itemId.replace(/_(ore|plate|wire)$/, '');
     return Object.freeze({
       kind: 'item' as const,
       fill: color(isColorToken(token) ? token : DEFAULT_ITEM_COLOR),

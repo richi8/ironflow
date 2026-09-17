@@ -6,13 +6,17 @@
  * per-recipe special cases, ever", widened to buildings because the same
  * argument applies: a branch on "is this a furnace" is a branch that C16, C21
  * and C20 each have to find and extend. What varies lives in
- * `data/buildings.ts` (which category, how big the buffers, does it burn
- * fuel) and `data/recipes.ts` (what turns into what, and how long it takes).
+ * `data/buildings.ts` (which category, who chooses the recipe, how fast, how
+ * big the buffers, does it burn fuel) and `data/recipes.ts` (what turns into
+ * what, and how long it takes). C16 added an assembler to this system by
+ * adding a row to the first of those files, and the word "assembler" appears
+ * nowhere below.
  *
  * ## A tick of one machine
  *
  * ```text
- *   resolve recipe      auto-select from the input buffer if it has none
+ *   resolve recipe      the one it was told, or one its input buffer names
+ *   craft length        the recipe's duration at this machine's speed
  *   deliver a held item a finished craft that had nowhere to go, retried
  *   check ingredients   progress 0 and not enough in the buffer -> no_input
  *   check fuel          nothing burning and nothing to burn   -> no_fuel
@@ -34,12 +38,18 @@
  *
  * ## Exact rates
  *
- * A saturated machine completes one craft every `durationTicks` exactly: the
+ * A saturated machine completes one craft every `craftTicks` exactly: the
  * craft that finishes at the end of a tick delivers in that same tick and
  * leaves `progressTicks` at 0, so the next tick is the next craft's first,
  * with no idle tick between them. 3.2 s is 96 ticks and 96 ticks is what a fed
  * furnace takes, which is what C15's ±2% acceptance criterion is measured
  * against (§6 R3 — integer ticks, never accumulated seconds).
+ *
+ * `craftTicks` is the recipe's duration divided by the machine's
+ * `craftingSpeed`, so C16's tier-1 assembler takes 60 ticks over a 1.0 s
+ * recipe. The division is done once at startup and looked up here (C16 task
+ * 5): a quotient recomputed per tick is a float in the middle of the one loop
+ * §6 R3 exists to keep integral.
  */
 
 import type { AlertLog } from '../alerts.js';
@@ -49,6 +59,7 @@ import type { MachineEntity } from '../entities/machine-entity.js';
 import { machineBuffers, type MachinePorts } from '../items/item-port.js';
 import type { ProductionCounters } from '../production.js';
 import type { BuildingRegistry, ProductionProperties } from '../registries/building-registry.js';
+import { CANNOT_CRAFT, type CraftDurations } from '../registries/craft-durations.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import { NO_RECIPE, type Recipe, type RecipeRegistry } from '../registries/recipe-registry.js';
 
@@ -57,6 +68,8 @@ export interface ProductionSystemOptions {
   readonly buildings: BuildingRegistry;
   readonly items: ItemRegistry;
   readonly recipes: RecipeRegistry;
+  /** How long a craft takes in each machine (C16 task 5). */
+  readonly crafts: CraftDurations;
   readonly alerts: AlertLog;
   readonly production: ProductionCounters;
 }
@@ -66,6 +79,7 @@ export class ProductionSystem {
   private readonly buildings: BuildingRegistry;
   private readonly recipes: RecipeRegistry;
   private readonly items: ItemRegistry;
+  private readonly crafts: CraftDurations;
   private readonly alerts: AlertLog;
   private readonly counters: ProductionCounters;
 
@@ -74,6 +88,7 @@ export class ProductionSystem {
     this.buildings = options.buildings;
     this.recipes = options.recipes;
     this.items = options.items;
+    this.crafts = options.crafts;
     this.alerts = options.alerts;
     this.counters = options.production;
   }
@@ -96,12 +111,33 @@ export class ProductionSystem {
     const buffers = machineBuffers(machine, config);
     const recipe = this.resolveRecipe(machine, config, buffers);
     if (recipe === null) {
-      this.setStatus(machine, MachineStatus.NoInput);
+      // Two different sentences, and the difference is the one thing the
+      // player can act on: a furnace with nothing in it wants an ingredient,
+      // an assembler with nothing chosen wants a decision (§13, pillar 3).
+      this.setStatus(
+        machine,
+        config.recipeSelection === 'player' ? MachineStatus.NoRecipe : MachineStatus.NoInput,
+      );
+      return;
+    }
+
+    // How long one craft of this recipe takes *in this machine* — the recipe's
+    // duration divided by the machine's speed, rounded once at startup rather
+    // than here (C16 task 5, §6 R3). See `registries/craft-durations.ts`.
+    const craftTicks = this.crafts.ticksFor(machine.type, recipe.recipeId);
+    if (craftTicks === CANNOT_CRAFT) {
+      // A recipe this building cannot run at all. `resolveRecipe` has already
+      // refused every recipe of the wrong category, so this is only reachable
+      // from content that changed under an old save (C27) — and a machine that
+      // sat at 0/0 for ever would be the least legible stall in the game.
+      machine.recipe = NO_RECIPE;
+      machine.progressTicks = 0;
+      this.setStatus(machine, MachineStatus.NoRecipe);
       return;
     }
 
     // A craft that finished into a full output buffer, retried.
-    if (machine.progressTicks >= recipe.durationTicks) {
+    if (machine.progressTicks >= craftTicks) {
       if (!this.deliver(machine, recipe, buffers)) {
         this.setStatus(machine, MachineStatus.OutputFull);
         return;
@@ -122,7 +158,7 @@ export class ProductionSystem {
     if (machine.fuelTicksRemaining > 0) machine.fuelTicksRemaining -= 1;
     machine.progressTicks += 1;
 
-    if (machine.progressTicks >= recipe.durationTicks) {
+    if (machine.progressTicks >= craftTicks) {
       if (!this.deliver(machine, recipe, buffers)) {
         this.setStatus(machine, MachineStatus.OutputFull);
         return;
@@ -138,14 +174,22 @@ export class ProductionSystem {
 
   /**
    * What this machine is making, picking one from its input buffer if it is
-   * between crafts and has nothing selected.
+   * between crafts, has nothing selected, and is the kind of machine that
+   * picks for itself.
    *
-   * A craft in progress keeps its recipe whatever is in the buffer — the ore
-   * is already spent — and a recipe whose ingredients have run out is dropped
-   * so that a furnace fed something else can switch to it. The selected recipe
-   * is stored (§10: authoritative) rather than derived each tick, because
-   * C16's assembler is *told* its recipe and the two machines must read the
-   * same field.
+   * The selected recipe is stored (§10: authoritative) rather than derived
+   * each tick, because an assembler is *told* its recipe and the two kinds of
+   * machine read the same field. What differs is only how long the choice
+   * lives, and that is `recipeSelection` in `data/buildings.ts` (C16):
+   *
+   * - **`'auto'`** — a craft in progress keeps its recipe whatever is in the
+   *   buffer, because the ore is already spent; a recipe whose ingredients
+   *   have run out is dropped, so a furnace fed something else can switch.
+   * - **`'player'`** — the recipe is kept through an empty buffer and never
+   *   replaced by one the items suggest. An assembler that quietly started
+   *   making wire because a copper plate arrived would be a factory that
+   *   rearranged itself while the player was not looking, and only
+   *   `setRecipe` (C16 task 2) may change it.
    */
   private resolveRecipe(
     machine: MachineEntity,
@@ -154,12 +198,15 @@ export class ProductionSystem {
   ): Recipe | null {
     const current = this.recipes.isRecipeId(machine.recipe) ? this.recipes.byId(machine.recipe) : null;
     if (current !== null && current.category === config.category) {
+      if (config.recipeSelection === 'player') return current;
       if (machine.progressTicks > 0 || this.hasIngredients(current, buffers)) return current;
     } else if (machine.recipe !== NO_RECIPE) {
       // Stale or wrong-category: a content change under an old save (C27).
       machine.recipe = NO_RECIPE;
       machine.progressTicks = 0;
     }
+
+    if (config.recipeSelection === 'player') return null;
 
     const picked = this.select(machine, config, buffers);
     machine.recipe = picked === null ? NO_RECIPE : picked.recipeId;

@@ -1,12 +1,18 @@
 /**
  * Reaching into a machine. See ironflow.md C12 task 5 and §7.
  *
- * The `takeItems` and `insertItems` arms of the command switch: the player
- * emptying a miner's buffer into their bag by hand, and — once something in
- * the game has an input buffer — putting something back. It is a system rather
+ * The `takeItems`, `insertItems` and (C16) `setRecipe` arms of the command
+ * switch: the player emptying a miner's buffer into their bag by hand, putting
+ * something back, and telling a machine what to make. It is a system rather
  * than three lines in `simulation.ts` for the reason `BuildSystem` is: it owns
- * one pair of commands end to end, including their refusals, and C15's furnace
- * adds an arm here rather than widening the orchestration.
+ * those commands end to end, including their refusals, and C15's furnace and
+ * C16's assembler add an arm here rather than widening the orchestration.
+ *
+ * `setRecipe` belongs with the other two and not with `production-system.ts`
+ * because of what it *does*: it reaches into a machine and takes the
+ * ingredients out (C16 task 2). The production system runs every machine every
+ * tick and has never heard of the player; this runs once, because somebody
+ * clicked, and its whole subject is what the player can reach.
  *
  * It is **not** C14's inserter. An inserter is a building, it runs in phase 6
  * every tick, and it has no opinion about where the player is standing. This
@@ -17,7 +23,7 @@
  * ```text
  * unknown_entity  the machine is gone          — nothing to be said about it
  * out_of_reach    walk closer                  — the answer the player can act on
- * nothing_to_take / not_accepted               — about the buffer itself
+ * nothing_to_take / not_accepted / unknown_recipe — about the machine itself
  * inventory_full / nothing_to_give             — about the bag
  * ```
  *
@@ -44,12 +50,19 @@
 
 import type { EntityStore } from '../entities/entity-store.js';
 import { forEachFootprintTile, type Entity } from '../entities/entity.js';
+import { asMachine } from '../entities/machine-entity.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
-import { inputPortOf, outputPortOf, type PortContext, type PortStack } from '../items/item-port.js';
+import {
+  inputPortOf,
+  machineBuffers,
+  outputPortOf,
+  type PortContext,
+  type PortStack,
+} from '../items/item-port.js';
 import { MINE_RANGE_TILES, type PlayerState } from '../player/player-state.js';
 import { BuildingRegistry } from '../registries/building-registry.js';
 import type { ItemId, ItemRegistry } from '../registries/item-registry.js';
-import type { RecipeRegistry } from '../registries/recipe-registry.js';
+import { NO_RECIPE, type Recipe, type RecipeRegistry, type RecipeStack } from '../registries/recipe-registry.js';
 
 export interface HandSystemOptions {
   readonly entities: EntityStore;
@@ -63,6 +76,7 @@ export class HandSystem {
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
   private readonly items: ItemRegistry;
+  private readonly recipes: RecipeRegistry;
   private readonly player: PlayerState;
 
   /** What each building holds and accepts — see `items/item-port.ts` (C15). */
@@ -72,6 +86,7 @@ export class HandSystem {
     this.entities = options.entities;
     this.buildings = options.buildings;
     this.items = options.items;
+    this.recipes = options.recipes;
     this.player = options.player;
     this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
   }
@@ -169,6 +184,94 @@ export class HandSystem {
   }
 
   /**
+   * Tell a machine what to make. The `setRecipe` command (§7, C16 task 2).
+   *
+   * ```text
+   *   refuse    gone, out of reach, not a machine, not a recipe it can run
+   *   give back a craft in progress, then everything in the input buffer
+   *   set       the new recipe, with progress at zero
+   * ```
+   *
+   * ## Nothing is ever deleted
+   *
+   * The ingredients of the *old* recipe are no use to the new one, and a
+   * machine that swallowed them would make switching a recipe a thing players
+   * learn not to do. So they come back — and a craft that was already under
+   * way comes back with them, because its ingredients were spent at the start
+   * of the craft (C15) and abandoning it halfway would lose real items rather
+   * than only time. Everything that can reach the player's bag goes there;
+   * what will not fit stays in the machine, which is the same partial,
+   * honest transfer every other hand action makes (C08), and the switch is
+   * refused outright rather than voiding anything if the refund has nowhere
+   * at all to go.
+   *
+   * The **fuel** buffer is left alone. Coal is coal whatever the machine is
+   * making, and handing back a half-full furnace's fuel would punish the
+   * player for changing their mind about the plates.
+   *
+   * ## Why it is a hand action
+   *
+   * Reach is required for the reason `take` and `insert` require it: this is
+   * the player walking up to a machine and reaching into it, and the panel
+   * that offers the choice is the same panel that offers TAKE. A machine is
+   * configured by somebody standing next to it, not from across the map.
+   */
+  setRecipe(entityId: EntityId, recipeId: string | null): CommandRejectionReason | null {
+    const entity = this.entities.get(entityId);
+    if (entity === undefined) return 'unknown_entity';
+    if (!this.canReach(entity)) return 'out_of_reach';
+
+    const config = this.buildings.productionFor(entity.type);
+    const machine = asMachine(entity, this.buildings);
+    // A chest has nothing to be told. `not_accepted` is the building refusing
+    // what it was handed, which is the same sentence it says about an item.
+    if (config === null || machine === null) return 'not_accepted';
+
+    let next: Recipe | null = null;
+    if (recipeId !== null) {
+      if (!this.recipes.has(recipeId)) return 'unknown_recipe';
+      next = this.recipes.get(recipeId);
+      if (next.category !== config.category) return 'not_accepted';
+    }
+
+    const nextId = next === null ? NO_RECIPE : next.recipeId;
+    // Choosing what it is already making is not a change, and must not be one:
+    // a panel that re-sends the selected recipe would empty the machine.
+    if (machine.recipe === nextId) return null;
+
+    const current = this.recipes.isRecipeId(machine.recipe) ? this.recipes.byId(machine.recipe) : null;
+    const buffers = machineBuffers(machine, config);
+    const refund = machine.progressTicks > 0 && current !== null ? current.inputs : NO_REFUND;
+
+    // Checked before anything moves, so a refusal leaves the machine exactly
+    // as it was. The buffer had room for these a moment ago and the bag is
+    // thirty slots, so this is the answer to a full bag beside a full machine
+    // rather than a case anyone meets in play.
+    for (const stack of refund) {
+      if (buffers.input.spaceFor(stack.itemId) + this.player.inventory.spaceFor(stack.itemId) < stack.count) {
+        return 'inventory_full';
+      }
+    }
+    for (const stack of refund) {
+      const kept = buffers.input.give(stack.itemId, stack.count);
+      if (kept < stack.count) this.player.inventory.add(stack.itemId, stack.count - kept);
+    }
+
+    machine.progressTicks = 0;
+    machine.recipe = nextId;
+
+    // A copy, because taking from the buffer edits the array being walked.
+    for (const entry of [...machine.input]) {
+      const itemId = entry[0];
+      const room = this.player.inventory.spaceFor(itemId);
+      if (room <= 0) continue;
+      const moved = this.player.inventory.add(itemId, Math.min(buffers.input.count(itemId), room));
+      if (moved > 0) buffers.input.take(itemId, moved);
+    }
+    return null;
+  }
+
+  /**
    * Put items from the player's bag into a building that takes them: coal or
    * ore into C15's furnace, anything into a chest.
    *
@@ -205,3 +308,6 @@ export class HandSystem {
 
 /** Nothing to take. Shared and frozen: most buildings, most of the time. */
 const NO_STACKS: readonly PortStack[] = Object.freeze([]);
+
+/** Nothing to hand back: a recipe changed between crafts rather than during one. */
+const NO_REFUND: readonly RecipeStack[] = Object.freeze([]);

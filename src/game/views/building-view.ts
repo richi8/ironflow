@@ -27,6 +27,7 @@
 
 import type { EntityId } from '../entities/entity.js';
 import type { MachineStatusName } from '../entities/machine-status.js';
+import type { RecipeView } from './recipe-view.js';
 import type { Rotation } from '../world/coordinates.js';
 
 /**
@@ -67,6 +68,22 @@ export interface MachineView {
    * (§10). `null` for a building with nothing to be partway through.
    */
   readonly progress: number | null;
+  /**
+   * What the machine is making, or `null` for one that is making nothing and
+   * for a building that makes nothing at all (C16).
+   */
+  readonly recipe: RecipeView | null;
+  /**
+   * The recipes the player may choose between, or `null` when the choice is
+   * not theirs to make (C16 task 3).
+   *
+   * Null for a chest, which runs no recipes, and null for a furnace, which
+   * reads its own input buffer and picks — offering a picker for a machine
+   * that will overrule it on the next tick would be a control that lies. It
+   * is the same nullability the two fields above have and for the same
+   * reason: a view model carries only what exists.
+   */
+  readonly recipes: readonly RecipeView[] | null;
   readonly inputs: readonly MachineStack[];
   readonly outputs: readonly MachineStack[];
   /**

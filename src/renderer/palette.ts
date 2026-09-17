@@ -61,6 +61,12 @@ export const PALETTE = Object.freeze({
      strips the suffix — so only the two that are nobody's ore need their own. */
   steel: '#b8c4d0',
   brick: '#a8543a',
+
+  /* assembled goods (C16). `copper_wire` is not here for the same reason
+     `iron_plate` is not: it strips to `copper` and is drawn as copper, which
+     is what makes a belt of copper read as one line from ore to wire. */
+  gear: '#8b96a4',
+  circuit: '#3f8f6a',
 });
 
 /** Every colour token the renderer may name. */

@@ -20,9 +20,16 @@
  * which is exactly the shape that tempts a panel into `innerHTML = ''` and a
  * loop. So the rows are a **fixed pool**, built in `mount()` and hidden when
  * unused: `STACK_ROWS` of them per section, which is more than any machine in
- * §15 has ingredients. A recipe that wanted more would show the first four,
- * which is a visible bug rather than a silent one — and C16, which is the
- * chunk that could produce one, is the chunk that would raise the number.
+ * §15 has ingredients — C16's widest recipe takes two, and the widest §15
+ * ever gets to is three. A recipe that wanted more would show the first four,
+ * which is a visible bug rather than a silent one.
+ *
+ * The **recipe picker** (C16 task 3) is the one thing here that is not a fixed
+ * pool, because the number of choices is a property of the *machine* rather
+ * than of what is happening inside it: a furnace has none, an assembler has
+ * every crafting recipe, and C22 will unlock more of them. So its buttons are
+ * rebuilt when the choices change and never otherwise — a repaint at 10 Hz
+ * moves one attribute, which is what §13's rule is actually about.
  *
  * ## It cannot change anything
  *
@@ -30,7 +37,10 @@
  * (§7). The panel holds no entity, no inventory and no controller — it is
  * handed a frozen snapshot and hands back an intention, which is what makes
  * C12's last acceptance criterion ("the inspector cannot mutate simulation
- * state except via commands") a property of the types.
+ * state except via commands") a property of the types. C16's picker is the
+ * first control here that changes what a machine *does* rather than what is
+ * in it, and it goes the same way: a recipe id out, a `setRecipe` command
+ * queued, and a machine that may still refuse it.
  *
  * ## Why the rate is the interesting number
  *
@@ -42,6 +52,7 @@
  */
 
 import type { MachineStack, MachineStatus, MachineView } from '../game/views/building-view.js';
+import type { RecipeView } from '../game/views/recipe-view.js';
 
 import { createIcon } from './icons.js';
 
@@ -104,6 +115,8 @@ interface Section {
 export interface InspectorOptions {
   /** Take `count` of `itemId` out of the inspected machine. */
   readonly onTake: (itemId: string, count: number) => void;
+  /** Make `recipeId`, or `null` to make nothing at all (C16 task 3). */
+  readonly onSetRecipe: (recipeId: string | null) => void;
   /** Stop inspecting. */
   readonly onClose: () => void;
 }
@@ -124,6 +137,26 @@ export class Inspector {
 
   private inputs!: Section;
   private outputs!: Section;
+
+  /** The MAKING line, for a machine that chooses its own recipe. */
+  private readonly makingRow = document.createElement('div');
+  private readonly makingValue = document.createElement('span');
+
+  /** The picker, for a machine the player chooses for (C16 task 3). */
+  private readonly recipeSection = document.createElement('div');
+  private readonly recipeGrid = document.createElement('div');
+  private recipeButtons: HTMLButtonElement[] = [];
+  /**
+   * The recipe ids the grid is currently built from.
+   *
+   * §13 forbids rebuilding a panel's subtree *on update*, which is about the
+   * ten times a second this panel repaints while a machine runs — not about
+   * the moment the player selects a different kind of machine, where the
+   * choices genuinely are different ones. So the buttons are rebuilt when this
+   * string changes and never otherwise, and selecting a machine of the same
+   * kind moves an attribute rather than a subtree.
+   */
+  private recipeSignature = '';
 
   /** The machine the rows currently describe. Only used to label a take. */
   private view: MachineView | null = null;
@@ -165,6 +198,24 @@ export class Inspector {
     this.rateValue.className = 'if-inspector__value';
     this.rateRow.append(rateLabel, this.rateValue);
 
+    // The rate row's layout, and a class of its own so a test — and a
+    // stylesheet — can name the line rather than the shape.
+    this.makingRow.className = 'if-inspector__rate if-inspector__making';
+    this.makingRow.hidden = true;
+    const makingLabel = document.createElement('span');
+    makingLabel.className = 'if-inspector__label';
+    makingLabel.textContent = 'MAKING';
+    this.makingValue.className = 'if-inspector__value';
+    this.makingRow.append(makingLabel, this.makingValue);
+
+    this.recipeSection.className = 'if-inspector__recipes';
+    this.recipeSection.hidden = true;
+    const recipeLabel = document.createElement('div');
+    recipeLabel.className = 'if-inspector__label';
+    recipeLabel.textContent = 'RECIPE';
+    this.recipeGrid.className = 'if-recipes';
+    this.recipeSection.append(recipeLabel, this.recipeGrid);
+
     this.inputs = this.createSection('INPUT', false);
     this.outputs = this.createSection('OUTPUT', true);
 
@@ -176,7 +227,17 @@ export class Inspector {
     this.whereValue.className = 'if-inspector__value';
     where.append(whereLabel, this.whereValue);
 
-    this.root.append(head, this.statusRow, this.progressRow, this.rateRow, this.inputs.root, this.outputs.root, where);
+    this.root.append(
+      head,
+      this.statusRow,
+      this.progressRow,
+      this.rateRow,
+      this.makingRow,
+      this.recipeSection,
+      this.inputs.root,
+      this.outputs.root,
+      where,
+    );
     parent.append(this.root);
   }
 
@@ -217,6 +278,7 @@ export class Inspector {
     this.rateRow.hidden = rate === null;
     if (rate !== null) setText(this.rateValue, `${rate.toFixed(1)} /min`);
 
+    this.fillRecipes(view);
     this.fill(this.inputs, view.inputs, view.inReach);
     this.fill(this.outputs, view.outputs, view.inReach);
 
@@ -228,6 +290,7 @@ export class Inspector {
     for (const section of [this.inputs, this.outputs]) {
       for (const row of section.rows) row.take.removeEventListener('click', this.handleTake);
     }
+    this.clearRecipes();
     this.root.remove();
   }
 
@@ -247,6 +310,87 @@ export class Inspector {
     const stack = this.view.outputs.find((line) => line.itemId === itemId);
     if (stack !== undefined && stack.count > 0) this.options.onTake(itemId, stack.count);
   };
+
+  private readonly handleRecipe = (event: Event): void => {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const recipeId = target.dataset['recipe'];
+    if (recipeId === undefined) return;
+    // Clicking what it is already making stops it, which is the only way to
+    // say "nothing" without a button whose whole label would be a negative.
+    // The machine hands the ingredients back either way (C16 task 2).
+    this.options.onSetRecipe(target.getAttribute('aria-pressed') === 'true' ? null : recipeId);
+  };
+
+  /**
+   * The MAKING line and the picker grid, for whichever of the two this machine
+   * has. See `views/recipe-view.ts` for why they are different fields.
+   */
+  private fillRecipes(view: MachineView): void {
+    const choices = view.recipes;
+    this.recipeSection.hidden = choices === null || choices.length === 0;
+    // The line is for machines that choose for themselves; a machine with a
+    // picker already says what it is making by which button is lit.
+    this.makingRow.hidden = choices !== null || view.recipe === null;
+    if (view.recipe !== null && choices === null) setText(this.makingValue, view.recipe.name);
+    if (choices === null) {
+      this.rebuildRecipes(NO_RECIPES);
+      return;
+    }
+
+    this.rebuildRecipes(choices);
+    for (let i = 0; i < this.recipeButtons.length; i++) {
+      const button = this.recipeButtons[i];
+      const choice = choices[i];
+      if (button === undefined || choice === undefined) continue;
+      // An attribute rather than a class, for the reason the status tone is
+      // one: there is then no stale state to remember to remove, and a button
+      // that says what it is out loud is one a screen reader can read.
+      const pressed = choice.selected ? 'true' : 'false';
+      if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
+    }
+  }
+
+  /** Build the grid, but only when the choices themselves have changed. */
+  private rebuildRecipes(choices: readonly RecipeView[]): void {
+    const signature = choices.map((choice) => choice.id).join('|');
+    if (signature === this.recipeSignature) return;
+    this.recipeSignature = signature;
+    this.clearRecipes();
+
+    for (const choice of choices) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'if-recipe';
+      button.dataset['recipe'] = choice.id;
+      button.setAttribute('aria-pressed', 'false');
+
+      const name = document.createElement('span');
+      name.className = 'if-recipe__name';
+      name.textContent = amountOf(choice.outputs[0]?.count ?? 1, choice.name);
+
+      const rate = document.createElement('span');
+      rate.className = 'if-recipe__rate';
+      rate.textContent = `${choice.ratePerMinute.toFixed(0)} /min`;
+
+      const parts = document.createElement('span');
+      parts.className = 'if-recipe__parts';
+      // C29 puts a real icon beside each of these; until then the count and
+      // the name are the icon, which is what the player reads anyway.
+      parts.textContent = choice.inputs.map((part) => amountOf(part.count, part.name)).join(' + ');
+
+      button.append(name, rate, parts);
+      button.addEventListener('click', this.handleRecipe);
+      this.recipeButtons.push(button);
+      this.recipeGrid.append(button);
+    }
+  }
+
+  private clearRecipes(): void {
+    for (const button of this.recipeButtons) button.removeEventListener('click', this.handleRecipe);
+    this.recipeButtons = [];
+    this.recipeGrid.replaceChildren();
+  }
 
   /**
    * A heading plus a fixed pool of rows. `takeable` decides whether the rows
@@ -314,6 +458,14 @@ export class Inspector {
       row.take.disabled = !inReach || stack.count === 0;
     }
   }
+}
+
+/** No choices: a machine that picks its own recipe, or a building with none. */
+const NO_RECIPES: readonly RecipeView[] = Object.freeze([]);
+
+/** "2 Iron Plate", and "Gear" for a single one — the count is the news. */
+function amountOf(count: number, name: string): string {
+  return count === 1 ? name : `${count} ${name}`;
 }
 
 function setText(element: HTMLElement, text: string): void {

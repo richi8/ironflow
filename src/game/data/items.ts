@@ -15,14 +15,24 @@
  * table that no test can tell is wrong. C15 adds `steel` and `brick` under
  * that same rule — they are what §15's other two smelting recipes make.
  *
+ * C16 adds the three intermediates §15 names first: `gear`, `copper_wire` and
+ * `circuit` — C16 task 4's three recipes, and a chain rather than three
+ * unrelated rows: plates make gears and wire, and wire and a plate make a
+ * circuit. `frame` and `data_core` wait, because the recipes that would make
+ * them are the two whose *consumer* is C22's lab, and a recipe no player has
+ * a reason to run is content that cannot be balanced.
+ *
  * `fuelSeconds` is how long one item burns in a machine that has a fuel
  * buffer. It lives on the *item*, not on the furnace, so C21's generator burns
  * the same coal for the same eight seconds without either building knowing
  * about the other (C15).
  *
  * Building items — the `miner` and `chest` a build cost is paid in today — are
- * deliberately *not* here. They become items when C16 gives them recipes; until
- * then the player's bag holds them under their string ids (see `item-stack.ts`).
+ * deliberately *not* here, and C16 does not add them: §15's building recipes
+ * need the player's materials bag and their slot inventory to become one
+ * thing, which is a change to how a build cost is *paid* rather than to what
+ * an assembler can make. Until then the bag holds them under their string ids
+ * (see `item-stack.ts`).
  */
 
 import type { ItemDefinition } from '../registries/item-registry.js';
@@ -36,4 +46,7 @@ export const ITEMS: readonly ItemDefinition[] = Object.freeze([
   { id: 'copper_plate', name: 'Copper Plate', stackSize: 100, sprite: 'item:copper_plate', category: 'plate' },
   { id: 'steel', name: 'Steel', stackSize: 100, sprite: 'item:steel', category: 'plate' },
   { id: 'brick', name: 'Brick', stackSize: 100, sprite: 'item:brick', category: 'plate' },
+  { id: 'gear', name: 'Gear', stackSize: 100, sprite: 'item:gear', category: 'intermediate' },
+  { id: 'copper_wire', name: 'Copper Wire', stackSize: 200, sprite: 'item:copper_wire', category: 'intermediate' },
+  { id: 'circuit', name: 'Circuit', stackSize: 200, sprite: 'item:circuit', category: 'intermediate' },
 ] satisfies readonly ItemDefinition[]);

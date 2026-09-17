@@ -87,7 +87,11 @@ describe('RecipeRegistry', () => {
       'smelt_steel',
       'bake_brick',
     ]);
-    expect(built.byCategory('crafting')).toEqual([]);
+    expect(built.byCategory('crafting').map((recipe) => recipe.id)).toEqual([
+      'make_gear',
+      'make_wire',
+      'make_circuit',
+    ]);
   });
 
   it.each([
@@ -133,6 +137,12 @@ describe('the shipped recipe table', () => {
       { id: 'smelt_copper', inputs: ['1 copper_ore'], outputs: ['1 copper_plate'], ticks: 96 },
       { id: 'smelt_steel', inputs: ['5 iron_plate'], outputs: ['1 steel'], ticks: 480 },
       { id: 'bake_brick', inputs: ['2 stone'], outputs: ['1 brick'], ticks: 96 },
+      // C16's three. These are the recipes' *own* durations: what an assembler
+      // takes is this divided by its crafting speed, which is
+      // `registries/craft-durations.ts` and not this table.
+      { id: 'make_gear', inputs: ['2 iron_plate'], outputs: ['1 gear'], ticks: 30 },
+      { id: 'make_wire', inputs: ['1 copper_plate'], outputs: ['2 copper_wire'], ticks: 15 },
+      { id: 'make_circuit', inputs: ['3 copper_wire', '1 iron_plate'], outputs: ['1 circuit'], ticks: 30 },
     ]);
   });
 
@@ -153,5 +163,17 @@ describe('the shipped recipe table', () => {
         expect(built.forInput('smelting', input.itemId)?.id).toBe(recipe.id);
       }
     }
+  });
+
+  it('refuses to guess for crafting, which is why an assembler has to be told', () => {
+    // An iron plate is an ingredient of both `make_gear` and `make_circuit`,
+    // so the index answers "ambiguous" rather than picking the first. That is
+    // a property of §15's table and not a rule about categories — C16 makes
+    // the *choosing* a building's `recipeSelection`, precisely because this
+    // answer cannot carry it: a copper plate is unambiguous and an assembler
+    // fed one must still wait to be told (see `production-system.ts`).
+    expect(built.forInput('crafting', items.idOf('iron_plate'))).toBeNull();
+    expect(built.acceptsInput('crafting', items.idOf('iron_plate'))).toBe(true);
+    expect(built.forInput('crafting', items.idOf('copper_plate'))?.id).toBe('make_wire');
   });
 });

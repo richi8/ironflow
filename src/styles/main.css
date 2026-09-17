@@ -525,6 +525,67 @@ body {
   margin-bottom: 8px;
 }
 
+/* --- Recipe picker (C16) -------------------------------------------------- */
+
+.if-inspector__recipes {
+  margin-bottom: 8px;
+}
+
+.if-recipes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.if-recipe {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-recipe:hover {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+/* The chosen one is lit, not merely outlined: which recipe a machine is on is
+   the first thing the player looks for when they open the panel. */
+.if-recipe[aria-pressed='true'] {
+  border-color: var(--if-accent);
+  background: var(--if-panel-high);
+  color: var(--if-text);
+}
+
+.if-recipe__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-recipe__rate {
+  color: var(--if-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.if-recipe__parts {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .if-stack {
   display: flex;
   align-items: center;

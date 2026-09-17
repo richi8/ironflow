@@ -186,6 +186,31 @@ export interface StorageProperties {
 export interface ProductionProperties {
   /** Which recipes this machine can run. §15 has smelting and crafting. */
   readonly category: RecipeCategory;
+  /**
+   * Who decides what this machine makes (C16).
+   *
+   * `'auto'` is C15's furnace: it reads its input buffer and runs whatever
+   * single recipe the items in it name, dropping that recipe again when they
+   * run out so a furnace fed something else can switch to it. `'player'` is
+   * the assembler: it makes what it was told by `setRecipe` and nothing else,
+   * for ever, including while it is empty — which is the whole difference
+   * between a machine that follows its belt and a machine that holds a
+   * decision the player made about the factory.
+   *
+   * It is a field rather than a test on the category because "who chooses" is
+   * not a property of what a recipe *is*. C15 expected `forInput`'s ambiguity
+   * to cover it; ambiguity decides *which* recipe an item names, and it
+   * cannot make a player's choice survive an empty buffer. See C16.
+   */
+  readonly recipeSelection: RecipeSelection;
+  /**
+   * How fast it works, as a multiplier on a recipe's authored duration.
+   *
+   * §15's anchor: 1.0 for a furnace, whose smelting times are already the
+   * times a furnace takes, and 0.5 for a tier-1 assembler. The division is
+   * done once — see `registries/craft-durations.ts` — never per tick (§6 R3).
+   */
+  readonly craftingSpeed: number;
   /** Ceiling on each ingredient it holds. */
   readonly inputCapacity: number;
   /** Ceiling on each product it holds before it stalls with `output_full`. */
@@ -193,6 +218,11 @@ export interface ProductionProperties {
   /** Ceiling on each fuel it holds. Absent means it does not burn anything. */
   readonly fuelCapacity?: number;
 }
+
+/** Who picks a machine's recipe. See `ProductionProperties.recipeSelection`. */
+export type RecipeSelection = 'auto' | 'player';
+
+const RECIPE_SELECTIONS: readonly RecipeSelection[] = Object.freeze(['auto', 'player']);
 
 export interface BuildingDefinition {
   readonly id: string;
@@ -340,6 +370,14 @@ function validate(definition: BuildingDefinition): void {
   if (production !== undefined) {
     if (!isRecipeCategory(production.category)) {
       throw new Error(`BuildingRegistry: ${where} runs "${production.category}" recipes, which is not a category.`);
+    }
+    if (!RECIPE_SELECTIONS.includes(production.recipeSelection)) {
+      throw new Error(
+        `BuildingRegistry: ${where} selects recipes "${production.recipeSelection}", which is neither "auto" nor "player".`,
+      );
+    }
+    if (!Number.isFinite(production.craftingSpeed) || production.craftingSpeed <= 0) {
+      throw new Error(`BuildingRegistry: ${where} works at speed ${production.craftingSpeed}, which is not a speed.`);
     }
     checkCapacity(production.inputCapacity, `${where} input buffer`);
     checkCapacity(production.outputCapacity, `${where} output buffer`);

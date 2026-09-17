@@ -15,6 +15,21 @@
  * furnace pick its own recipe from whatever an inserter drops in it. That is a
  * property of this table, not a rule in the code: `RecipeRegistry.forInput`
  * refuses to guess when two recipes in a category want the same ingredient.
+ *
+ * ## Crafting (C16)
+ *
+ * The three C16 task 4 names, and the reason an assembler is *told* what to
+ * make rather than guessing: `iron_plate` is an ingredient of both `make_gear`
+ * and `make_circuit`, so the index above answers "ambiguous" and there is
+ * nothing to guess from. That is not a smelting/crafting distinction the code
+ * knows — it is what these rows happen to look like — which is why the
+ * *choosing* is `recipeSelection` in `data/buildings.ts` and not a category
+ * test anywhere.
+ *
+ * Their durations are the recipe's own, before the machine's speed: §15
+ * authors `make_gear` at 1.0 s and the tier-1 assembler runs at speed 0.5, so
+ * one gear takes 60 ticks. That division happens once, in
+ * `registries/craft-durations.ts`, and never here.
  */
 
 import type { RecipeDefinition } from '../registries/recipe-registry.js';
@@ -47,5 +62,29 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'brick', count: 1 }],
     seconds: 3.2,
     category: 'smelting',
+  },
+  {
+    id: 'make_gear',
+    inputs: [{ itemId: 'iron_plate', count: 2 }],
+    outputs: [{ itemId: 'gear', count: 1 }],
+    seconds: 1.0,
+    category: 'crafting',
+  },
+  {
+    id: 'make_wire',
+    inputs: [{ itemId: 'copper_plate', count: 1 }],
+    outputs: [{ itemId: 'copper_wire', count: 2 }],
+    seconds: 0.5,
+    category: 'crafting',
+  },
+  {
+    id: 'make_circuit',
+    inputs: [
+      { itemId: 'copper_wire', count: 3 },
+      { itemId: 'iron_plate', count: 1 },
+    ],
+    outputs: [{ itemId: 'circuit', count: 1 }],
+    seconds: 1.0,
+    category: 'crafting',
   },
 ] satisfies readonly RecipeDefinition[]);

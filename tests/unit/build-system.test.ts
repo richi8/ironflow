@@ -110,6 +110,7 @@ describe('BuildingRegistry', () => {
       'belt',
       'inserter',
       'furnace',
+      'assembler',
       'chest',
     ]);
   });
@@ -490,7 +491,10 @@ describe('adding a building', () => {
     const sawmill: BuildingDefinition = {
       id: 'sawmill',
       name: 'Sawmill',
-      entityType: EntityType.Assembler,
+      // Any type no shipped building has claimed — C16's assembler took the
+      // one this used to borrow, which is the registry refusing two buildings
+      // one entity type exactly as it is supposed to.
+      entityType: EntityType.Lab,
       category: 'production',
       size: { width: 3, height: 2 },
       rotationCount: 4,

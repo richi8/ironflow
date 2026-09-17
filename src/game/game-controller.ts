@@ -48,14 +48,18 @@ import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
 import { BuildingRegistry, type BuildingDefinition } from './registries/building-registry.js';
+import { CANNOT_CRAFT } from './registries/craft-durations.js';
+import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-registry.js';
 import type { Simulation } from './simulation.js';
 import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
 import type { PortStack } from './items/item-port.js';
+import type { ItemId } from './registries/item-registry.js';
 import type { MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudView } from './views/hud-view.js';
 import type { PlacementView } from './views/placement-view.js';
+import type { RecipePartView, RecipeView } from './views/recipe-view.js';
 import type { SelectionView } from './views/selection-view.js';
 import type { PlayerActivity, PlayerView } from './views/player-view.js';
 import { BUILD_RANGE_TILES, MINE_RANGE_TILES } from './player/player-state.js';
@@ -403,6 +407,12 @@ export class GameController {
       // not zero, for a building that is not partway through anything — see
       // the note in `views/building-view.ts`.
       progress: this.progressOf(entity),
+      // What it is making, and — for a machine the player chooses for — what
+      // else it could make. Both null for a building that runs no recipes, so
+      // the panel leaves the section out rather than drawing an empty grid
+      // under every crate (C16 task 3, and §13's rule about `HudView`).
+      recipe: this.currentRecipeView(entity),
+      recipes: this.recipeChoicesFor(entity),
       inputs: inputs.length === 0 ? EMPTY_STACKS : freeze(inputs),
       outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
       // Measured for the selected machine only (C12 task 2). A machine asked
@@ -565,10 +575,25 @@ export class GameController {
     return this.dispatch({ type: 'takeItems', entityId, itemId, amount });
   }
 
-  /** The other direction. Nothing in the game accepts items by hand yet — see
-   * `systems/hand-system.ts` — so this is refused with a reason until C15. */
+  /**
+   * The other direction: coal or ore into a furnace, ingredients into an
+   * assembler, anything into a chest. The building decides what it will take
+   * — see `systems/hand-system.ts`.
+   */
   insertItems(entityId: EntityId, itemId: string, amount: number): CommandResult {
     return this.dispatch({ type: 'insertItems', entityId, itemId, amount });
+  }
+
+  /**
+   * Tell a machine what to make, or `null` to stop it making anything (C16).
+   *
+   * A command like everything else, for the reason `takeItems` is one: the
+   * picker names a recipe, the simulation decides whether that machine may run
+   * it, and the ingredients of whatever it was making come back to the player
+   * in the same tick.
+   */
+  setRecipe(entityId: EntityId, recipeId: string | null): CommandResult {
+    return this.dispatch({ type: 'setRecipe', entityId, recipeId });
   }
 
   /* ---------------------------------------------------------------- *
@@ -662,10 +687,13 @@ export class GameController {
     const machine = asMachine(entity, this.simulation.buildings);
     if (machine !== null) {
       // A machine with no recipe is not partway through anything, and neither
-      // is one whose recipe vanished under a content change (C27).
-      if (!this.simulation.recipes.isRecipeId(machine.recipe)) return null;
-      const recipe = this.simulation.recipes.byId(machine.recipe);
-      return machine.progressTicks / recipe.durationTicks;
+      // is one whose recipe vanished under a content change (C27). The
+      // denominator is the craft's length *in this machine* — a recipe's
+      // duration at its own speed — which is the same number the simulation
+      // counts against, and not the recipe's own (C16 task 5).
+      const craftTicks = this.simulation.crafts.ticksFor(entity.type, machine.recipe);
+      if (craftTicks === CANNOT_CRAFT) return null;
+      return machine.progressTicks / craftTicks;
     }
 
     const miner = asMiner(entity);
@@ -681,6 +709,66 @@ export class GameController {
     }
 
     return null;
+  }
+
+  /**
+   * The recipe a machine is running, as the panel shows it, or null.
+   *
+   * Null covers three different things that all read the same way on screen: a
+   * building that runs no recipes, a machine that has not been given one, and
+   * a recipe that no longer exists under changed content (C27).
+   */
+  private currentRecipeView(entity: Entity): RecipeView | null {
+    const machine = asMachine(entity, this.simulation.buildings);
+    if (machine === null || !this.simulation.recipes.isRecipeId(machine.recipe)) return null;
+    return this.recipeView(entity, this.simulation.recipes.byId(machine.recipe), machine.recipe);
+  }
+
+  /**
+   * Every recipe this machine could be told to make, or null when nobody is
+   * going to tell it (C16 task 3).
+   *
+   * The list is the machine's *category*, in content order, which is the order
+   * `data/recipes.ts` is written in — so the grid does not reshuffle itself
+   * between two frames, and adding a recipe puts it where the content author
+   * put it. Every recipe is unlocked until C22, so nothing is filtered out
+   * yet; when something is, it is filtered here and the panel never learns
+   * that it happened.
+   */
+  private recipeChoicesFor(entity: Entity): readonly RecipeView[] | null {
+    const config = this.simulation.buildings.productionFor(entity.type);
+    if (config === null || config.recipeSelection !== 'player') return null;
+    const machine = asMachine(entity, this.simulation.buildings);
+    const selected = machine === null ? NO_RECIPE : machine.recipe;
+    const views = this.simulation.recipes
+      .byCategory(config.category)
+      .map((recipe) => this.recipeView(entity, recipe, selected));
+    return views.length === 0 ? EMPTY_RECIPES : freeze(views);
+  }
+
+  /** One recipe, at the speed of the machine that would run it. */
+  private recipeView(entity: Entity, recipe: Recipe, selected: RecipeId): RecipeView {
+    const craftTicks = this.simulation.crafts.ticksFor(entity.type, recipe.recipeId);
+    const first = recipe.outputs[0];
+    const outputs = recipe.outputs.map((stack) => this.partView(stack.itemId, stack.count));
+    return freeze({
+      id: recipe.id,
+      name: outputs[0]?.name ?? recipe.id,
+      inputs: freeze(recipe.inputs.map((stack) => this.partView(stack.itemId, stack.count))),
+      outputs: freeze(outputs),
+      craftTicks,
+      // Guarded, because §6 R7 has no exception for a number the UI divides:
+      // a recipe this machine cannot run reports no rate rather than Infinity.
+      ratePerMinute: craftTicks === CANNOT_CRAFT ? 0 : ((first?.count ?? 0) * TPS * 60) / craftTicks,
+      selected: recipe.recipeId === selected,
+    });
+  }
+
+  /** One ingredient or product, named. See `stackView` on where the name is from. */
+  private partView(itemId: ItemId, count: number): RecipePartView {
+    const known = this.simulation.items.isItemId(itemId);
+    const id = known ? this.simulation.items.byId(itemId).id : `item ${itemId}`;
+    return freeze({ itemId: id, name: known ? this.simulation.items.byId(itemId).name : id, count });
   }
 
   /**
@@ -714,6 +802,9 @@ export class GameController {
 
 /** Nothing in, nothing out. Shared so every empty machine view points at one array. */
 const EMPTY_STACKS: readonly MachineStack[] = Object.freeze([]);
+
+/** A machine whose category has no recipes at all. Shared and frozen. */
+const EMPTY_RECIPES: readonly RecipeView[] = Object.freeze([]);
 
 /**
  * Freeze a view before it leaves the controller (§13).

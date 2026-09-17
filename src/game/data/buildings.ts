@@ -22,6 +22,11 @@
  * whole of "this thing holds items" is `slots`, and the whole of "this thing
  * hands items to its neighbour" is `itemsPerSecond`.
  *
+ * C15's furnace and C16's assembler are the fifth and sixth, and they are the
+ * proof of that rule rather than another instance of it: they differ from one
+ * another in nothing at all but the `production` field, and
+ * `production-system.ts` does not contain either of their names.
+ *
  * The order is §15's building table order, and it is also menu and hotkey
  * order — which is why the inserter goes between the belt and the chest
  * rather than on the end.
@@ -114,8 +119,52 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     // as it does for a miner; the footprint is square either way. The three
     // fifties are **balance numbers** for C20: one stack of ore in, one of
     // plates out, and enough coal that a furnace is not a chore to feed.
-    production: { category: 'smelting', inputCapacity: 50, outputCapacity: 50, fuelCapacity: 50 },
+    //
+    // `auto` and speed 1.0 are the two C16 added. A furnace reads its own
+    // input buffer and runs whatever is in it, which is what makes an ore belt
+    // into a plate belt without the player ever opening the panel; and §15's
+    // smelting times are already the times a furnace takes, so its speed is
+    // the identity rather than a number to tune.
+    production: {
+      category: 'smelting',
+      recipeSelection: 'auto',
+      craftingSpeed: 1.0,
+      inputCapacity: 50,
+      outputCapacity: 50,
+      fuelCapacity: 50,
+    },
     sprite: 'building:production:FU:2x2:2',
+  },
+  {
+    id: 'assembler',
+    name: 'Assembler',
+    entityType: EntityType.Assembler,
+    category: 'production',
+    size: { width: 3, height: 3 },
+    // Four, for the furnace's reason: rotation is which side an inserter and
+    // the placement ghost face, and a 3x3 looks the same in all of them.
+    rotationCount: 4,
+    buildCost: [{ itemId: 'assembler', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §15: "recipe selectable, speed 0.5". Both words are this one field pair
+    // — the assembler is the first building in the game that holds a decision
+    // the player made rather than one its belt made for it (C16 tasks 1–3).
+    //
+    // No `fuelCapacity`: §15 gives it 150 kW, and a machine that takes power
+    // is one whose gate is C21's satisfaction ratio. Until C21 exists it runs
+    // for free, which is the same thing every other building does today.
+    //
+    // The two fifties are **balance numbers** for C20, and the same ones the
+    // furnace has: a ceiling per ingredient is what makes backpressure reach
+    // the belt in front of it (§9).
+    production: {
+      category: 'crafting',
+      recipeSelection: 'player',
+      craftingSpeed: 0.5,
+      inputCapacity: 50,
+      outputCapacity: 50,
+    },
+    sprite: 'building:production:AS:3x3:2',
   },
   {
     id: 'chest',

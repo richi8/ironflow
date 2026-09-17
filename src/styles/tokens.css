@@ -48,6 +48,9 @@
   /* smelted goods (C15) — a plate is its ore, a brick and steel are their own */
   --if-steel: #b8c4d0;
   --if-brick: #a8543a;
+  /* assembled goods (C16) — a wire is its copper, these two are their own */
+  --if-gear: #8b96a4;
+  --if-circuit: #3f8f6a;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

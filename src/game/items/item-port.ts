@@ -102,10 +102,11 @@ export function outputPortOf(entity: Entity, ctx: PortContext): ItemSource | nul
  * Where an item can be put into this building, or null if nowhere.
  *
  * For a machine this routes: anything that burns goes in the fuel buffer, and
- * anything a recipe in its category wants goes in the input buffer. Nothing
+ * anything the recipe it is running wants goes in the input buffer. Nothing
  * else is accepted, so an inserter pointed at a furnace with copper plates on
  * its belt waits with empty hands instead of silting the furnace up with
- * something it can never smelt (C14 task 6).
+ * something it can never smelt (C14 task 6). See `MachineInputPort` for what
+ * a machine that has not chosen a recipe yet will take.
  */
 export function inputPortOf(entity: Entity, ctx: PortContext): ItemSink | null {
   const machine = asMachine(entity, ctx.buildings);
@@ -218,15 +219,33 @@ function containerPort(contents: ItemSlots, inventory: Inventory, capacity: numb
  * Fuel wins when an item is both, which in v1 it never is — coal smelts into
  * nothing — but the order has to be written down somewhere, and "a machine
  * that can burn it, burns it" is the answer that keeps a furnace running.
+ *
+ * ## What an ingredient buffer accepts (C16)
+ *
+ * **A machine that knows what it is making takes that recipe's ingredients and
+ * nothing else.** C15 asked the *category* instead, which was the same answer
+ * while every machine in the game picked its recipe from its own buffer. It
+ * stops being the same answer the moment a machine is *told*: an assembler set
+ * to make gears, with a copper plate on the belt beside it, would fill fifty
+ * slots of its input with an ingredient it will never spend, and the player
+ * would be left reading a full buffer under the word "missing ingredients".
+ * That is C14 task 6's rule — an inserter waits rather than silting a machine
+ * up with something it cannot use — now that a machine can say which is which.
+ *
+ * A machine with no recipe yet falls back to the category, and a machine whose
+ * recipe is the player's falls back to *nothing*: until it is told, there is
+ * no answer to "will you want this?" that is not a guess.
  */
 class MachineInputPort implements ItemSink {
   private readonly ctx: PortContext;
   private readonly config: ProductionProperties;
+  private readonly machine: MachineEntity;
   private readonly buffers: MachinePorts;
 
   constructor(machine: MachineEntity, config: ProductionProperties, ctx: PortContext) {
     this.ctx = ctx;
     this.config = config;
+    this.machine = machine;
     this.buffers = machineBuffers(machine, config);
   }
 
@@ -234,8 +253,19 @@ class MachineInputPort implements ItemSink {
   private route(itemId: ItemId): ItemSink | null {
     if (itemId === NO_ITEM) return null;
     if (this.config.fuelCapacity !== undefined && this.ctx.items.fuelTicksOf(itemId) > 0) return this.buffers.fuel;
-    if (!this.ctx.recipes.acceptsInput(this.config.category, itemId)) return null;
-    return this.buffers.input;
+    return this.wants(itemId) ? this.buffers.input : null;
+  }
+
+  /** Is this item an ingredient of what the machine is making, or could make? */
+  private wants(itemId: ItemId): boolean {
+    const recipe = this.ctx.recipes.isRecipeId(this.machine.recipe)
+      ? this.ctx.recipes.byId(this.machine.recipe)
+      : null;
+    if (recipe !== null && recipe.category === this.config.category) {
+      return recipe.inputs.some((stack) => stack.itemId === itemId);
+    }
+    if (this.config.recipeSelection === 'player') return false;
+    return this.ctx.recipes.acceptsInput(this.config.category, itemId);
   }
 
   spaceFor(itemId: ItemId): number {

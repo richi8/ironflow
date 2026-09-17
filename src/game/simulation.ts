@@ -12,6 +12,7 @@ import { ItemRegistry } from './registries/item-registry.js';
 import { ProductionCounters } from './production.js';
 import { RECIPES } from './data/recipes.js';
 import { RecipeRegistry } from './registries/recipe-registry.js';
+import { CraftDurations } from './registries/craft-durations.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
 import { HandSystem } from './systems/hand-system.js';
@@ -89,6 +90,16 @@ export class Simulation {
   readonly recipes: RecipeRegistry;
 
   /**
+   * How long one craft takes in each kind of machine (C16 task 5).
+   *
+   * Content, derived from the two registries above and never serialized: the
+   * recipe's authored duration divided by the building's `craftingSpeed`,
+   * rounded once here rather than per tick (§6 R3). The controller reads it
+   * too, because a progress bar is that same fraction.
+   */
+  readonly crafts: CraftDurations;
+
+  /**
    * The player character. Authoritative (§10), and the reason build range and
    * mining reach can be rules rather than suggestions (C10).
    */
@@ -97,8 +108,10 @@ export class Simulation {
   /**
    * The player's build materials. Still the string-keyed `ItemCounts` bag,
    * which now lives on the player; this is an alias so the build system, the
-   * controller and C06's tests keep one name for it. C16 replaces both with
-   * the player's `SlotInventory` when building items become real items.
+   * controller and C06's tests keep one name for it. It stays that way after
+   * C16: §15's building recipes need the bag and the player's `SlotInventory`
+   * to become one thing, which is a change to how a build cost is *paid*
+   * rather than to what a machine can make, and C16 added neither.
    */
   get inventory(): ItemCounts {
     return this.player.materials;
@@ -130,7 +143,8 @@ export class Simulation {
   private readonly playerSystem: PlayerSystem;
 
   /**
-   * The player's hands: the `takeItems` and `insertItems` commands (C12).
+   * The player's hands: the `takeItems`, `insertItems` (C12) and `setRecipe`
+   * (C16) commands.
    *
    * Exposed rather than private because the controller asks it two read-only
    * questions the inspector needs — what is in a machine's output buffer, and
@@ -175,6 +189,7 @@ export class Simulation {
     this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
     this.items = options.items ?? new ItemRegistry(ITEMS);
     this.recipes = options.recipes ?? new RecipeRegistry(RECIPES, this.items);
+    this.crafts = new CraftDurations(this.buildings, this.recipes);
     this.player =
       options.player ??
       new PlayerState({
@@ -200,6 +215,7 @@ export class Simulation {
       buildings: this.buildings,
       items: this.items,
       recipes: this.recipes,
+      crafts: this.crafts,
       alerts: this.alerts,
       production: this.production,
     });
@@ -382,7 +398,7 @@ export class Simulation {
    * so rather than nothing at all.
    *
    * Each later chunk replaces one arm of this with a call into its system —
-   * C10 `movePlayer` and `mineTile`, C12 `takeItems` and `insertItems`, C15
+   * C10 `movePlayer` and `mineTile`, C12 `takeItems` and `insertItems`, C16
    * `setRecipe`, C22 `startResearch`.
    * There is deliberately no handler registry: a switch is smaller, it is
    * exhaustively checked by the compiler, and a registry would be an
@@ -412,6 +428,8 @@ export class Simulation {
         return this.hands.take(command.entityId, command.itemId, command.amount);
       case 'insertItems':
         return this.hands.insert(command.entityId, command.itemId, command.amount);
+      case 'setRecipe':
+        return this.hands.setRecipe(command.entityId, command.recipeId);
       case 'stopMining':
         // A no-op when nothing is being mined. Releasing the button over empty
         // ground is not a mistake, and telling the player it was would put a

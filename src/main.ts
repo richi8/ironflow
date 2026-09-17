@@ -70,6 +70,7 @@ const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
   belt: 100,
   inserter: 20,
   furnace: 10,
+  assembler: 3,
   chest: 10,
 });
 
@@ -130,9 +131,11 @@ function bootstrap(): void {
    * enough to wire a first factory and not enough to skip thinking about where
    * they go (C14). Ten furnaces is two per miner, which is just over §15's
    * 1.6 and is the first number here that comes out of the content table
-   * rather than out of the feel of the thing (C15). It is still a **balance
-   * number** and still temporary
-   * in one respect — C16 makes buildings craftable, and a starting stock then
+   * rather than out of the feel of the thing (C15). Three assemblers is the
+   * same arithmetic one step along: §15 says a gear assembler needs 3.2 plate
+   * furnaces, so ten furnaces feed three of them (C16). All of them are
+   * **balance numbers**, and all of them are still temporary in one respect —
+   * §15's building recipes make buildings craftable, and a starting stock then
    * becomes a decision about the first five minutes rather than about whether
    * the game can be played at all.
    */
