@@ -43,6 +43,7 @@ import type { Entity, EntityId } from './entities/entity.js';
 import { footprintExtent } from './entities/entity.js';
 import { asInserter, inserterCycleProgress } from './entities/inserter-entity.js';
 import { machineStatusName, statusOf } from './entities/machine-status.js';
+import { asMachine } from './entities/machine-entity.js';
 import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
@@ -50,6 +51,7 @@ import { BuildingRegistry, type BuildingDefinition } from './registries/building
 import type { Simulation } from './simulation.js';
 import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
+import type { PortStack } from './items/item-port.js';
 import type { MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudView } from './views/hud-view.js';
@@ -374,16 +376,18 @@ export class GameController {
     if (entity === undefined) return null;
     const definition = this.simulation.buildings.forEntityType(entity.type);
 
-    const miner = asMiner(entity);
-    const mining = miner === null ? null : this.simulation.buildings.miningFor(entity.type);
     // C13: a chest has contents too, and more than one kind of them. The
-    // capacity beside each line is the miner's buffer cap, which is what turns
-    // "12" into "12/50" and puts `output_full` on screen before it happens; a
-    // chest fills by running out of *slots*, whatever is in them, so there is
-    // no per-item number to show and the row shows none.
-    const outputs = this.simulation.hands
-      .outputsOf(entity)
-      .map((stack) => this.stackView(stack.itemId, stack.count, mining?.bufferCapacity ?? null));
+    // capacity beside each line comes from the port that holds it, which is
+    // what turns "12" into "12/50" and puts `output_full` on screen before it
+    // happens; a chest fills by running out of *slots*, whatever is in them,
+    // so there is no per-item number to show and the row shows none (C15).
+    const inputs = this.simulation.hands.inputsOf(entity).map((stack) => this.stackView(stack));
+    const outputs = this.simulation.hands.outputsOf(entity).map((stack) => this.stackView(stack));
+    // A machine reports what it makes per minute; a miner what it mines. A
+    // belt, a chest and an inserter make nothing and report null.
+    const produces =
+      this.simulation.buildings.miningFor(entity.type) !== null ||
+      this.simulation.buildings.productionFor(entity.type) !== null;
 
     return freeze({
       id: entity.id,
@@ -399,12 +403,12 @@ export class GameController {
       // not zero, for a building that is not partway through anything — see
       // the note in `views/building-view.ts`.
       progress: this.progressOf(entity),
-      inputs: EMPTY_STACKS,
+      inputs: inputs.length === 0 ? EMPTY_STACKS : freeze(inputs),
       outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
       // Measured for the selected machine only (C12 task 2). A machine asked
       // about in passing reads 0 rather than a figure from someone else's
       // window; a machine that produces nothing at all reads null.
-      ratePerMinute: mining === null ? null : this.rate.perMinuteFor(entity.id),
+      ratePerMinute: produces ? this.rate.perMinuteFor(entity.id) : null,
       x: entity.x,
       y: entity.y,
       rotation: entity.rotation,
@@ -650,10 +654,20 @@ export class GameController {
    * under every crate in the factory (see `views/building-view.ts`).
    *
    * A miner counts ticks toward the next item; an inserter counts ticks
-   * through one swing cycle (C14). Both are progress in the sense the bar
-   * means: something is happening and this is how much of it is left.
+   * through one swing cycle (C14); a machine counts ticks into the craft it is
+   * running (C15). All three are progress in the sense the bar means:
+   * something is happening and this is how much of it is left.
    */
   private progressOf(entity: Entity): number | null {
+    const machine = asMachine(entity, this.simulation.buildings);
+    if (machine !== null) {
+      // A machine with no recipe is not partway through anything, and neither
+      // is one whose recipe vanished under a content change (C27).
+      if (!this.simulation.recipes.isRecipeId(machine.recipe)) return null;
+      const recipe = this.simulation.recipes.byId(machine.recipe);
+      return machine.progressTicks / recipe.durationTicks;
+    }
+
     const miner = asMiner(entity);
     if (miner !== null) {
       const mining = this.simulation.buildings.miningFor(entity.type);
@@ -678,9 +692,11 @@ export class GameController {
    * throwing: a view model is drawn every frame, and a content typo should
    * read as a strange label rather than take the frame down.
    */
-  private stackView(itemId: string, count: number, capacity: number | null): MachineStack {
-    const name = this.simulation.items.has(itemId) ? this.simulation.items.get(itemId).name : itemId;
-    return freeze({ itemId, name, count, capacity });
+  private stackView(stack: PortStack): MachineStack {
+    const known = this.simulation.items.isItemId(stack.itemId);
+    const itemId = known ? this.simulation.items.byId(stack.itemId).id : `item ${stack.itemId}`;
+    const name = known ? this.simulation.items.byId(stack.itemId).name : itemId;
+    return freeze({ itemId, name, count: stack.count, capacity: stack.capacity });
   }
 
   /**

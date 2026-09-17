@@ -47,6 +47,7 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   unknown_entity: 'That machine is no longer there.',
   nothing_to_take: 'There is none of that in there.',
   not_accepted: 'That machine does not take items.',
+  nothing_to_give: 'You are not carrying any of that.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {
@@ -63,6 +64,7 @@ export function rejectionMessage(reason: CommandRejectionReason): string {
  */
 const ALERT_TEXT: Readonly<Record<AlertType, (alert: Alert) => string>> = Object.freeze({
   miner_no_resource: (alert) => `Miner at ${alert.x}, ${alert.y} has run out of ore — move it to a fresh patch.`,
+  machine_no_fuel: (alert) => `The machine at ${alert.x}, ${alert.y} is out of fuel — feed it coal to carry on.`,
 });
 
 export function alertMessage(alert: Alert): string {

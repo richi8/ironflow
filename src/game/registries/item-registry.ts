@@ -33,6 +33,8 @@
  * `NO_ENTITY` exists to avoid (C05).
  */
 
+import { TPS } from '../simulation-clock.js';
+
 /** A stable numeric handle to an item kind. Persisted; never renumbered. */
 export type ItemId = number;
 
@@ -74,6 +76,16 @@ export interface ItemDefinition {
    */
   readonly sprite: string;
   readonly category: ItemCategory;
+  /**
+   * How long one of this item burns in a machine with a fuel buffer, in
+   * seconds. Absent means "not a fuel", which is all but one item in v1.
+   *
+   * It is on the item rather than on the furnace because burning is a property
+   * of the thing burnt: C21's generator gets the same eight seconds out of a
+   * coal as C15's furnace does, and neither building has a table of what it
+   * accepts. The registry converts it to ticks once (§6 R3).
+   */
+  readonly fuelSeconds?: number;
 }
 
 /** The persisted string→number mapping. Sorted by string id; plain data (§14). */
@@ -107,6 +119,21 @@ function validate(definition: ItemDefinition): void {
   if (!ITEM_CATEGORIES.includes(definition.category)) {
     throw new Error(`ItemRegistry: ${where} has category "${definition.category}", which is not one.`);
   }
+  const fuelSeconds = definition.fuelSeconds;
+  if (fuelSeconds !== undefined) {
+    if (!Number.isFinite(fuelSeconds) || fuelSeconds <= 0) {
+      throw new Error(`ItemRegistry: ${where} burns for ${fuelSeconds} seconds, which is not a duration.`);
+    }
+    if (fuelTicksOf(definition) < 1) {
+      throw new Error(`ItemRegistry: ${where} burns for ${fuelSeconds} seconds, which rounds to under one tick.`);
+    }
+  }
+}
+
+/** Burn time in whole ticks, converted once (§6 R3). `0` for a non-fuel. */
+function fuelTicksOf(definition: ItemDefinition): number {
+  const seconds = definition.fuelSeconds;
+  return seconds === undefined ? 0 : Math.round(seconds * TPS);
 }
 
 function validateMapping(mapping: ItemIdMapping): void {
@@ -147,6 +174,9 @@ export class ItemRegistry {
    */
   private readonly stackSizes: readonly number[];
 
+  /** Burn time in ticks, indexed by runtime id. `0` is "not a fuel". */
+  private readonly fuelTicks: readonly number[];
+
   constructor(definitions: readonly ItemDefinition[], options: ItemRegistryOptions = {}) {
     const assigned = options.assignedIds;
     if (assigned !== undefined) validateMapping(assigned);
@@ -162,6 +192,7 @@ export class ItemRegistry {
 
     const frozen: ItemDefinition[] = [];
     const stackSizes: number[] = [];
+    const fuelTicks: number[] = [];
 
     for (const definition of definitions) {
       validate(definition);
@@ -177,10 +208,12 @@ export class ItemRegistry {
       this.byItemId.set(itemId, value);
       this.ids.set(value.id, itemId);
       stackSizes[itemId] = value.stackSize;
+      fuelTicks[itemId] = fuelTicksOf(value);
     }
 
     this.definitions = Object.freeze(frozen);
     this.stackSizes = Object.freeze(stackSizes);
+    this.fuelTicks = Object.freeze(fuelTicks);
   }
 
   /** Every item, in content order. What the inventory panel follows. */
@@ -244,6 +277,17 @@ export class ItemRegistry {
       throw new Error(`ItemRegistry: no item has runtime id ${itemId}.`);
     }
     return stackSize;
+  };
+
+  /**
+   * How long one of `itemId` burns, in ticks; `0` when it is not a fuel.
+   *
+   * Unlike `stackSizeOf` an unknown id answers `0` rather than throwing: a
+   * machine asks this of whatever is in its fuel buffer, and "this is not
+   * fuel" is the honest answer to "what is this thing I cannot identify".
+   */
+  readonly fuelTicksOf = (itemId: ItemId): number => {
+    return this.fuelTicks[itemId] ?? 0;
   };
 
   /**

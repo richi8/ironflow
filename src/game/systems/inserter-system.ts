@@ -76,7 +76,6 @@ import {
   beltEntryPosition,
   type BeltEntity,
 } from '../entities/belt-entity.js';
-import { asChest } from '../entities/chest-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { ENTITY_TYPE_COUNT, EntityType } from '../entities/entity-types.js';
 import type { Entity } from '../entities/entity.js';
@@ -86,10 +85,10 @@ import {
   type InserterEntity,
 } from '../entities/inserter-entity.js';
 import { MachineStatus } from '../entities/machine-status.js';
-import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
-import { SlotInventory, type ItemSlots } from '../items/inventory.js';
-import type { BuildingRegistry, InserterConfig, StorageProperties } from '../registries/building-registry.js';
+import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
+import type { BuildingRegistry, InserterConfig } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
+import type { RecipeRegistry } from '../registries/recipe-registry.js';
 import { DIRECTION_OFFSETS, TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
 
 export interface InserterSystemOptions {
@@ -97,6 +96,8 @@ export interface InserterSystemOptions {
   readonly buildings: BuildingRegistry;
   /** Needed to turn a miner's resource into a runtime item id, and for stacks. */
   readonly items: ItemRegistry;
+  /** Needed to know what a machine beside it will accept (C15). */
+  readonly recipes: RecipeRegistry;
 }
 
 /** Is this a tile the occupancy index can be asked about without throwing? */
@@ -107,7 +108,16 @@ function inTileRange(x: number, y: number): boolean {
 export class InserterSystem {
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
-  private readonly items: ItemRegistry;
+
+  /**
+   * What every neighbour that is not a belt offers and accepts (C15).
+   *
+   * C14 had a branch here per kind of neighbour — miner, chest, nothing — and
+   * C15 would have added two more for the furnace's two buffers. They live in
+   * `items/item-port.ts` instead, so this system knows only "take one from the
+   * thing behind me, put one into the thing in front of me".
+   */
+  private readonly ports: PortContext;
 
   /**
    * Inserter timings by entity type, resolved once.
@@ -121,7 +131,7 @@ export class InserterSystem {
   constructor(options: InserterSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
-    this.items = options.items;
+    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
     this.configs = Object.freeze(
       Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) =>
         this.buildings.inserterFor(type as EntityType),
@@ -285,9 +295,10 @@ export class InserterSystem {
    * What this inserter would pick up, without taking it. `NO_ITEM` for nothing.
    *
    * A belt offers its **front** item — the one nearest its output end, which
-   * is `items[0]` by the invariant `belt-entity.ts` states. A container offers
-   * its lowest item id, because its slots are kept sorted and "whatever is
-   * first" must not depend on the order things were put in (§6 R4).
+   * is `items[0]` by the invariant `belt-entity.ts` states. Everything else
+   * offers whatever its output port offers, which is its lowest item id,
+   * because a container's slots are kept sorted and "whatever is first" must
+   * not depend on the order things were put in (§6 R4).
    */
   private sourceItem(inserter: InserterEntity): ItemId {
     const source = this.source(inserter);
@@ -296,19 +307,7 @@ export class InserterSystem {
     const belt = asBelt(source);
     if (belt !== null) return belt.items[0]?.itemId ?? NO_ITEM;
 
-    const miner = asMiner(source);
-    if (miner !== null) {
-      const output = minerOutput(miner);
-      if (output === null || !this.items.has(output.itemId)) return NO_ITEM;
-      return this.items.idOf(output.itemId);
-    }
-
-    if (this.buildings.storageFor(source.type) !== null) {
-      const chest = asChest(source);
-      return chest?.contents[0]?.[0] ?? NO_ITEM;
-    }
-
-    return NO_ITEM;
+    return outputPortOf(source, this.ports)?.peek() ?? NO_ITEM;
   }
 
   /**
@@ -325,23 +324,10 @@ export class InserterSystem {
     const belt = asBelt(source);
     if (belt !== null) return takeBeltFront(belt);
 
-    const miner = asMiner(source);
-    if (miner !== null) {
-      const output = minerOutput(miner);
-      if (output === null || !this.items.has(output.itemId)) return NO_ITEM;
-      if (takeMinerOutput(miner, 1) !== 1) return NO_ITEM;
-      return this.items.idOf(output.itemId);
-    }
-
-    const storage = this.buildings.storageFor(source.type);
-    if (storage !== null) {
-      const chest = asChest(source);
-      const itemId = chest?.contents[0]?.[0] ?? NO_ITEM;
-      if (chest === null || itemId === NO_ITEM) return NO_ITEM;
-      return this.container(chest.contents, storage).remove(itemId, 1) === 1 ? itemId : NO_ITEM;
-    }
-
-    return NO_ITEM;
+    const port = outputPortOf(source, this.ports);
+    if (port === null) return NO_ITEM;
+    const itemId = port.peek();
+    return itemId !== NO_ITEM && port.take(itemId, 1) === 1 ? itemId : NO_ITEM;
   }
 
   /* ---------------------------------------------------------------- *
@@ -356,13 +342,7 @@ export class InserterSystem {
     const belt = asBelt(target);
     if (belt !== null) return beltEntryPosition(belt, BELT_MAX_POSITION) >= 0;
 
-    const storage = this.buildings.storageFor(target.type);
-    if (storage !== null) {
-      const chest = asChest(target);
-      return chest !== null && this.container(chest.contents, storage).spaceFor(itemId) > 0;
-    }
-
-    return false;
+    return (inputPortOf(target, this.ports)?.spaceFor(itemId) ?? 0) > 0;
   }
 
   /** Put the held item into the destination. Returns whether it went. */
@@ -376,22 +356,7 @@ export class InserterSystem {
     // so an item handed to a belt never has to cross a tile it was never on.
     if (belt !== null) return beltAccept(belt, inserter.heldItem, BELT_MAX_POSITION);
 
-    const storage = this.buildings.storageFor(target.type);
-    if (storage !== null) {
-      const chest = asChest(target);
-      if (chest === null) return false;
-      return this.container(chest.contents, storage).add(inserter.heldItem, 1) === 1;
-    }
-
-    return false;
-  }
-
-  /**
-   * A container over an entity's own slots, written straight into authoritative
-   * state with nothing to copy back — see `chest-entity.ts`.
-   */
-  private container(contents: ItemSlots, storage: StorageProperties): SlotInventory {
-    return new SlotInventory({ slots: storage.slots, stackSizeOf: this.items.stackSizeOf, contents });
+    return inputPortOf(target, this.ports)?.give(inserter.heldItem, 1) === 1;
   }
 }
 

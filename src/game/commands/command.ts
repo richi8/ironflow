@@ -119,7 +119,9 @@ export type CommandRejectionReason =
   /** The machine holds none of the item that was asked for (C12 task 5). */
   | 'nothing_to_take'
   /** The machine has no input buffer, or none that accepts that item. */
-  | 'not_accepted';
+  | 'not_accepted'
+  /** The player's bag holds none of the item they tried to insert (C15). */
+  | 'nothing_to_give';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {

@@ -42,6 +42,7 @@ export enum MachineStatus {
   NoInput = 5,
   /** C15: a machine that could run if the player chose what it should make. */
   NoRecipe = 6,
+  NoFuel = 7,
 }
 
 /**
@@ -56,6 +57,7 @@ const MACHINE_STATUS_NAMES = Object.freeze([
   'no_power',
   'no_input',
   'no_recipe',
+  'no_fuel',
 ] as const);
 
 /** The name of a status, as a view model spells it. */

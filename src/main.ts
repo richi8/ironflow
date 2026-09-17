@@ -69,6 +69,7 @@ const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
   miner: 5,
   belt: 100,
   inserter: 20,
+  furnace: 10,
   chest: 10,
 });
 
@@ -127,7 +128,10 @@ function bootstrap(): void {
    * out of them mid-drag is the one shortage that makes the game feel broken
    * rather than constrained (C13). Twenty inserters is four per miner, which is
    * enough to wire a first factory and not enough to skip thinking about where
-   * they go (C14). It is still a **balance number** and still temporary
+   * they go (C14). Ten furnaces is two per miner, which is just over §15's
+   * 1.6 and is the first number here that comes out of the content table
+   * rather than out of the feel of the thing (C15). It is still a **balance
+   * number** and still temporary
    * in one respect — C16 makes buildings craftable, and a starting stock then
    * becomes a decision about the first five minutes rather than about whether
    * the game can be played at all.

@@ -11,7 +11,8 @@
  *
  * The branch is on **content**, never on an id or an entity type:
  * `definition.mining` is what makes something a miner, `definition.belt` a belt,
- * `definition.inserter` an inserter and `definition.storage` a container, so
+ * `definition.inserter` an inserter, `definition.storage` a container and
+ * `definition.production` a machine that runs recipes, so
  * the day C21 adds an electric miner, nothing here changes. That is the same rule `build-system.ts`
  * states in its header, kept true by giving the type-specific part its own
  * place to live rather than by care.
@@ -24,6 +25,7 @@ import { newBelt } from './belt-entity.js';
 import { newChest } from './chest-entity.js';
 import type { EntityInit } from './entity.js';
 import { newInserter } from './inserter-entity.js';
+import { newMachine } from './machine-entity.js';
 import { newMiner } from './miner-entity.js';
 
 /**
@@ -43,5 +45,6 @@ export function initialBuildingState(
   if (definition.belt !== undefined) return newBelt(x, y, rotation);
   if (definition.inserter !== undefined) return newInserter(x, y, rotation);
   if (definition.storage !== undefined) return newChest(x, y, rotation);
+  if (definition.production !== undefined) return newMachine(definition.entityType, x, y, rotation);
   return { type: definition.entityType, x, y, rotation };
 }

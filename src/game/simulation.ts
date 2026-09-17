@@ -10,11 +10,14 @@ import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
 import { ProductionCounters } from './production.js';
+import { RECIPES } from './data/recipes.js';
+import { RecipeRegistry } from './registries/recipe-registry.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
 import { HandSystem } from './systems/hand-system.js';
 import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
+import { ProductionSystem } from './systems/production-system.js';
 import { PlayerSystem } from './systems/player-system.js';
 import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
@@ -39,6 +42,7 @@ export interface SimulationOptions {
   readonly entities?: EntityStore;
   /** The item content table (C08). Defaulted from `data/items.ts`, like buildings. */
   readonly items?: ItemRegistry;
+  readonly recipes?: RecipeRegistry;
   /**
    * The player (C10). Defaulted to one standing at the origin, so a test that
    * cares about ticks and not about walking can still say `new Simulation({
@@ -81,6 +85,9 @@ export class Simulation {
    */
   readonly items: ItemRegistry;
 
+  /** What every machine in the game can make (C15). Built from `data/recipes.ts`. */
+  readonly recipes: RecipeRegistry;
+
   /**
    * The player character. Authoritative (§10), and the reason build range and
    * mining reach can be rules rather than suggestions (C10).
@@ -100,6 +107,13 @@ export class Simulation {
   private readonly builder: BuildSystem;
 
   private readonly miningSystem: MiningSystem;
+
+  /**
+   * Machines (C15), phase 4. One system for the furnace and for every machine
+   * after it: what a machine can make is content, not code — see
+   * `production-system.ts`.
+   */
+  private readonly productionSystem: ProductionSystem;
 
   /**
    * Belts (C13), phase 5. It keeps a derived downstream-first order of its own
@@ -160,6 +174,7 @@ export class Simulation {
     this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
     this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
     this.items = options.items ?? new ItemRegistry(ITEMS);
+    this.recipes = options.recipes ?? new RecipeRegistry(RECIPES, this.items);
     this.player =
       options.player ??
       new PlayerState({
@@ -180,20 +195,31 @@ export class Simulation {
       alerts: this.alerts,
       production: this.production,
     });
+    this.productionSystem = new ProductionSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+      recipes: this.recipes,
+      alerts: this.alerts,
+      production: this.production,
+    });
     this.beltSystem = new BeltSystem({
       entities: this.entities,
       buildings: this.buildings,
       items: this.items,
+      recipes: this.recipes,
     });
     this.inserterSystem = new InserterSystem({
       entities: this.entities,
       buildings: this.buildings,
       items: this.items,
+      recipes: this.recipes,
     });
     this.hands = new HandSystem({
       entities: this.entities,
       buildings: this.buildings,
       items: this.items,
+      recipes: this.recipes,
       player: this.player,
     });
     this.playerSystem = new PlayerSystem({
@@ -314,6 +340,12 @@ export class Simulation {
     // it was built rather than the one after.
     this.miningSystem.tick();
 
+    // Phase 4 — production. Machines burn a tick of fuel and advance a tick of
+    // progress (C15). After mining, so an ore that landed in a buffer this
+    // tick can be smelted in it; before the belts, so a plate finished this
+    // tick is on the belt in front of the furnace in the same tick.
+    this.productionSystem.tick();
+
     // Phase 5 — belts. Items move, hand off between belts, and are dropped on
     // by the machines beside them (C13). Downstream-first, so belt speed is a
     // property of the layout rather than of the order the belts were built in.
@@ -324,7 +356,7 @@ export class Simulation {
     // throughput is a property of the layout rather than of array order.
     this.inserterSystem.tick();
 
-    // Phases 2, 4 and 7 arrive with the chunks listed above.
+    // Phases 2 and 7 arrive with the chunks listed above.
 
     // Phase 8 — player. Movement and manual mining (C10). It runs after every
     // machine so that the world a step of walking is judged against is the one

@@ -8,6 +8,7 @@ import {
   NO_ITEM,
   type ItemDefinition,
 } from '../../src/game/registries/item-registry.js';
+import { TPS } from '../../src/game/simulation-clock.js';
 
 /**
  * The item registry. See ironflow.md C08 tasks 1–2.
@@ -153,7 +154,7 @@ describe('ItemRegistry validation', () => {
 });
 
 describe('the shipped item table', () => {
-  it('registers §15’s first six items with their stack sizes', () => {
+  it('registers §15’s shipped items with their stack sizes', () => {
     const registry = new ItemRegistry(ITEMS);
 
     expect(registry.all().map((item) => item.id)).toEqual([
@@ -163,9 +164,23 @@ describe('the shipped item table', () => {
       'stone',
       'iron_plate',
       'copper_plate',
+      'steel',
+      'brick',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);
+  });
+
+  it('burns coal for §15’s eight seconds, and nothing else at all', () => {
+    const registry = new ItemRegistry(ITEMS);
+    expect(registry.fuelTicksOf(registry.idOf('coal'))).toBe(8 * TPS);
+    for (const item of ITEMS) {
+      if (item.id === 'coal') continue;
+      expect(registry.fuelTicksOf(registry.idOf(item.id))).toBe(0);
+    }
+    // A machine asks this of whatever is in its fuel buffer, so an id it
+    // cannot identify answers "not fuel" rather than throwing.
+    expect(registry.fuelTicksOf(9999)).toBe(0);
   });
 
   it('gives every item its own sprite id', () => {

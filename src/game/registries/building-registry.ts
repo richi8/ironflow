@@ -21,6 +21,7 @@ import { ENTITY_TYPE_COUNT, entityTypeName, isEntityType, type EntityType } from
 import type { ItemStack } from '../items/item-stack.js';
 import { isBuildable, isTileType, tileProperties, type TileType } from '../world/tile.js';
 import { isRotation, type Rotation } from '../world/coordinates.js';
+import { isRecipeCategory, type RecipeCategory } from './recipe-registry.js';
 
 /**
  * How the build menu groups a building, and which colour its placeholder takes.
@@ -170,6 +171,29 @@ export interface StorageProperties {
   readonly slots: number;
 }
 
+/**
+ * What makes a building a machine that runs recipes (C15).
+ *
+ * Everything that separates a furnace from C16's assembler is in here, which
+ * is why `production-system.ts` can be written without naming either of them:
+ * the category picks the recipes it may run, the capacities size its buffers,
+ * and `fuelCapacity` decides whether it burns something or (C21) takes power.
+ *
+ * The capacities are per *item*, not slots: a machine's buffer is not a chest
+ * the player sorts, it is a few kinds of thing with a ceiling on each, and a
+ * ceiling is what makes backpressure reach the belt in front of it (§9).
+ */
+export interface ProductionProperties {
+  /** Which recipes this machine can run. §15 has smelting and crafting. */
+  readonly category: RecipeCategory;
+  /** Ceiling on each ingredient it holds. */
+  readonly inputCapacity: number;
+  /** Ceiling on each product it holds before it stalls with `output_full`. */
+  readonly outputCapacity: number;
+  /** Ceiling on each fuel it holds. Absent means it does not burn anything. */
+  readonly fuelCapacity?: number;
+}
+
 export interface BuildingDefinition {
   readonly id: string;
   readonly name: string;
@@ -204,6 +228,8 @@ export interface BuildingDefinition {
   readonly inserter?: InserterProperties;
   /** Present only on buildings that hold items for the player (C13). */
   readonly storage?: StorageProperties;
+  /** Present only on buildings that turn ingredients into products (C15). */
+  readonly production?: ProductionProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -223,6 +249,7 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   if (definition.belt !== undefined) Object.freeze(definition.belt);
   if (definition.inserter !== undefined) Object.freeze(definition.inserter);
   if (definition.storage !== undefined) Object.freeze(definition.storage);
+  if (definition.production !== undefined) Object.freeze(definition.production);
   return Object.freeze(definition);
 }
 
@@ -309,6 +336,16 @@ function validate(definition: BuildingDefinition): void {
     throw new Error(`BuildingRegistry: ${where} has ${storage.slots} slots; it must be whole and above 0.`);
   }
 
+  const production = definition.production;
+  if (production !== undefined) {
+    if (!isRecipeCategory(production.category)) {
+      throw new Error(`BuildingRegistry: ${where} runs "${production.category}" recipes, which is not a category.`);
+    }
+    checkCapacity(production.inputCapacity, `${where} input buffer`);
+    checkCapacity(production.outputCapacity, `${where} output buffer`);
+    if (production.fuelCapacity !== undefined) checkCapacity(production.fuelCapacity, `${where} fuel buffer`);
+  }
+
   if (definition.placement.onTerrain.length === 0) {
     throw new Error(`BuildingRegistry: ${where} accepts no terrain at all, so it could never be placed.`);
   }
@@ -331,6 +368,12 @@ function validate(definition: BuildingDefinition): void {
  * of ticks lands on the nearest one rather than accumulating a fractional
  * remainder that no two machines would agree on.
  */
+function checkCapacity(capacity: number, where: string): void {
+  if (!Number.isInteger(capacity) || capacity < 1) {
+    throw new Error(`BuildingRegistry: ${where} holds ${capacity}; it must be whole and above 0.`);
+  }
+}
+
 function ticksPerItem(mining: MiningProperties): number {
   return Math.round(TPS / mining.itemsPerSecond);
 }
@@ -391,11 +434,21 @@ export class BuildingRegistry {
 
   private readonly storageByType = new Map<EntityType, StorageProperties>();
 
+  private readonly productionByType = new Map<EntityType, ProductionProperties>();
+
+  /**
+   * Entity types that run recipes, ascending. What `ProductionSystem` walks,
+   * in a fixed order that does not depend on the content table's (§6 R4).
+   */
+  private readonly productionTypeList: readonly EntityType[];
+
   /**
    * Entity types whose buildings have an output buffer something else can
    * empty, ascending. C13 task 5's "back to the source machine" needs a list
    * of the machines a belt can be loaded from, and it has to be in a fixed
    * order (§6 R4) that does not depend on which building was defined first.
+   * A miner's mined ore and a furnace's finished plates are both such a
+   * buffer, so both kinds of building are in it.
    */
   private readonly outputTypes: readonly EntityType[];
 
@@ -436,16 +489,17 @@ export class BuildingRegistry {
       if (value.storage !== undefined) {
         this.storageByType.set(value.entityType, value.storage);
       }
+      if (value.production !== undefined) {
+        this.productionByType.set(value.entityType, value.production);
+      }
     }
 
     this.definitions = Object.freeze(frozen);
     // Built by walking the *type numbers*, not the definitions, so the order is
     // the enum's and not the content table's (§6 R4).
-    this.outputTypes = Object.freeze(
-      Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => type as EntityType).filter((type) =>
-        this.miningByType.has(type),
-      ),
-    );
+    const allTypes = Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => type as EntityType);
+    this.outputTypes = Object.freeze(allTypes.filter((type) => this.miningByType.has(type)));
+    this.productionTypeList = Object.freeze(allTypes.filter((type) => this.productionByType.has(type)));
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */
@@ -511,12 +565,36 @@ export class BuildingRegistry {
   }
 
   /**
+   * How this kind of building runs recipes, or null if it runs none (C15).
+   *
+   * This is also the answer to "is this entity a machine": `asMachine` asks it
+   * rather than testing the entity type, so C16's assembler becomes a machine
+   * by appearing in `data/buildings.ts` with a production config and nothing
+   * else (§19 rule 17).
+   */
+  productionFor(type: EntityType): ProductionProperties | null {
+    return this.productionByType.get(type) ?? null;
+  }
+
+  /** Every entity type that runs recipes, ascending by type number (C15). */
+  productionTypes(): readonly EntityType[] {
+    return this.productionTypeList;
+  }
+
+  /**
    * Every entity type with an output buffer, ascending by type number.
    *
    * What C13's belt system walks to unload machines onto the belts in front of
    * them. Content decides membership — a building has an output because it has
-   * `mining`, never because of its id (§19 rule 17) — and C15's furnace joins
-   * the list by gaining a recipe output rather than by editing a system.
+   * `mining`, never because of its id (§19 rule 17).
+   *
+   * C13 expected C15's furnace to join this list and it does **not**: §15's
+   * ratios are derived with inserters between machines and belts ("1 std
+   * inserter feeds 3.2 plate furnaces", "a belt is saturated by 16 miners *or*
+   * 8 std inserters"), and C15's acceptance chain puts an inserter on each
+   * side of the furnace. A machine that could drop its own output on a belt
+   * would make half of those inserters decoration. A *miner* stays direct
+   * because it has no input side and §15 counts it that way. See C15.
    */
   outputBufferTypes(): readonly EntityType[] {
     return this.outputTypes;

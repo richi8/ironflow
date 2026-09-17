@@ -18,7 +18,7 @@
  * unknown_entity  the machine is gone          — nothing to be said about it
  * out_of_reach    walk closer                  — the answer the player can act on
  * nothing_to_take / not_accepted               — about the buffer itself
- * inventory_full  your bag is full
+ * inventory_full / nothing_to_give             — about the bag
  * ```
  *
  * Reach is asked before anything about contents for the same reason C10's
@@ -28,40 +28,34 @@
  *
  * ## What counts as a buffer
  *
- * Content, never an id (§19 rule 17). A machine has an output buffer because
- * its building definition has `mining` on it — the same test `building-init.ts`
- * and `MiningSystem` already make — so C21's electric miner is a table entry
- * and nothing here changes. C13 adds the second kind of thing a player can
- * take from: anything with `storage` on its definition, which is a chest.
+ * Content, never an id (§19 rule 17) — and since C15, not even a branch here.
+ * A miner's mined ore, a chest's contents, an inserter's hand and a furnace's
+ * three buffers are all *ports* (`items/item-port.ts`), which is the one place
+ * that knows how a building holds things. This system asks a building for the
+ * end of the transfer it needs and moves items across it; C21's electric miner
+ * and C16's assembler are table entries and nothing here changes.
  *
- * C14 adds the third: an inserter's hand, which holds at most one item and is
- * takeable for the reason a chest is — a container the player can watch fill
- * and never empty is not a container, and an inserter stuck holding one item
- * with its destination demolished is the same problem one item wide.
- *
- * Nothing has an *input* buffer yet, so `insert` still refuses everything.
- * That refusal is the permanent answer for a miner; C15's furnace is the first
- * machine with somewhere to put an ingredient, and it is the chunk that fills
- * the arm in. A chest is filled by the belt running into it (C13) and emptied
- * by the take button, which is the loop C13's acceptance criteria describe.
+ * C15 also filled in `insert`, which C12 and C14 left refusing everything for
+ * want of anything in the game with an input buffer. `not_accepted` is now the
+ * *building's* answer rather than a standing one — a miner has no input port
+ * and a furnace refuses an item no smelting recipe wants — which is the same
+ * sentence it always was, now said by content.
  */
 
-import { asChest } from '../entities/chest-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { forEachFootprintTile, type Entity } from '../entities/entity.js';
-import { asInserter, inserterHolding } from '../entities/inserter-entity.js';
-import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
-import { SlotInventory } from '../items/inventory.js';
-import type { ItemStack } from '../items/item-stack.js';
+import { inputPortOf, outputPortOf, type PortContext, type PortStack } from '../items/item-port.js';
 import { MINE_RANGE_TILES, type PlayerState } from '../player/player-state.js';
 import { BuildingRegistry } from '../registries/building-registry.js';
-import { NO_ITEM, type ItemRegistry } from '../registries/item-registry.js';
+import type { ItemId, ItemRegistry } from '../registries/item-registry.js';
+import type { RecipeRegistry } from '../registries/recipe-registry.js';
 
 export interface HandSystemOptions {
   readonly entities: EntityStore;
   readonly buildings: BuildingRegistry;
   readonly items: ItemRegistry;
+  readonly recipes: RecipeRegistry;
   readonly player: PlayerState;
 }
 
@@ -71,11 +65,15 @@ export class HandSystem {
   private readonly items: ItemRegistry;
   private readonly player: PlayerState;
 
+  /** What each building holds and accepts — see `items/item-port.ts` (C15). */
+  private readonly ports: PortContext;
+
   constructor(options: HandSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
     this.items = options.items;
     this.player = options.player;
+    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
   }
 
   /**
@@ -114,32 +112,19 @@ export class HandSystem {
    * kind of thing. Ordered by item id for a chest and single for a miner, so
    * the inspector's rows never reorder under the player's cursor.
    */
-  outputsOf(entity: Entity): readonly ItemStack[] {
-    const miner = asMiner(entity);
-    if (miner !== null) {
-      const output = minerOutput(miner);
-      return output === null ? NO_STACKS : [output];
-    }
+  outputsOf(entity: Entity): readonly PortStack[] {
+    return outputPortOf(entity, this.ports)?.stacks() ?? NO_STACKS;
+  }
 
-    const chest = asChest(entity);
-    if (chest !== null && this.buildings.storageFor(entity.type) !== null) {
-      const stacks: ItemStack[] = [];
-      for (const [itemId, count] of chest.contents) {
-        if (this.items.isItemId(itemId)) stacks.push({ itemId: this.items.byId(itemId).id, count });
-      }
-      return stacks;
-    }
-
-    // An inserter's hand (C14). It is an output in the only sense that matters
-    // here — the player can see what is in it and take it back — and that is
-    // the answer to task 6's worry about an item held hostage by an inserter
-    // whose destination was demolished mid-swing.
-    const inserter = asInserter(entity);
-    if (inserter !== null && inserterHolding(inserter) && this.items.isItemId(inserter.heldItem)) {
-      return [{ itemId: this.items.byId(inserter.heldItem).id, count: 1 }];
-    }
-
-    return NO_STACKS;
+  /**
+   * What is waiting on a machine's *input* side: ingredients, then fuel.
+   *
+   * The inspector's INPUT section, which was empty for every building in the
+   * game until C15's furnace. It is read-only from the panel — the TAKE button
+   * belongs to outputs — but the player can fill it with `insertItems`.
+   */
+  inputsOf(entity: Entity): readonly PortStack[] {
+    return inputPortOf(entity, this.ports)?.stacks() ?? NO_STACKS;
   }
 
   /**
@@ -149,44 +134,8 @@ export class HandSystem {
    * and answered from `outputsOf` so there is one definition of "what is in
    * there" rather than a second one that can disagree with the panel.
    */
-  private availableOf(entity: Entity, itemId: string): number {
-    for (const stack of this.outputsOf(entity)) {
-      if (stack.itemId === itemId) return stack.count;
-    }
-    return 0;
-  }
-
-  /**
-   * Take `amount` of one item out of a machine. Returns what actually left.
-   *
-   * The write half of `outputsOf`, and the reason both are here: a miner's
-   * count and a chest's array are two ways of storing the same idea, and the
-   * two places that empty them — this and C13's belt system — must not each
-   * carry their own copy of how.
-   */
-  private removeFrom(entity: Entity, itemId: string, amount: number): number {
-    const miner = asMiner(entity);
-    if (miner !== null) return takeMinerOutput(miner, amount);
-
-    // Taking the item out of an inserter's hand leaves it mid-swing with
-    // nothing to deliver, which `InserterSystem` treats as a completed drop.
-    const inserter = asInserter(entity);
-    if (inserter !== null) {
-      if (!inserterHolding(inserter) || amount < 1) return 0;
-      inserter.heldItem = NO_ITEM;
-      return 1;
-    }
-
-    const chest = asChest(entity);
-    const storage = this.buildings.storageFor(entity.type);
-    if (chest === null || storage === null) return 0;
-
-    const inventory = new SlotInventory({
-      slots: storage.slots,
-      stackSizeOf: this.items.stackSizeOf,
-      contents: chest.contents,
-    });
-    return inventory.remove(this.items.idOf(itemId), amount);
+  private availableOf(entity: Entity, itemId: ItemId): number {
+    return outputPortOf(entity, this.ports)?.count(itemId) ?? 0;
   }
 
   /**
@@ -203,10 +152,10 @@ export class HandSystem {
     // inventory, which keys on runtime ids. It is the same "there is none of
     // that in there" from the player's side, so it needs no reason of its own.
     if (!this.items.has(itemId)) return 'nothing_to_take';
-    const available = this.availableOf(entity, itemId);
+    const runtimeId = this.items.idOf(itemId);
+    const available = this.availableOf(entity, runtimeId);
     if (available <= 0) return 'nothing_to_take';
 
-    const runtimeId = this.items.idOf(itemId);
     const space = this.player.inventory.spaceFor(runtimeId);
     if (space <= 0) return 'inventory_full';
 
@@ -215,24 +164,44 @@ export class HandSystem {
 
     // Only by what the bag actually accepted — the remainder stays in the
     // machine rather than evaporating between the two.
-    this.removeFrom(entity, itemId, moved);
+    outputPortOf(entity, this.ports)?.take(runtimeId, moved);
     return null;
   }
 
   /**
-   * Put items from the player's bag into a machine's input buffer.
+   * Put items from the player's bag into a building that takes them: coal or
+   * ore into C15's furnace, anything into a chest.
    *
-   * Refuses everything today, with the reason that will stay true for a miner
-   * forever: it has an output and no input. C15's furnace is the first machine
-   * with somewhere to put an ingredient, and it fills this in.
+   * C12 refused everything here, because the only machine in the game had an
+   * output and no input. What has not changed is *who decides*: `not_accepted`
+   * still comes from the building — a miner has no input port, and a furnace
+   * refuses an item no recipe of its category wants — rather than from a list
+   * of ids kept here (§19 rule 17).
+   *
+   * Partial like `take`: what fits moves, and only moving nothing is a
+   * rejection. The bag is debited by exactly what the building accepted.
    */
-  insert(entityId: EntityId, _itemId: string, _amount: number): CommandRejectionReason | null {
+  insert(entityId: EntityId, itemId: string, amount: number): CommandRejectionReason | null {
     const entity = this.entities.get(entityId);
     if (entity === undefined) return 'unknown_entity';
     if (!this.canReach(entity)) return 'out_of_reach';
-    return 'not_accepted';
+
+    const port = inputPortOf(entity, this.ports);
+    if (port === null) return 'not_accepted';
+    if (!this.items.has(itemId)) return 'not_accepted';
+
+    const runtimeId = this.items.idOf(itemId);
+    if (port.spaceFor(runtimeId) <= 0) return 'not_accepted';
+
+    const held = this.player.inventory.count(runtimeId);
+    if (held <= 0) return 'nothing_to_give';
+
+    const moved = port.give(runtimeId, Math.min(amount, held));
+    if (moved === 0) return 'not_accepted';
+    this.player.inventory.remove(runtimeId, moved);
+    return null;
   }
 }
 
 /** Nothing to take. Shared and frozen: most buildings, most of the time. */
-const NO_STACKS: readonly ItemStack[] = Object.freeze([]);
+const NO_STACKS: readonly PortStack[] = Object.freeze([]);

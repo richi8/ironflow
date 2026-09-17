@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C14 complete.** Milestone B in progress. Next: C15 — furnace and the first vertical slice. |
+| **Status** | **C15 complete — the §20 milestone gate after C15 is passed: the vertical slice runs unattended.** Milestone B complete. Next: C16 — assembler and multi-input recipes. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C15 — Furnace and the first vertical slice** |
+| **First action** | Chunk **C16 — Assembler & multi-input recipes** |
 
 ---
 
@@ -567,7 +567,9 @@ export type Command =
 because somebody clicked, as against C14's inserter, which is a building
 running in phase 6. Taking is real; **inserting is validated and refused**,
 because a miner's buffer is an output and nothing else in the game has an input
-buffer until C15's furnace. See C12's deviations.
+buffer until C15's furnace. See C12's deviations. **C15 implemented it**: the
+refusal now comes from the building — a miner has no input port, a furnace
+refuses what no smelting recipe wants — rather than being a standing answer.
 
 **Implementation note (C10).** Two refinements, both forced by the fact that
 commands arrive at *frame* rate and take effect at *tick* rate.
@@ -3154,6 +3156,151 @@ and no DOM**.
 
 **Out of scope.** Electric furnaces (C21), recipe selection UI (C16), modules.
 
+**Decisions taken while implementing this chunk.**
+
+- **One `MachineEntity`, not a `FurnaceEntity`.** Task 2 says the production
+  system must contain no per-recipe special cases; the same argument applies
+  one level up, because a branch on "is this a furnace" is a branch C16, C20
+  and C21 each have to find and extend. What separates a furnace from an
+  assembler is `ProductionProperties` in `data/buildings.ts` — recipe
+  category, buffer sizes, and whether it burns anything — so `asMachine` asks
+  the *registry* rather than the entity type, and C16's assembler becomes a
+  machine by appearing in the content table.
+
+- **Ingredients are taken when a craft starts and the product is held when it
+  finishes.** `progressTicks` sitting at `durationTicks` *is* the "holding a
+  finished item" state (task 6), so there is no field for it and no way for
+  the two to disagree. The ingredients for the next craft are not touched
+  until the held one lands, which is what makes the stall reversible: unblock
+  the output and the machine carries on in the same tick.
+
+- **Fuel is checked before the ingredients are consumed.** A furnace that runs
+  dry between crafts has not eaten an ore it cannot smelt. Task 4's "progress
+  pauses rather than resetting" is the same instinct one step earlier: a
+  supply gap costs time, never work already done.
+
+- **A saturated machine completes a craft every `durationTicks` exactly.** The
+  craft that finishes at the end of a tick delivers *in that tick*, leaving
+  `progressTicks` at 0 with no idle tick before the next one — the same
+  arrangement C14 made for the inserter's `Returning` stage, for the same
+  reason. 3.2 s is 96 ticks and 96 ticks is what a fed furnace takes, which is
+  what the ±2% acceptance criterion is measured against.
+
+- **A furnace picks its recipe from the lowest item id in its input buffer**,
+  not from what arrived first. Arrival order is not serialized, so a furnace
+  holding both ore and stone must choose the same recipe after a reload as
+  before it — §6 R6's "resolve contention by id" applied to items rather than
+  entities. `RecipeRegistry.forInput` refuses to answer at all when two
+  recipes in a category want the same ingredient, which is how the same index
+  will serve C16's player-chosen crafting without a special case for it.
+
+- **Fuel is a property of the item, not of the furnace.** `fuelSeconds: 8` sits
+  on coal in `data/items.ts`, so C21's generator burns the same coal for the
+  same eight seconds without either building carrying a table of what it
+  accepts. It converts to ticks once, at registry build (§6 R3).
+
+- **A belt still does not load a machine, and a machine does not unload onto a
+  belt.** Two comments written in C13 predicted the opposite — that the furnace
+  would gain an arm in `belt-system.ts` and join `outputBufferTypes` — and both
+  were wrong on the plan's own evidence: §15 derives its ratios with an
+  inserter in that gap ("1 std inserter feeds 3.2 plate furnaces"; "a belt is
+  saturated by 16 miners **or** 8 std inserters"), and C15's acceptance chain
+  puts an inserter on each side of the furnace. A belt that could load a
+  machine at 8 items/s would make half of those inserters decoration. A
+  *miner* keeps its direct drop, because it has no input side and §15 counts
+  it that way. Both comments now say so, beside the code that implements it.
+
+- **`items/item-port.ts` exists, which is C14's "noticed, not fixed" paid
+  off.** C14 ended with three systems each carrying their own copy of "how an
+  item gets into a chest" and named C15 as the chunk that should unify them,
+  because C15 had to touch all three. A **port** is one end of a transfer, in
+  two interfaces rather than one — `ItemSource` and `ItemSink` — because the
+  two directions are genuinely different sets of buildings, and splitting them
+  means every port that exists has a caller for every method it implements. A
+  miner offers and never accepts; a furnace's input accepts and never offers;
+  only a chest does both. Belts stay out of it on purpose: an item on a belt
+  has a *position* (§9), and flattening that into "add one item" would make a
+  belt a container with a count.
+
+- **The player can hand-feed a furnace, and `insertItems` finally does
+  something.** C12 wrote the refusal and said the furnace would fill it in.
+  What did not change is who decides: `not_accepted` comes from the building —
+  no input port, or an item no recipe of its category wants — rather than from
+  a list kept in `HandSystem`.
+
+**Deviations.**
+
+- **Task 1's `RecipeDefinition` is split in two**, the way `BuildingDefinition`
+  already is. Content authors `seconds` and string item ids because that is how
+  §15's table reads; the registry builds a frozen `Recipe` with `durationTicks`
+  and runtime `ItemId`s, so no system resolves a string per tick. The task's
+  comment — "converted from seconds at registry build" — is what this is.
+
+- **A recipe has a numeric `RecipeId`, but there is no saved id mapping.**
+  A machine's `recipe` field is a number with `NO_RECIPE` for none, exactly as
+  `heldItem` is an `ItemId` with `NO_ITEM` (C05 refuses `undefined` in an
+  entity). Unlike items, C24 will write the recipe's *string* id into the save
+  and read it back through `get`: one field per machine does not earn a
+  translation table, and a save that names its recipes is one a human can read.
+
+- **`MachineStatus` gained `NoFuel`**, and `AlertType` gained
+  `machine_no_fuel`. The status is task 4's; the alert follows C11's miner
+  precedent — it fires on the transition, not every tick — because §13 asks a
+  stall to explain itself and "it stopped an hour ago and I never noticed" is
+  the failure that makes a factory game feel arbitrary.
+
+- **C15 ships all four of §15's smelting recipes, not only `smelt_iron`.**
+  Task 5 names the first one; the other three are content in the same table and
+  the chunk's central claim is that the system does not know one recipe from
+  another — four rows test that better than one, and `smelt_steel`'s five-plate
+  input is the only multi-ingredient recipe the game will have before C16.
+  `steel` and `brick` join `data/items.ts` under that file's existing rule: an
+  item arrives with the recipe that makes it. Both also gained a palette token,
+  because without one they would have drawn as the same grey box.
+
+- **The furnace has four rotations**, although a 2×2 footprint looks the same
+  in all of them. Rotation is what an inserter and the placement ghost read to
+  face it, and a building that cannot be turned is a building the player
+  fights with. It costs nothing: `normalizeRotation` already handles it.
+
+- **The three buffer capacities are 50 each** — one stack of ore in, one of
+  plates out, and 400 seconds of coal. **Balance numbers** for C20, and the
+  ceiling that makes backpressure reach the belt (§9).
+
+- **The starting kit gained 10 furnaces**, two per miner against §15's 1.6.
+  Another balance number, and the first one here that comes out of the content
+  table rather than out of the feel of the thing.
+
+- **`rejected: 'nothing_to_give'` was added** for an `insertItems` whose player
+  is not carrying the item — the other half of `nothing_to_take`, which said
+  the wrong thing about the wrong container.
+
+**Acceptance, as tested.**
+
+- `tests/integration/vertical-slice.test.ts` builds
+  `iron patch -> miner -> belt -> inserter -> furnace -> inserter -> chest`
+  **and** a second `coal patch -> miner -> belt -> inserter -> furnace` chain
+  entirely from `build` commands, then runs twenty simulated minutes without
+  touching anything. The coal chain is not decoration: a hand-fed furnace
+  cannot make the "unattended" claim. Plates arrive at 0.3125/s ±2% over the
+  second ten minutes, nothing is lost, a full chest stalls the line all the way
+  back to the miner's buffer, and two identical builds produce identical state.
+  The §6 R8 round-trip test is written and skipped until C24.
+
+**Noticed, not fixed.**
+
+- **`ProductionRate`'s window is 300 ticks**, which at 0.3125 plates a second
+  is three plates: the furnace's rate in the inspector is honest but visibly
+  coarse, and it flickers between roughly 12 and 24 per minute. A miner at 0.5
+  a second has the same problem half as badly and C12 did not notice. The fix
+  is a window in *items* rather than ticks, or a longer one for slow machines;
+  C20 is where a number that reads wrong on screen matters.
+- **`MachineInputPort.route` decides fuel-before-ingredient** for an item that
+  is both, and no item in v1 is both. If C20 ever makes something smeltable
+  that also burns, that line is the one to look at.
+- The inspector has no INSERT button, so `insertItems` is reachable only from
+  a command. C16 builds the recipe panel and is the natural place for it.
+
 ---
 
 # Milestone C — Factory game
@@ -3874,6 +4021,11 @@ player bag        = 30 slots
 
 13 items. Add the 14th only if a recipe needs it.
 
+**Fuel.** `coal` burns for **8 s** in any machine with a fuel buffer. It is a
+property of the item (`fuelSeconds` in `data/items.ts`), not of the furnace, so
+C21's generator burns it for the same eight seconds without a table of its own
+(C15). Nothing else in v1 burns.
+
 ### Recipes
 
 | id | inputs | output | time | machine |
@@ -3928,7 +4080,7 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | deterministic round-robin |
 | `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | 13 kW | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
-| `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal |
+| `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
 | `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | 150 kW | recipe selectable, speed 0.5 |
 | `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s |
 | `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8, supply area 5 |
@@ -4069,6 +4221,7 @@ full chain producing data cores -> lab -> research complete    (C22)
 2. Determinism rerun hash (C18) — protects the simulation.
 3. Save round-trip equality (C24) — protects saves.
 4. The C15 vertical-slice chain — protects the game.
+   (`tests/integration/vertical-slice.test.ts`, written in C15.)
 
 If a refactor breaks one of these, the refactor is wrong. Do not update the test
 to match the new behaviour without an explicit, reasoned decision recorded in the
@@ -4203,7 +4356,7 @@ Recommended next chunk
 | Gate | Condition |
 |---|---|
 | After C07 | The prototype is navigable and buildings can be placed. **Passed.** |
-| After C15 | **The vertical slice runs unattended.** If it does not, nothing after this matters. |
+| After C15 | **The vertical slice runs unattended.** If it does not, nothing after this matters. **Passed** — twenty simulated minutes, two mining chains, plates at 0.3125/s ±2%. |
 | After C18 | **Determinism holds.** Do not build worldgen on a nondeterministic simulation. |
 | After C20 | **The game is fun.** Answered honestly, in writing. Failing this means staying in C20. |
 | After C24 | The save round-trip determinism test passes. |

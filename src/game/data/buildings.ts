@@ -102,6 +102,22 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     sprite: 'inserter',
   },
   {
+    id: 'furnace',
+    name: 'Furnace',
+    entityType: EntityType.Furnace,
+    category: 'production',
+    size: { width: 2, height: 2 },
+    rotationCount: 4,
+    buildCost: [{ itemId: 'furnace', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // Rotation picks the side finished plates fall out of onto a belt, exactly
+    // as it does for a miner; the footprint is square either way. The three
+    // fifties are **balance numbers** for C20: one stack of ore in, one of
+    // plates out, and enough coal that a furnace is not a chore to feed.
+    production: { category: 'smelting', inputCapacity: 50, outputCapacity: 50, fuelCapacity: 50 },
+    sprite: 'building:production:FU:2x2:2',
+  },
+  {
     id: 'chest',
     name: 'Chest',
     entityType: EntityType.Chest,

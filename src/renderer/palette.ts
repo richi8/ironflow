@@ -56,6 +56,11 @@ export const PALETTE = Object.freeze({
   copper: '#c96a3a',
   coal: '#2b3242',
   stone: '#9aa3ad',
+
+  /* smelted goods (C15). A plate takes its ore's colour — `item:iron_plate`
+     strips the suffix — so only the two that are nobody's ore need their own. */
+  steel: '#b8c4d0',
+  brick: '#a8543a',
 });
 
 /** Every colour token the renderer may name. */

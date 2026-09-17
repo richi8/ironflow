@@ -66,14 +66,13 @@ import {
   type BeltEntity,
   type BeltItem,
 } from '../entities/belt-entity.js';
-import { asChest } from '../entities/chest-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { ENTITY_TYPE_COUNT, EntityType } from '../entities/entity-types.js';
 import { forEachOutputTile, type Entity, type EntityId } from '../entities/entity.js';
-import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
-import { SlotInventory } from '../items/inventory.js';
-import type { BeltConfig, BuildingRegistry, StorageProperties } from '../registries/building-registry.js';
-import type { ItemId, ItemRegistry } from '../registries/item-registry.js';
+import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
+import type { BeltConfig, BuildingRegistry } from '../registries/building-registry.js';
+import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
+import type { RecipeRegistry } from '../registries/recipe-registry.js';
 import { DIRECTION_OFFSETS, TILE_MAX, TILE_MIN } from '../world/coordinates.js';
 
 export interface BeltSystemOptions {
@@ -81,6 +80,8 @@ export interface BeltSystemOptions {
   readonly buildings: BuildingRegistry;
   /** Needed to turn a miner's resource into a runtime item id, and for stacks. */
   readonly items: ItemRegistry;
+  /** Part of the port context; belts never look a recipe up themselves (C15). */
+  readonly recipes: RecipeRegistry;
 }
 
 /** Is this a tile the occupancy index can be asked about without throwing? */
@@ -91,7 +92,9 @@ function inTileRange(x: number, y: number): boolean {
 export class BeltSystem {
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
-  private readonly items: ItemRegistry;
+
+  /** What the buildings at either end of a belt hold — see `items/item-port.ts`. */
+  private readonly ports: PortContext;
 
   /**
    * Belt speed by entity type, resolved once.
@@ -111,7 +114,7 @@ export class BeltSystem {
   constructor(options: BeltSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
-    this.items = options.items;
+    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
     this.beltConfigs = Object.freeze(
       Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => this.buildings.beltFor(type as EntityType)),
     );
@@ -207,12 +210,12 @@ export class BeltSystem {
       return beltAccept(next, item.itemId, Math.min(desired, BELT_MAX_POSITION));
     }
 
-    const storage = this.buildings.storageFor(target.type);
-    if (storage !== null) return this.store(target, storage, item.itemId, 1) === 1;
-
-    // A miner, or anything else with no way in. C15's furnace is the first
-    // machine with an input buffer and adds its arm here.
-    return false;
+    // Containers only. C13 expected C15's furnace to gain an arm here and it
+    // deliberately did not: a belt that could load a machine directly would
+    // carry 8 items/s into it, and every ratio in §15 is derived with an
+    // inserter's 1 item/s in that gap. A furnace is fed by an inserter.
+    if (this.buildings.storageFor(target.type) === null) return false;
+    return this.store(target, item.itemId, 1) === 1;
   }
 
   /** The entity on the tile a belt points at, or undefined for nothing usable. */
@@ -234,19 +237,14 @@ export class BeltSystem {
   /**
    * Put items into a container. Returns how many actually went in.
    *
-   * The container is built over the entity's own `contents` array, so this
-   * writes straight into authoritative state with nothing to copy back — see
-   * `chest-entity.ts` on why an entity cannot simply hold a `SlotInventory`.
+   * The port is built over the entity's own `contents` array, so this writes
+   * straight into authoritative state with nothing to copy back — see
+   * `chest-entity.ts` on why an entity cannot simply hold a `SlotInventory`,
+   * and `items/item-port.ts` for why all three systems that do this now ask
+   * the same code (C15).
    */
-  private store(entity: Entity, storage: StorageProperties, itemId: ItemId, amount: number): number {
-    const chest = asChest(entity);
-    if (chest === null) return 0;
-    const inventory = new SlotInventory({
-      slots: storage.slots,
-      stackSizeOf: this.items.stackSizeOf,
-      contents: chest.contents,
-    });
-    return inventory.add(itemId, amount);
+  private store(entity: Entity, itemId: ItemId, amount: number): number {
+    return inputPortOf(entity, this.ports)?.give(itemId, amount) ?? 0;
   }
 
   /**
@@ -272,15 +270,13 @@ export class BeltSystem {
   }
 
   private unload(machine: Entity): void {
-    // A miner's buffer is a bare count whose item is implied by its resource
-    // (C11), so reading it is miner-shaped. C15's furnace holds a real buffer
-    // and gains its own arm here, exactly as it does in `HandSystem`.
-    const miner = asMiner(machine);
-    if (miner === null) return;
-
-    const output = minerOutput(miner);
-    if (output === null || !this.items.has(output.itemId)) return;
-    const itemId = this.items.idOf(output.itemId);
+    // Whatever its output port offers — a miner's mined ore, in v1, because a
+    // miner is the only building `outputBufferTypes` contains. See the note
+    // there on why C15's furnace is not in it.
+    const port = outputPortOf(machine, this.ports);
+    if (port === null) return;
+    const itemId = port.peek();
+    if (itemId === NO_ITEM) return;
 
     const definition = this.buildings.forEntityType(machine.type);
     let delivered = false;
@@ -297,7 +293,7 @@ export class BeltSystem {
       if (beltAccept(belt, itemId, BELT_MAX_POSITION)) delivered = true;
     });
 
-    if (delivered) takeMinerOutput(miner, 1);
+    if (delivered) port.take(itemId, 1);
   }
 
   /* ---------------------------------------------------------------- *

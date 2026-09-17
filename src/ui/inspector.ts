@@ -69,6 +69,7 @@ const STATUS_TEXT: Readonly<Record<MachineStatus, string>> = Object.freeze({
   no_power: 'No power',
   no_input: 'Missing ingredients',
   no_recipe: 'No recipe set',
+  no_fuel: 'Out of fuel — progress is paused, not lost',
 });
 
 /** Which of §11's status tokens each one is painted in. */
@@ -83,6 +84,7 @@ const STATUS_TONE: Readonly<Record<MachineStatus, StatusTone>> = Object.freeze({
   no_input: 'warn',
   no_recipe: 'warn',
   // Stopped for a reason that will not fix itself without moving something.
+  no_fuel: 'warn',
   no_resource: 'danger',
   no_power: 'danger',
 });

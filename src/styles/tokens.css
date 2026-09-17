@@ -45,6 +45,9 @@
   --if-copper: #c96a3a;
   --if-coal: #2b3242;
   --if-stone: #9aa3ad;
+  /* smelted goods (C15) — a plate is its ore, a brick and steel are their own */
+  --if-steel: #b8c4d0;
+  --if-brick: #a8543a;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

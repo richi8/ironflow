@@ -19,7 +19,7 @@
 import type { EntityId } from '../entities/entity.js';
 
 /** What happened. One name per kind, because a toast has to say which. */
-export type AlertType = 'miner_no_resource';
+export type AlertType = 'miner_no_resource' | 'machine_no_fuel';
 
 /**
  * It carries the tile as well as the entity id because the id alone is not

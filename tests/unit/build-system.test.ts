@@ -109,6 +109,7 @@ describe('BuildingRegistry', () => {
       'miner',
       'belt',
       'inserter',
+      'furnace',
       'chest',
     ]);
   });
