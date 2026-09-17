@@ -12,7 +12,7 @@ import { BuildSystem } from '../../src/game/systems/build-system.js';
 import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, SOUTH, TILE_MAX, WEST, type Rotation } from '../../src/game/world/coordinates.js';
 import { TileType } from '../../src/game/world/tile.js';
-import { createPlaygroundGenerator } from '../../src/game/world/world-generator.js';
+import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 
 /**
@@ -583,13 +583,16 @@ describe('ItemCounts', () => {
 
 describe('the playground world', () => {
   /**
-   * The scaffolding that makes three of this chunk's acceptance criteria
-   * possible to *look at* (§20). The checkerboard has neither water nor ore, so
-   * "rejected on water" and "rejected without resources" could be tested and
-   * never seen. This pins that the world the running game boots into still has
-   * both, in reach of the starting camera.
+   * The fixture world the rejection cases are stated against.
+   *
+   * The checkerboard has neither water nor ore, so "rejected on water" and
+   * "rejected without resources" would have nowhere to happen. Until C19 this
+   * was also the world the running game booted into; it now boots into a
+   * generated one, and what the guarantee has become — ore of every kind
+   * within reach of spawn, on buildable land — is C19's starting-area
+   * validation and is tested there.
    */
-  it('puts water and ore where the first minute of play can reach them', () => {
+  it('rejects placement on water and on bare ground, at known coordinates', () => {
     const world = new World(createPlaygroundGenerator());
     const buildings = new BuildingRegistry(BUILDINGS);
     const entities = new EntityStore({ footprintOf: buildings.footprintOf });

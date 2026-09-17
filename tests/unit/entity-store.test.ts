@@ -14,7 +14,7 @@ import {
 } from '../../src/game/entities/entity.js';
 import { ENTITY_TYPE_COUNT, EntityType, entityTypeName, isEntityType } from '../../src/game/entities/entity-types.js';
 import { Simulation } from '../../src/game/simulation.js';
-import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { createCheckerboardGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { EAST, NORTH, SOUTH, WEST, type Rotation } from '../../src/game/world/coordinates.js';
 

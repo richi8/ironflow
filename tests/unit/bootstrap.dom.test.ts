@@ -4,7 +4,7 @@ import { DebugOverlay } from '../../src/debug/debug-overlay.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { TPS } from '../../src/game/simulation-clock.js';
-import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { createCheckerboardGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { CanvasSurface } from '../../src/platform/canvas-surface.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';

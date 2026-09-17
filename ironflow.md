@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C18 complete — §6 is a tested invariant. The gate is open.** Next: C19 — procedural world generation. |
+| **Status** | **C19 complete — a new seed is a new run.** Next: C20 — content & balance pass ⛔ the stop-and-tune gate. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C19 — Procedural world generation** |
+| **First action** | Chunk **C20 — Content & balance pass** |
 
 ---
 
@@ -1390,7 +1390,10 @@ or noise stub). Rendering.
    world-chunk boundary in stone and anchors an 8-tile checkerboard to absolute
    coordinates, so the two things C02 must get right — no seams, and a negative
    half that is continuous rather than mirrored — are visible by eye the moment
-   C03 draws anything.
+   C03 draws anything. **C19 did replace it**, and the prediction held: the
+   file's contents changed and `ChunkGenerator` did not. The checkerboard moved
+   to `tests/fixtures/world-fixtures.ts`, where half the suite still wants a
+   world it can state facts about.
 
 `Simulation` now takes a `World` in its constructor and exposes it read-only,
 per §4: every piece of authoritative state hangs off the simulation, and the
@@ -2298,6 +2301,10 @@ stability, buffer-vs-slot semantics.
   until it drops below a full tile's worth. **C19 should revisit this** if patch
   richness ends up varying by more than about 2x; until then a patch is at most
   one full tile per square and the scale is exact.
+  **Resolved in C19:** it does not. The generator's richest tile is capped at
+  exactly two nominal tiles, and a test pins that, so the buckets stay as they
+  are and the second array is never paid for. The only cost is that the richest
+  patches in the world read as full until they are half mined.
 - **Ore is drawn by the terrain layer, into the same cached bitmap.** A patch is
   not an entity (task 1), so it has no business in the entity layer, and caching
   it costs nothing extra: `consumeResource` bumps the world chunk's `revision`,
@@ -3954,6 +3961,137 @@ over 100 seeds; determinism across the save round-trip; performance benchmark.
 
 **Out of scope.** Biomes with gameplay effects, rivers, cliffs as pathing
 obstacles, decorative props.
+
+**Decisions taken while implementing this chunk.**
+
+- **Patches come from a jittered grid, not from a thresholded noise field**
+  (task 3). A noise field has no notion of a *patch*, so it cannot vary
+  anything per patch — every blob it produces has the same size distribution
+  and the same roundness, and richness could only be a function of position
+  rather than of the deposit. Task 3's own next sentence is that per-patch
+  variation in size, shape and richness matters more than patch count, so the
+  grid is what the task actually asks for: one cell of one resource's grid
+  holds at most one deposit, whose position, radius, aspect, orientation and
+  richness all come off a stream seeded by `hash3(seed, cellX, cellY,
+  resource)`. The low-frequency noise the task names is still here, doing the
+  two jobs it is good at — roughening each deposit's edge so it does not read
+  as an ellipse, and deciding **how many** deposits a region holds.
+- **The density field is the fix for a map that was confetti.** Without it
+  every cell is an independent coin flip and all four ores are evenly
+  interleaved everywhere: no direction is worth walking in and no piece of
+  ground is worth more than any other, which fails pillar 4 on a map that
+  technically satisfies every other criterion. With it the map has iron
+  country and copper country, and the good spots are the seams. It is also
+  what makes starting-area validation worth having rather than a formality —
+  a spawn that passes it is a spawn on one of those seams.
+- **Distance buys size and richness, and costs count.** Task 4 asks for
+  patches that get richer and larger further out. They do — 1.4× the radius
+  and 2× the peak at 1,024 tiles — and they also get *rarer*, by a factor of
+  about three. Measured: 15% ore coverage at the origin with a mean of 164
+  units a tile, against 8% at a thousand tiles with a mean of 286. The total
+  ore under a distant square mile is about what it is at home, concentrated
+  into a third as many places, which is what makes the far patch worth a long
+  belt run: there is not another one behind it. It also keeps the starting
+  area dense enough for task 5's guarantees to be reachable without making
+  the whole world a sprinkle of ore.
+- **Peak richness is capped at exactly 2× nominal**, because C09 fixed the
+  four ore-pile fullness buckets to an absolute scale and asked C19 to revisit
+  that "if patch richness ends up varying by more than about 2x". It does not,
+  and a test pins it. The alternative — a second `Uint16Array` per world chunk
+  recording each tile's original amount — is 2 KB per world chunk and a field
+  in every save, to answer a question only ever asked about a pixel.
+- **Spawn moved to the origin** from C06's (6, 6). The distance scaling is
+  measured from the origin, so spawning anywhere else would put the player on
+  ore already richer than the generator's own baseline.
+- **A "patch of ≥20 tiles" is measured by flood fill, not by counting tiles.**
+  Twenty iron tiles scattered as four five-tile slivers is not a patch a 2×2
+  miner can stand on. The validator counts connected four-neighbour regions.
+- **`createStartingWorld` throws when all 64 seeds fail**, rather than handing
+  back the last one. "Never hand the player an unplayable world" has only two
+  honest implementations, and silently returning attempt 64 is neither. It
+  also reports the seed it settled on — the debug overlay shows it — because a
+  perturbed seed the player is not told about is a bug report about a world
+  with no iron in it.
+- **`NoiseField` offsets its own origin, derived from the seed.** Tile (0, 0)
+  sits exactly on a lattice corner of every octave, so an unoffset field
+  returns a raw uninterpolated hash there — *uniformly* distributed, where
+  every other tile in the world is the bell-shaped average of four. The spawn
+  tile was therefore the one tile that did not obey the generator's own
+  terrain distribution, and it showed: a third of all seeds put the player in
+  a lake against a global water coverage of an eighth, and every ore cell near
+  the origin shared one density value, making a starting area all-or-nothing
+  per resource. Validation pass rate went from 14% to 21% on that fix alone,
+  and to 47% after retuning. Found by a test, not by eye.
+- **No `Math.sin`, `Math.cos` or `Math.pow` anywhere in the generator.** They
+  are not exactly specified by IEEE-754, so two engines may disagree in the
+  last bit and hand two players subtly different coastlines from the same
+  seed — a determinism failure that would surface months later as a save that
+  fails to reload identically. `Math.sqrt` is correctly rounded and is used
+  instead: a patch's orientation is a normalised random vector, never an
+  angle.
+- **C02's checkerboard and C09's four hand-placed discs moved to
+  `tests/fixtures/world-fixtures.ts`** rather than being deleted. Both chunks
+  said C19 would delete them, and it has — from `src/`. A test of the build
+  system or the terrain layer wants a world it can state facts about ("the
+  pond is at (14, 3)"), and a procedurally generated one cannot offer that
+  without pinning a seed and re-pinning it on every tuning pass.
+- **A dev tool, not a dev page** (task 7). `npm run minimap` writes a PNG —
+  one seed, or a contact sheet of twenty — and prints the terrain histogram
+  and the starting-area report beside it. `tools/` runs under Node with
+  `--experimental-transform-types` and a twenty-line resolver hook, because
+  `src/**` imports `./thing.js` the way the module specification wants and
+  Node will not resolve that to a `.ts` file. The alternative was a dependency
+  (`tsx`) for twenty lines of work, which §3's policy exists to refuse.
+
+**Deviations.**
+
+- **Task 3's "thresholded noise" became a jittered grid plus two noise
+  fields.** See the first decision above. The plan's stated *goal* for the
+  task — per-patch variation in size, shape and richness — is met more
+  directly this way than the mechanism it suggested could have met it.
+- **Balance numbers are provisional and belong to C20.** Terrain thresholds,
+  patch densities, radii, richness and the distance curve are all tuned to
+  "different every seed, playable at the start", which is C19's bar. Water
+  averages 13% of tiles and varies from 8% to 23% across seeds; ore covers
+  about 15% of the starting area. Whether that is *fun* is the next chunk's
+  question, and it is asked at the stop-and-tune gate rather than here.
+
+**Acceptance, as verified.**
+
+- *The same seed produces byte-identical worlds, regardless of exploration
+  order.* Pass — a generator walks a thousand world chunks before reaching
+  (5, 5) and matches one that goes straight there; a shuffled 7×7 exploration
+  matches a row-major one; two `Simulation`s exploring in opposite directions
+  hash identically under C18's state hash.
+- *100 random seeds all pass starting-area validation within the retry
+  budget.* Pass — 100 widely spread seeds, mean 2.25 attempts, worst well
+  inside half the budget. Measured separately: 47% of raw seeds pass
+  unperturbed, so exhausting all 64 has probability around 10⁻¹⁶.
+- *20 seeds inspected by eye produce visibly different resource layouts.*
+  Pass — `npm run minimap -- --seed=7000 --count=20 --chunks=8`. Lake-locked
+  spawns, stone plateaus, copper-heavy country and near-barren ground all
+  appear in the twenty.
+- *Generating 40×40 world chunks takes < 500 ms.* Pass — **304 ms** mean,
+  319 ms worst, over five iterations (`npm run bench`, case
+  `worldgen-40x40`). One world chunk costs 0.20 ms; a validated starting
+  world, seed retries included, costs 7.6 ms.
+
+**Noticed, not fixed.**
+
+- **§11's `--if-iron` (`#7d94ad`) and `--if-stone` (`#9aa3ad`) are hard to
+  tell apart**, and iron ore on stone terrain (`#55606e`) is low contrast.
+  Invisible while the only ore was four hand-placed discs; obvious on a
+  generated map. It is a §11 decision, so C20's balance pass or C29's art
+  pass owns it.
+- **`npm run bench:baseline` rewrites every baseline**, so adding a benchmark
+  file forces the unrelated committed numbers to be restored by hand or
+  silently replaced with numbers from a different machine. The C18 baselines
+  were restored from git for this commit. Scoping the write is a one-flag
+  change and belongs to C28.
+- **A frame at minimum zoom costs ~10.5 ms with nothing built**, composing 96
+  cached terrain bitmaps. Not a regression — the same 96 bitmaps were
+  composed before — but it is the first time the number has been looked at,
+  and it is C29's.
 
 ---
 

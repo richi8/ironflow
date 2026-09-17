@@ -238,9 +238,12 @@ export default tseslint.config(
     },
   },
 
-  /* Tests and config files legitimately touch everything. */
+  /* Tests, dev tools and config files legitimately touch everything. `tools/`
+     is not the game: it runs in Node, it prints, and it reads across every
+     layer on purpose, which is why the dev-tool boundary is the directory
+     itself rather than a rule inside it. */
   {
-    files: ['tests/**/*.ts', '*.config.ts', 'eslint.config.js'],
+    files: ['tests/**/*.ts', 'tools/**/*.{ts,mjs}', '*.config.ts', 'eslint.config.js'],
     languageOptions: { globals: { ...globals.node } },
     rules: {
       'no-restricted-imports': 'off',

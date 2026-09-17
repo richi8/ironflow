@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommandProcessor } from '../../src/game/commands/command-processor.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { EAST, NORTH, SOUTH, WEST, type TileCoord } from '../../src/game/world/coordinates.js';
-import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { createCheckerboardGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { Camera } from '../../src/renderer/camera.js';
 import {

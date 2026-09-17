@@ -5,9 +5,9 @@ import { GameController } from './game/game-controller.js';
 import { Game } from './game/game.js';
 import { Simulation } from './game/simulation.js';
 import { ResourceType, resourceName } from './game/world/resource.js';
-import { createPlaygroundGenerator } from './game/world/world-generator.js';
+import { createStartingWorld, WORLD_SPAWN } from './game/world/starting-area.js';
 import { toChunkCoord, toLocalCoord, localIndex } from './game/world/chunk.js';
-import { World } from './game/world/world.js';
+import type { World } from './game/world/world.js';
 import { InputManager } from './input/input-manager.js';
 import type { InputAction } from './input/keybindings.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
@@ -61,9 +61,6 @@ function describeOre(world: World, x: number, y: number): string {
   return `${resourceName(type)} ${chunk.resourceAmount[index] ?? 0}`;
 }
 
-/** Where a new game starts. On grass, within reach of the playground's iron. */
-const START_TILE = Object.freeze({ x: 6, y: 6 });
-
 /** What the player starts carrying. See the note at the assignment below. */
 const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
   miner: 5,
@@ -96,12 +93,11 @@ function describePlayerState(view: PlayerView): string {
 /**
  * The world seed (§6 R2, §10, §14).
  *
- * One fixed number while worldgen is still C19's playground generator, which
- * ignores it. It is passed anyway rather than left to default, because a
- * composition root that lets a piece of authoritative state default is a
- * composition root that has not decided — and the day the generator starts
- * reading it, "which seed is this world?" must already have an answer the save
- * can carry.
+ * One fixed number until C25's new-game dialog makes it a player decision.
+ * From C19 it is the only thing that decides what the map looks like, and
+ * `createStartingWorld` may hand back a *different* seed than this one — the
+ * perturb-and-retry of C19 task 5 — which is why the simulation is given the
+ * seed that was accepted rather than the one asked for.
  */
 const WORLD_SEED = 0x1f0f10;
 
@@ -111,20 +107,24 @@ function bootstrap(): void {
 
   const surface = new CanvasSurface(canvas);
   const overlay = new DebugOverlay(uiRoot);
-  // C09 places real resource patches and C19 replaces the generator entirely.
-  // The world is empty until something asks about a tile — see World.getChunk.
-  const world = new World(createPlaygroundGenerator());
+  // C19: a generated world, validated before the player is put in it. The
+  // returned seed is the one that passed, which is not necessarily WORLD_SEED
+  // — see `starting-area.ts`. Validation has already generated the world
+  // chunks around spawn; everything beyond them is still empty until something
+  // asks about a tile (see World.getChunk).
+  const started = createStartingWorld(WORLD_SEED);
+  const world: World = started.world;
   // The simulation builds its own registry from `data/buildings.ts` and hands
   // the entity store the footprint lookup that comes with it (C05, C06).
   // The seed is chosen here because §4 makes the composition root the place
   // decisions are wired; it is authoritative state from C18 (§6 R2, §10) and
   // becomes a *player* decision at C25's new-game dialog, at which point this
   // constant is what that dialog replaces.
-  const simulation = new Simulation({ world, seed: WORLD_SEED });
-  simulation.player.setTilePosition(START_TILE.x, START_TILE.y);
+  const simulation = new Simulation({ world, seed: started.seed });
+  simulation.player.setTilePosition(WORLD_SPAWN.x, WORLD_SPAWN.y);
   const scheduler = new BrowserFrameScheduler();
 
-  const camera = new Camera({ x: START_TILE.x, y: START_TILE.y });
+  const camera = new Camera({ x: WORLD_SPAWN.x, y: WORLD_SPAWN.y });
   const renderer = new CanvasRenderer(surface.ctx);
 
   const applySize = (): void => {
@@ -325,7 +325,9 @@ function bootstrap(): void {
       simulation.getTick(),
       {
         size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
-        world: `${world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
+        // C19: the seed is the first thing to check when a map looks wrong,
+        // and it is not necessarily the one `WORLD_SEED` asked for.
+        world: `seed ${started.seed} (${started.attempts} tried), ${world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
         build:
           held === null
             ? '— (1-9 or B to select, R rotates)'

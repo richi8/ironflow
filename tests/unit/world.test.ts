@@ -22,7 +22,7 @@ import {
   isTileType,
   tileProperties,
 } from '../../src/game/world/tile.js';
-import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { createCheckerboardGenerator } from '../fixtures/world-fixtures.js';
 import { World, type ChunkGenerator } from '../../src/game/world/world.js';
 
 /**
@@ -595,8 +595,11 @@ describe('World memory', () => {
 });
 
 /* -------------------------------------------------------------------------- *
- * The placeholder generator. C19 replaces it; until then it must at least be
- * positional, because C19's determinism rests on that habit being in place.
+ * The checkerboard fixture. It was `src/game/world/world-generator.ts` until
+ * C19 put a real generator there; it stayed because half the suite wants a
+ * world it can state facts about, and it is still held to `ChunkGenerator`'s
+ * positional contract — a fixture that generated differently on a second visit
+ * would make every test built on it lie.
  * -------------------------------------------------------------------------- */
 
 describe('createCheckerboardGenerator', () => {

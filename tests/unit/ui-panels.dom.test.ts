@@ -5,7 +5,7 @@ import { DetachedCursor, GameController } from '../../src/game/game-controller.j
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { NORTH } from '../../src/game/world/coordinates.js';
-import { createPlaygroundGenerator } from '../../src/game/world/world-generator.js';
+import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { MAX_TOASTS, Notifications, TOAST_LIFETIME_MS } from '../../src/ui/notifications.js';
 import { GameUI, HUD_HZ, LIVE_HZ } from '../../src/ui/ui.js';

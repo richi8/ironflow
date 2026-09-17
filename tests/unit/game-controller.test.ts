@@ -10,7 +10,7 @@ import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { EAST, NORTH } from '../../src/game/world/coordinates.js';
-import { createPlaygroundGenerator } from '../../src/game/world/world-generator.js';
+import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
 

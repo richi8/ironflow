@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ITEMS } from '../../src/game/data/items.js';
-import { CHUNK_SIZE, MAX_RESOURCE_AMOUNT, createChunk, localIndex } from '../../src/game/world/chunk.js';
+import { MAX_RESOURCE_AMOUNT, createChunk } from '../../src/game/world/chunk.js';
 import {
   NOMINAL_RESOURCE_AMOUNT,
   NO_BUCKET,
@@ -15,17 +15,15 @@ import {
   resourceName,
   resourceProperties,
 } from '../../src/game/world/resource.js';
-import { TileType } from '../../src/game/world/tile.js';
-import { createPlaygroundGenerator } from '../../src/game/world/world-generator.js';
 
 /**
  * C09 — resource patches. See ironflow.md C09.
  *
  * The depletion arithmetic itself lives in `world.test.ts`, because it is
  * `World.consumeResource` and C02 built it. What is new here is the vocabulary
- * on top of it: which byte means which ore, what that ore yields, how full a
- * tile reads, and whether the stub generator produces patches a miner can
- * actually be built on.
+ * on top of it: which byte means which ore, what that ore yields, and how full
+ * a tile reads. Whether a generated map produces patches a miner can be built
+ * on is C19's question, and it is asked in `world-generator.test.ts`.
  */
 
 describe('ResourceType', () => {
@@ -124,75 +122,5 @@ describe('resourceBucket', () => {
       expect(bucket).toBeGreaterThanOrEqual(previous);
       previous = bucket;
     }
-  });
-});
-
-/**
- * The stub patches of C09 task 4. They are scaffolding C19 deletes, but until
- * then they are the only ore in the game, so "a miner can be built and tested"
- * is a property worth holding them to.
- */
-describe('the playground patches', () => {
-  const generate = createPlaygroundGenerator();
-
-  /** Every tile of the four world chunks around the origin. */
-  function eachTile(visit: (resource: number, amount: number, terrain: number) => void): void {
-    for (const cx of [-1, 0]) {
-      for (const cy of [-1, 0]) {
-        const chunk = generate(cx, cy);
-        for (let ly = 0; ly < CHUNK_SIZE; ly++) {
-          for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-            const index = localIndex(lx, ly);
-            visit(chunk.resource[index] ?? 0, chunk.resourceAmount[index] ?? 0, chunk.terrain[index] ?? 0);
-          }
-        }
-      }
-    }
-  }
-
-  it('places one patch of every resource within reach of the origin', () => {
-    const found = new Set<number>();
-    eachTile((resource) => {
-      if (resource !== ResourceType.None) found.add(resource);
-    });
-    expect([...found].sort()).toEqual([...RESOURCE_TYPES].sort());
-  });
-
-  it('never writes a byte that is not a resource, or an amount the array cannot hold', () => {
-    eachTile((resource, amount) => {
-      expect(isResourceType(resource)).toBe(true);
-      expect(amount).toBeGreaterThanOrEqual(0);
-      expect(amount).toBeLessThanOrEqual(MAX_RESOURCE_AMOUNT);
-    });
-  });
-
-  it('leaves no ore tile empty, so a patch outline is always mineable', () => {
-    eachTile((resource, amount) => {
-      if (resource !== ResourceType.None) expect(amount).toBeGreaterThan(0);
-    });
-  });
-
-  it('puts no ore under water, which nothing could ever mine', () => {
-    eachTile((resource, _amount, terrain) => {
-      if (terrain === TileType.Water) expect(resource).toBe(ResourceType.None);
-    });
-  });
-
-  it('shows every fullness bucket at once, so depletion is visible before it finishes', () => {
-    const buckets = new Set<number>();
-    eachTile((resource, amount) => {
-      if (resource !== ResourceType.None) buckets.add(resourceBucket(amount));
-    });
-    expect([...buckets].sort()).toEqual([0, 1, 2, 3]);
-  });
-
-  it('is pure and positional, so a world chunk visited twice is identical', () => {
-    // C19's contract, adopted by the stub: generation order must never change
-    // what a world chunk contains, or walking away and back would rewrite it.
-    const first = generate(0, 0);
-    const second = generate(0, 0);
-    expect([...second.resource]).toEqual([...first.resource]);
-    expect([...second.resourceAmount]).toEqual([...first.resourceAmount]);
-    expect(second.dirty).toBe(false);
   });
 });

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Command } from '../../src/game/commands/command.js';
+import { Simulation } from '../../src/game/simulation.js';
 import { MAX_STEPS_PER_FRAME } from '../../src/game/simulation-clock.js';
 import { EAST } from '../../src/game/world/coordinates.js';
+import { World } from '../../src/game/world/world.js';
+import { createWorldGenerator } from '../../src/game/world/world-generator.js';
 
 import {
   CELL_COUNT,
@@ -241,5 +244,47 @@ describe('§6 R7: no NaN, no Infinity, no -0', () => {
       if (!Number.isFinite(value) || Object.is(value, -0)) bad.push(path);
     });
     expect(bad).toEqual(['$.a[1]', '$.b.c']);
+  });
+});
+
+/**
+ * C19's generator, under §6's contract rather than under its own.
+ *
+ * `world-generator.test.ts` checks that the generator is positional. This
+ * checks the consequence §6 actually cares about: that the *authoritative
+ * state* of a world is the same number however the player got there. It is the
+ * closest thing to C19's "determinism across the save round-trip" that can be
+ * written before C24 exists — and when C24 does exist, the round-trip test
+ * compares against this same hash rather than replacing it.
+ */
+describe('§6: a generated world is the same world however it was explored', () => {
+  /** Walk a world's tiles in a given order, generating what that touches. */
+  function explore(seed: number, order: readonly { x: number; y: number }[]): Simulation {
+    const simulation = new Simulation({ world: new World(createWorldGenerator(seed)), seed });
+    for (const { x, y } of order) simulation.world.getTile(x, y);
+    return simulation;
+  }
+
+  const points: { x: number; y: number }[] = [];
+  for (let cy = -2; cy <= 2; cy++) for (let cx = -2; cx <= 2; cx++) points.push({ x: cx * 32, y: cy * 32 });
+
+  it('hashes the same whether the map was walked east-first or west-first', () => {
+    const forwards = explore(0xc19, points);
+    const backwards = explore(0xc19, [...points].reverse());
+    expect(hashState(backwards)).toBe(hashState(forwards));
+  });
+
+  it('hashes differently for a different seed, so the test above is not vacuous', () => {
+    expect(hashState(explore(0xc19, points))).not.toBe(hashState(explore(0xc1a, points)));
+  });
+
+  it('leaves every generated number finite, integral and not -0 (§6 R7)', () => {
+    const bad: string[] = [];
+    forEachNumber(canonicalState(explore(0xfeed, points)), (value, path) => {
+      if (!Number.isFinite(value)) bad.push(`${path} = ${String(value)}`);
+      if (Object.is(value, -0)) bad.push(`${path} = -0`);
+      if (path.includes('.world') && !Number.isInteger(value)) bad.push(`${path} = ${String(value)}`);
+    });
+    expect(bad).toEqual([]);
   });
 });

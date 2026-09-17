@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CHUNK_SIZE, createChunk } from '../../src/game/world/chunk.js';
 import { NOMINAL_RESOURCE_AMOUNT, ResourceType } from '../../src/game/world/resource.js';
 import { TileType } from '../../src/game/world/tile.js';
-import { createCheckerboardGenerator } from '../../src/game/world/world-generator.js';
+import { createCheckerboardGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
 import { Camera } from '../../src/renderer/camera.js';
 import { TerrainLayer, type TerrainSurface } from '../../src/renderer/layers/terrain-layer.js';
