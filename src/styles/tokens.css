@@ -41,16 +41,25 @@
   --if-terrain-water: #23516e;
 
   /* resources */
-  --if-iron: #7d94ad;
+  --if-iron: #8fa6c6;
   --if-copper: #c96a3a;
   --if-coal: #2b3242;
-  --if-stone: #9aa3ad;
+  --if-stone: #b9b2a2;
   /* smelted goods (C15) — a plate is its ore, a brick and steel are their own */
   --if-steel: #b8c4d0;
   --if-brick: #a8543a;
   /* assembled goods (C16) — a wire is its copper, these two are their own */
   --if-gear: #8b96a4;
   --if-circuit: #3f8f6a;
+
+  /* building items (C20) */
+  --if-miner: #e0913f;
+  --if-belt: #4f7fa8;
+  --if-splitter: #6b8fd4;
+  --if-inserter: #7a6ec4;
+  --if-chest: #8a7250;
+  --if-furnace: #c25a4a;
+  --if-assembler: #46a88f;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

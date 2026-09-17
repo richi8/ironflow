@@ -81,6 +81,7 @@ const STATUS_TEXT: Readonly<Record<MachineStatus, string>> = Object.freeze({
   no_input: 'Missing ingredients',
   no_recipe: 'No recipe set',
   no_fuel: 'Out of fuel — progress is paused, not lost',
+  no_destination: 'Nowhere to put anything — it is not pointed at a belt, a chest or a machine',
 });
 
 /** Which of §11's status tokens each one is painted in. */
@@ -98,6 +99,9 @@ const STATUS_TONE: Readonly<Record<MachineStatus, StatusTone>> = Object.freeze({
   no_fuel: 'warn',
   no_resource: 'danger',
   no_power: 'danger',
+  // Misconfigured rather than stalled: nothing will ever come of it, and it
+  // will not announce itself again (C20).
+  no_destination: 'danger',
 });
 
 interface StackRow {
@@ -141,6 +145,17 @@ export class Inspector {
   /** The MAKING line, for a machine that chooses its own recipe. */
   private readonly makingRow = document.createElement('div');
   private readonly makingValue = document.createElement('span');
+
+  /**
+   * "The next item goes to…", for a splitter. C20, closing C17's note.
+   *
+   * Its own row rather than a line in the OUTPUT section, because a splitter
+   * has no output *buffer* — what it has is a decision about which of two
+   * belts the next item takes, and that is a different kind of fact from "12
+   * plates are sitting in here".
+   */
+  private readonly nextRow = document.createElement('div');
+  private readonly nextValue = document.createElement('span');
 
   /** The picker, for a machine the player chooses for (C16 task 3). */
   private readonly recipeSection = document.createElement('div');
@@ -208,6 +223,14 @@ export class Inspector {
     this.makingValue.className = 'if-inspector__value';
     this.makingRow.append(makingLabel, this.makingValue);
 
+    this.nextRow.className = 'if-inspector__rate if-inspector__next';
+    this.nextRow.hidden = true;
+    const nextLabel = document.createElement('span');
+    nextLabel.className = 'if-inspector__label';
+    nextLabel.textContent = 'NEXT OUT';
+    this.nextValue.className = 'if-inspector__value';
+    this.nextRow.append(nextLabel, this.nextValue);
+
     this.recipeSection.className = 'if-inspector__recipes';
     this.recipeSection.hidden = true;
     const recipeLabel = document.createElement('div');
@@ -216,7 +239,15 @@ export class Inspector {
     this.recipeGrid.className = 'if-recipes';
     this.recipeSection.append(recipeLabel, this.recipeGrid);
 
-    this.inputs = this.createSection('INPUT', false);
+    // Takeable since C20. C15 left the INPUT section read-only because the
+    // TAKE button belongs to outputs — and C16 then noticed the hole that
+    // leaves: ingredients stranded in a machine because the player's bag was
+    // full could only be got back by switching the recipe twice. Reaching into
+    // a machine is a hand action and the hand does not care which buffer it is
+    // (see `systems/hand-system.ts`); what must never take from an input is an
+    // *inserter*, and that is still enforced where it always was, in
+    // `items/item-port.ts`.
+    this.inputs = this.createSection('INPUT', true);
     this.outputs = this.createSection('OUTPUT', true);
 
     const where = document.createElement('div');
@@ -233,6 +264,7 @@ export class Inspector {
       this.progressRow,
       this.rateRow,
       this.makingRow,
+      this.nextRow,
       this.recipeSection,
       this.inputs.root,
       this.outputs.root,
@@ -278,6 +310,13 @@ export class Inspector {
     this.rateRow.hidden = rate === null;
     if (rate !== null) setText(this.rateValue, `${rate.toFixed(1)} /min`);
 
+    // A splitter's whole panel was empty before C20: it has no ports, so
+    // there was nothing to list. This is the one thing it does have.
+    this.nextRow.hidden = view.nextOutput === null;
+    if (view.nextOutput !== null) {
+      setText(this.nextValue, `${view.nextOutput.x}, ${view.nextOutput.y}`);
+    }
+
     this.fillRecipes(view);
     this.fill(this.inputs, view.inputs, view.inReach);
     this.fill(this.outputs, view.outputs, view.inReach);
@@ -307,7 +346,15 @@ export class Inspector {
     // The count the button was drawn with, so "take" means what the row says.
     // A machine that produced one more item in between keeps it; a partial
     // transfer is the normal outcome of every transfer in this game (C08).
-    const stack = this.view.outputs.find((line) => line.itemId === itemId);
+    //
+    // Either section, since C20 made the input rows takeable too. One lookup
+    // across both rather than a flag on the button: an item cannot be in both
+    // buffers of one machine — `RecipeRegistry` refuses a recipe that has the
+    // same item as an ingredient and a product — so there is nothing for the
+    // two to disagree about.
+    const stack =
+      this.view.outputs.find((line) => line.itemId === itemId) ??
+      this.view.inputs.find((line) => line.itemId === itemId);
     if (stack !== undefined && stack.count > 0) this.options.onTake(itemId, stack.count);
   };
 

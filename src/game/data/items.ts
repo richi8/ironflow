@@ -27,12 +27,27 @@
  * the same coal for the same eight seconds without either building knowing
  * about the other (C15).
  *
- * Building items — the `miner` and `chest` a build cost is paid in today — are
- * deliberately *not* here, and C16 does not add them: §15's building recipes
- * need the player's materials bag and their slot inventory to become one
- * thing, which is a change to how a build cost is *paid* rather than to what
- * an assembler can make. Until then the bag holds them under their string ids
- * (see `item-stack.ts`).
+ * ## Building items (C20)
+ *
+ * The seven at the end are the change C16 said it was not making: §15's "a
+ * building is placed by consuming its item", with the item being an ordinary
+ * registered item rather than a string in a second bag beside the real one.
+ * They are not in §15's thirteen-row table — that table is the *materials* —
+ * but they are what its building table's "crafted from" column has always
+ * implied, and the player's `ItemCounts` existed only because they were
+ * missing. It is gone; `items/build-materials.ts` is what replaced it.
+ *
+ * One row per building in `data/buildings.ts`, in the same order, and a test
+ * asserts that correspondence in both directions: a building whose item does
+ * not exist cannot be paid for, and an unplaceable building item is a stack a
+ * player can never spend. The four buildings §15 still owes — generator, power
+ * pole, lab, radar — arrive with the systems that make them do something
+ * (C21–C23), and their items arrive with them.
+ *
+ * Stack sizes are **balance numbers**. A hundred belts and fifty of everything
+ * else: belts are spent a dozen at a time and a stack that ran out mid-drag is
+ * the one shortage that reads as a bug (C13), and fifty of anything else is
+ * well past what a player carries before they run out of somewhere to put it.
  */
 
 import type { ItemDefinition } from '../registries/item-registry.js';
@@ -49,4 +64,14 @@ export const ITEMS: readonly ItemDefinition[] = Object.freeze([
   { id: 'gear', name: 'Gear', stackSize: 100, sprite: 'item:gear', category: 'intermediate' },
   { id: 'copper_wire', name: 'Copper Wire', stackSize: 200, sprite: 'item:copper_wire', category: 'intermediate' },
   { id: 'circuit', name: 'Circuit', stackSize: 200, sprite: 'item:circuit', category: 'intermediate' },
+
+  // Building items (C20). Order follows `data/buildings.ts`, which is §15's
+  // building table order, which is also build-menu and hotkey order.
+  { id: 'miner', name: 'Miner', stackSize: 50, sprite: 'item:miner', category: 'building' },
+  { id: 'belt', name: 'Transport Belt', stackSize: 100, sprite: 'item:belt', category: 'building' },
+  { id: 'splitter', name: 'Splitter', stackSize: 50, sprite: 'item:splitter', category: 'building' },
+  { id: 'inserter', name: 'Inserter', stackSize: 50, sprite: 'item:inserter', category: 'building' },
+  { id: 'furnace', name: 'Furnace', stackSize: 50, sprite: 'item:furnace', category: 'building' },
+  { id: 'assembler', name: 'Assembler', stackSize: 50, sprite: 'item:assembler', category: 'building' },
+  { id: 'chest', name: 'Chest', stackSize: 50, sprite: 'item:chest', category: 'building' },
 ] satisfies readonly ItemDefinition[]);

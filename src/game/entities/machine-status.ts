@@ -14,6 +14,13 @@
  * member per chunk is a type every save migration has to re-learn. C11 uses
  * four of the seven; C15 and C21 supply the producers for the rest.
  *
+ * **C20 added an eighth**, `NoDestination`, which is the one the original list
+ * was missing rather than the start of a habit: seven of them answer "why has
+ * this machine stopped" and the eighth answers "it has not stopped, it was
+ * never going to start". Appending is safe — no existing number moves — and
+ * the alternative was leaving C17's silently-waiting inserter reporting a
+ * condition that would clear itself and never did.
+ *
  * ## Why it is stored rather than derived
  *
  * Every value here is recomputable from the machine's own state, so §10 would
@@ -43,6 +50,19 @@ export enum MachineStatus {
   /** C15: a machine that could run if the player chose what it should make. */
   NoRecipe = 6,
   NoFuel = 7,
+  /**
+   * C20: there is nowhere for this to put what it moves, and there never will
+   * be until the player changes something.
+   *
+   * Different from `OutputFull`, and the difference is the only thing the
+   * player can act on. A full chest empties; a tile with nothing on it, or a
+   * splitter, or a belt running the wrong way, does not — C17 filed this as
+   * "an inserter pointed at a splitter waits for ever, silently", which is the
+   * failure mode §7 and pillar 3 exist to prevent. Reporting it as
+   * `OutputFull` was worse than reporting nothing: it named a condition that
+   * was going to clear itself, and it never did.
+   */
+  NoDestination = 8,
 }
 
 /**
@@ -58,6 +78,7 @@ const MACHINE_STATUS_NAMES = Object.freeze([
   'no_input',
   'no_recipe',
   'no_fuel',
+  'no_destination',
 ] as const);
 
 /** The name of a status, as a view model spells it. */

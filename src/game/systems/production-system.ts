@@ -296,5 +296,15 @@ export class ProductionSystem {
     if (status === MachineStatus.NoFuel) {
       this.alerts.push({ type: 'machine_no_fuel', entityId: machine.id, x: machine.x, y: machine.y });
     }
+    // C20. A machine whose choice is the player's and who has not been given
+    // one does nothing at all, for ever, with no other symptom: it is the
+    // purest case of "nothing happens", which is what pillar 3 exists to stop.
+    // The toast fires once, on the transition, exactly as the fuel one does —
+    // and because the status only *becomes* `NoRecipe` when a machine that
+    // could run is asked to, a newly placed assembler says it once and is
+    // quiet until the player answers.
+    if (status === MachineStatus.NoRecipe) {
+      this.alerts.push({ type: 'machine_no_recipe', entityId: machine.id, x: machine.x, y: machine.y });
+    }
   }
 }

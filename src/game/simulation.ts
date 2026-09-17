@@ -4,7 +4,7 @@ import type { Command, CommandRejectionReason } from './commands/command.js';
 import { BUILDINGS } from './data/buildings.js';
 import { EntityStore } from './entities/entity-store.js';
 import { forEachFootprintTile } from './entities/entity.js';
-import type { ItemCounts } from './items/item-stack.js';
+import { BuildMaterials } from './items/build-materials.js';
 import { BUILD_RANGE_TILES, PlayerState } from './player/player-state.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
@@ -62,13 +62,6 @@ export interface SimulationOptions {
    * the player starts with.
    */
   readonly player?: PlayerState;
-  /**
-   * The player's build-materials bag. Kept as a `Simulation` option after C10
-   * moved the bag onto the player, because it is how a test hands the game a
-   * stock without building a `PlayerState` to do it. Ignored when `player` is
-   * given — a player brought their own.
-   */
-  readonly inventory?: ItemCounts;
 }
 
 export class Simulation {
@@ -117,16 +110,13 @@ export class Simulation {
   readonly player: PlayerState;
 
   /**
-   * The player's build materials. Still the string-keyed `ItemCounts` bag,
-   * which now lives on the player; this is an alias so the build system, the
-   * controller and C06's tests keep one name for it. It stays that way after
-   * C16: §15's building recipes need the bag and the player's `SlotInventory`
-   * to become one thing, which is a change to how a build cost is *paid*
-   * rather than to what a machine can make, and C16 added neither.
+   * The player's items, by the string ids a build cost names them with (C20).
+   *
+   * A view over `player.inventory`, not a container: the second bag this used
+   * to alias is gone, because §15's building recipes made a `chest` an item
+   * like any other. See `items/build-materials.ts`.
    */
-  get inventory(): ItemCounts {
-    return this.player.materials;
-  }
+  readonly inventory: BuildMaterials;
 
   private readonly builder: BuildSystem;
 
@@ -224,17 +214,13 @@ export class Simulation {
     this.items = options.items ?? new ItemRegistry(ITEMS);
     this.recipes = options.recipes ?? new RecipeRegistry(RECIPES, this.items);
     this.crafts = new CraftDurations(this.buildings, this.recipes);
-    this.player =
-      options.player ??
-      new PlayerState({
-        stackSizeOf: this.items.stackSizeOf,
-        ...(options.inventory === undefined ? {} : { materials: options.inventory }),
-      });
+    this.player = options.player ?? new PlayerState({ stackSizeOf: this.items.stackSizeOf });
+    this.inventory = new BuildMaterials(this.player.inventory, this.items);
     this.builder = new BuildSystem({
       world: this.world,
       entities: this.entities,
       buildings: this.buildings,
-      inventory: this.player.materials,
+      inventory: this.inventory,
     });
     this.miningSystem = new MiningSystem({
       world: this.world,
@@ -264,6 +250,7 @@ export class Simulation {
       buildings: this.buildings,
       items: this.items,
       recipes: this.recipes,
+      alerts: this.alerts,
     });
     this.hands = new HandSystem({
       entities: this.entities,

@@ -154,6 +154,37 @@ export interface GhostView {
 }
 
 /**
+ * What one machine is making, for the alt-mode overlay. See C20 task 5.
+ *
+ * ```text
+ *        [iron plate]          <- the badge this describes
+ *      /-------------\
+ *      |   furnace    |
+ * ```
+ *
+ * C20 asks for "an alt mode overlay showing what each machine makes", and the
+ * reason it earns its place is the reason the inspector is not enough: the
+ * inspector answers about **one** machine, and the question a player actually
+ * has — "which of these forty furnaces is on copper?" — is about all of them
+ * at once. Reading it forty times is not reading it.
+ *
+ * It carries a sprite rather than an item id because it is a render view and
+ * the composition root has already made that translation (§4, and the same
+ * split `GhostView` makes). `count` is what a container is holding; null for a
+ * machine, whose badge is about what it *makes* rather than what it has.
+ */
+export interface MachineAnnotation {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** The item sprite drawn in the badge. */
+  readonly sprite: SpriteId;
+  /** How many are in there, for a container. Null for a machine. */
+  readonly count: number | null;
+}
+
+/**
  * The selected building's footprint, outlined in the overlay layer (C12).
  *
  * A rectangle rather than a tile, because the outline belongs around the
@@ -205,4 +236,12 @@ export interface RenderState {
   readonly hover: TileCoord | null;
   readonly ghost: GhostView | null;
   readonly selected: SelectionRect | null;
+  /**
+   * What every machine on screen is making (C20's alt mode), or empty.
+   *
+   * Empty rather than null when the mode is off, so the overlay layer draws a
+   * loop over nothing rather than branching — and so a frame's worth of state
+   * never has two ways to say "none of these".
+   */
+  readonly annotations: readonly MachineAnnotation[];
 }

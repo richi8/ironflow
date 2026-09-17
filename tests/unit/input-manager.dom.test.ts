@@ -138,6 +138,9 @@ let input: InputManager;
  * Replace the fixture. Detaches first: the keyboard listens on `document`, so
  * a manager left attached keeps answering keys from the next test's events.
  */
+/** The entity id `recipeOf` answers "nothing" for. See `mount`. */
+const EMPTY_MACHINE = 41;
+
 function mount(bindings = DEFAULT_KEYBINDINGS): void {
   input?.detach();
   canvas?.remove();
@@ -154,6 +157,10 @@ function mount(bindings = DEFAULT_KEYBINDINGS): void {
     picker,
     commands,
     bindings,
+    // C20's copy-settings needs one question answered about the world, and a
+    // single function is the whole of what this layer is allowed to ask.
+    // `EMPTY_MACHINE` stands for a machine that is making nothing.
+    recipeOf: (entityId): string | null => (entityId === EMPTY_MACHINE ? null : 'make_gear'),
     onAction: (action, phase) => actions.push([action, phase]),
   });
   input.attach();
@@ -544,6 +551,75 @@ describe('the build tool', () => {
     ]);
     // The manager itself holds nothing: what slot 1 means is content.
     expect(input.buildTool).toBeNull();
+  });
+
+  /**
+   * Copy-settings (C20 task 5): shift-right-click copies a machine's recipe,
+   * shift-left-click pastes it.
+   *
+   * What this layer owns is the *gesture*, and the two things that could go
+   * wrong with it are both about which click wins: a shift-right-click must
+   * not be the click that demolishes, and a shift-left-click must not be the
+   * click that places a building. Whether the paste is honoured is the
+   * simulation's (§7) and is `hand-system.ts`'s to answer.
+   */
+  describe('copy-settings', () => {
+    function shiftDown(): void {
+      document.dispatchEvent(keyEvent('keydown', 'ShiftLeft'));
+    }
+
+    it('copies on shift-right-click and pastes on shift-left-click', () => {
+      picker.entitiesAt.set('3,8', 7);
+      picker.entitiesAt.set('5,8', 9);
+      shiftDown();
+
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 2 }));
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 55, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+      expect(commands.drain()).toEqual([{ type: 'setRecipe', entityId: 9, recipeId: 'make_gear' }]);
+    });
+
+    it('does not demolish the machine it copies from', () => {
+      picker.entitiesAt.set('3,8', 7);
+      shiftDown();
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 2 }));
+      expect(commands.drain()).toEqual([]);
+    });
+
+    it('does not place a building on the click that pastes', () => {
+      picker.entitiesAt.set('3,8', 7);
+      input.setBuildTool(MINER);
+      shiftDown();
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+      expect(commands.drain().map((command) => command.type)).toEqual(['setRecipe']);
+    });
+
+    it('pastes "nothing" when the copied machine was making nothing', () => {
+      // Deliberate: it is the only way to tell a row of assemblers to stop
+      // without opening every panel. `recipeOf` answering null is a *copy*,
+      // not a failure to copy.
+      picker.entitiesAt.set('3,8', EMPTY_MACHINE);
+      picker.entitiesAt.set('5,8', 9);
+      shiftDown();
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 2 }));
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 55, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+      expect(commands.drain()).toEqual([{ type: 'setRecipe', entityId: 9, recipeId: null }]);
+    });
+
+    it('leaves the clipboard alone when the copy click misses everything', () => {
+      picker.entitiesAt.set('3,8', 7);
+      picker.entitiesAt.set('5,8', 9);
+      shiftDown();
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 2 }));
+      // Bare ground: a shift-right-click that missed must not silently empty
+      // what the player copied a moment ago.
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 95, y: 92, button: BUTTON_RIGHT, buttons: 2 }));
+      canvas.dispatchEvent(pointerEvent('pointerdown', { x: 55, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+
+      expect(commands.drain()).toEqual([{ type: 'setRecipe', entityId: 9, recipeId: 'make_gear' }]);
+    });
   });
 
   it('does not move the selection while placing', () => {

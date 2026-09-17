@@ -44,6 +44,7 @@ import { footprintExtent } from './entities/entity.js';
 import { asInserter, inserterCycleProgress } from './entities/inserter-entity.js';
 import { machineStatusName, statusOf } from './entities/machine-status.js';
 import { asMachine } from './entities/machine-entity.js';
+import { splitterOutputTile, asSplitter } from './entities/splitter-entity.js';
 import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
@@ -274,20 +275,13 @@ export class GameController {
     let itemTotal = 0;
     const items: HudItemCount[] = [];
 
-    // Everything the player is carrying, in two passes because they carry it
-    // in two containers — see `player/player-state.ts` on why, and C16 on when
-    // that stops being true. Real items first, in content order, so the row a
-    // player watches while mining does not move when a building is bought.
+    // One pass, since C20: the player carries one container. `toJSON` is
+    // ordered by runtime id, which is content order, so the row a player
+    // watches while mining does not move when a building is crafted.
     for (const [itemId, count] of this.simulation.player.inventory.toJSON()) {
       const definition = this.simulation.items.byId(itemId);
       itemTotal += count;
       items.push(freeze({ itemId: definition.id, name: definition.name, count }));
-    }
-    // `toJSON` is sorted by item id, so the HUD's rows never reorder under the
-    // player's cursor as counts change.
-    for (const [itemId, count] of Object.entries(this.simulation.inventory.toJSON())) {
-      itemTotal += count;
-      items.push(freeze({ itemId, name: this.itemName(itemId), count }));
     }
 
     return freeze({
@@ -419,11 +413,35 @@ export class GameController {
       // about in passing reads 0 rather than a figure from someone else's
       // window; a machine that produces nothing at all reads null.
       ratePerMinute: produces ? this.rate.perMinuteFor(entity.id) : null,
+      // C20, closing C17's note: a splitter's panel used to be empty, because
+      // it has no ports and therefore no contents to list. What it has is a
+      // decision, and this is it.
+      nextOutput: this.nextOutputOf(entity),
       x: entity.x,
       y: entity.y,
       rotation: entity.rotation,
       inReach: this.simulation.hands.canReach(entity),
     });
+  }
+
+  /**
+   * Where the next item out of a splitter goes, or null for anything else.
+   *
+   * Read straight off the entity's `outputCursor`, which is authoritative
+   * state and the very thing C17 made deterministic — so the panel is showing
+   * the simulation's own decision rather than a guess that could disagree with
+   * it on the next tick.
+   *
+   * Null when the side it names has nothing on the other end: a splitter with
+   * one output belt is a splitter that will send everything one way, and
+   * pointing at a bare tile would say the opposite.
+   */
+  private nextOutputOf(entity: Entity): { readonly x: number; readonly y: number } | null {
+    const splitter = asSplitter(entity);
+    if (splitter === null) return null;
+    const size = this.simulation.buildings.forEntityType(entity.type).size;
+    const tile = splitterOutputTile(splitter, size, splitter.outputCursor);
+    return tile === null ? null : freeze({ x: tile.x, y: tile.y });
   }
 
   /**
@@ -787,17 +805,6 @@ export class GameController {
     return freeze({ itemId, name, count: stack.count, capacity: stack.capacity });
   }
 
-  /**
-   * The player-facing name of an item.
-   *
-   * Until C08 there is no item registry, and every item in the game is a
-   * building's own build cost (§15), so the building table is the only place a
-   * name exists. C08 gives items their own definitions and this asks that
-   * instead — one lookup changing, not a panel.
-   */
-  private itemName(itemId: string): string {
-    return this.simulation.buildings.has(itemId) ? this.simulation.buildings.get(itemId).name : itemId;
-  }
 }
 
 /** Nothing in, nothing out. Shared so every empty machine view points at one array. */

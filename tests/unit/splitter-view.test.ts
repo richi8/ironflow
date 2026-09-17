@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { laneAccept, newBelt, type BeltEntity } from '../../src/game/entities/belt-entity.js';
-import { newSplitter, splitterTile, type SplitterEntity } from '../../src/game/entities/splitter-entity.js';
+import {
+  newSplitter,
+  otherSide,
+  splitterOutputTile,
+  splitterTile,
+  type SplitterEntity,
+} from '../../src/game/entities/splitter-entity.js';
+import { Game } from '../../src/game/game.js';
+import { GameController } from '../../src/game/game-controller.js';
+import { FakeScheduler } from '../fixtures/fake-scheduler.js';
 import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { BuildingRegistry } from '../../src/game/registries/building-registry.js';
 import { Simulation } from '../../src/game/simulation.js';
@@ -94,5 +103,45 @@ describe('items inside a splitter', () => {
     const sim = simulation();
     sim.entities.create<SplitterEntity>(newSplitter(6, 6, EAST));
     expect(describeBeltItems(sim.entities, sim.buildings, sim.items)).toEqual([]);
+  });
+});
+
+/**
+ * The splitter's inspector panel, which was empty until C20.
+ *
+ * C17 wrote the note this closes: "a splitter's inspector panel is empty,
+ * exactly as a belt's is: it has no ports, so the view model carries no
+ * contents. What a player would want to see is which way the next item is
+ * going, which is the one cursor the UI has no word for yet."
+ */
+describe('the splitter panel (C20)', () => {
+  function controllerFor(sim: Simulation): GameController {
+    return new GameController({
+      game: new Game({ simulation: sim, scheduler: new FakeScheduler(), render: () => {} }),
+    });
+  }
+
+  it('names the tile the next item out of it will go to', () => {
+    const sim = simulation();
+    const splitter = sim.entities.create<SplitterEntity>(newSplitter(6, 6, EAST));
+    // Both outputs are belts, so both sides are real destinations.
+    sim.entities.create<BeltEntity>(newBelt(7, 6, EAST));
+    sim.entities.create<BeltEntity>(newBelt(7, 7, EAST));
+
+    const controller = controllerFor(sim);
+    const first = controller.getBuildingView(splitter.id)?.nextOutput;
+    expect(first).toEqual(splitterOutputTile(splitter, SPLITTER.size, splitter.outputCursor));
+
+    // It is the simulation's own cursor, not a guess: moving it moves the
+    // readout, which is what keeps the panel from disagreeing with the belt.
+    splitter.outputCursor = otherSide(splitter.outputCursor);
+    expect(controller.getBuildingView(splitter.id)?.nextOutput).not.toEqual(first);
+  });
+
+  it('is null for everything that does not split, so no other panel grows a row', () => {
+    const sim = simulation();
+    const belt = sim.entities.create<BeltEntity>(newBelt(1, 1, EAST));
+    const controller = controllerFor(sim);
+    expect(controller.getBuildingView(belt.id)?.nextOutput).toBeNull();
   });
 });

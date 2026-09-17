@@ -22,19 +22,21 @@
  * 30 ticks per second a repeating fraction, and the step would have to be
  * rounded — which is the float problem again, wearing a hat.
  *
- * ## Two containers, for one more chunk
+ * ## One container, at last
  *
- * The player carries a `SlotInventory` of real items (C08) and an `ItemCounts`
- * bag of building materials. That is not a design; it is C08's recorded
- * deviation arriving on schedule: a build cost is paid in `miner` and `chest`,
- * which are not registered items until C16 gives them recipes, and a
- * `SlotInventory` keys on numeric ids the registry hands out. **C16 merges the
- * two**, at which point `materials` disappears and `inventory` holds
- * everything.
+ * The player carried two of them for eleven chunks: a `SlotInventory` of real
+ * items (C08) and an `ItemCounts` bag of building materials, because a build
+ * cost is paid in `miner` and `chest` and those were not registered items.
+ * C20's building recipes make them items, so `materials` is gone and
+ * `inventory` holds everything. What pays a build cost is a string-keyed view
+ * over this one bag — see `items/build-materials.ts`.
+ *
+ * The consequence the player feels: the bag can be **full**. Thirty slots now
+ * hold ore, plates and buildings together, which is what makes a chest
+ * something to want rather than something to have.
  */
 
 import { SlotInventory, type SerializedInventory, type StackSizeLookup } from '../items/inventory.js';
-import { ItemCounts } from '../items/item-stack.js';
 import { TPS } from '../simulation-clock.js';
 import { NORTH, type Rotation, type TileCoord } from '../world/coordinates.js';
 
@@ -149,7 +151,6 @@ export interface SerializedPlayer {
   readonly miningY: number | null;
   readonly miningTicks: number;
   readonly inventory: SerializedInventory;
-  readonly materials: Record<string, number>;
 }
 
 export interface PlayerStateOptions {
@@ -159,15 +160,6 @@ export interface PlayerStateOptions {
   readonly x?: number;
   readonly y?: number;
   readonly slots?: number;
-  /**
-   * The build-materials bag to adopt, rather than starting with an empty one.
-   *
-   * The seam C24's loader restores through, and the one a test that only cares
-   * about placement uses to hand the player a stock. It exists because
-   * `materials` is the C06 bag and C16 deletes it; giving it a setter would
-   * outlive it.
-   */
-  readonly materials?: ItemCounts;
 }
 
 export class PlayerState {
@@ -205,21 +197,15 @@ export class PlayerState {
   /** Integer ticks of progress toward the next item (§6 R3). */
   miningTicks = 0;
 
-  /** Ore, plates — everything the registry knows about. Slot-based (C08). */
-  readonly inventory: SlotInventory;
-
   /**
-   * Building materials, still keyed by string id.
-   *
-   * C08's recorded deviation: `miner` and `chest` are not registered items
-   * until C16 gives them recipes. C16 deletes this field.
+   * Everything the player is carrying: ore, plates, gears and buildings.
+   * Slot-based (C08), and since C20 the only container they have.
    */
-  readonly materials: ItemCounts;
+  readonly inventory: SlotInventory;
 
   constructor(options: PlayerStateOptions) {
     this.subX = tileCentreSubtile(options.x ?? 0);
     this.subY = tileCentreSubtile(options.y ?? 0);
-    this.materials = options.materials ?? new ItemCounts();
     this.inventory = new SlotInventory({
       slots: options.slots ?? PLAYER_INVENTORY_SLOTS,
       stackSizeOf: options.stackSizeOf,
@@ -329,7 +315,6 @@ export class PlayerState {
       miningY: this.miningY,
       miningTicks: this.miningTicks,
       inventory: this.inventory.toJSON(),
-      materials: this.materials.toJSON(),
     };
   }
 }

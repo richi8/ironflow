@@ -91,6 +91,15 @@ describe('RecipeRegistry', () => {
       'make_gear',
       'make_wire',
       'make_circuit',
+      // C20's building recipes, in `data/buildings.ts` order. They are
+      // `crafting` because the assembler is the machine that runs them.
+      'make_miner',
+      'make_belt',
+      'make_splitter',
+      'make_inserter',
+      'make_furnace',
+      'make_assembler',
+      'make_chest',
     ]);
   });
 
@@ -143,6 +152,31 @@ describe('the shipped recipe table', () => {
       { id: 'make_gear', inputs: ['2 iron_plate'], outputs: ['1 gear'], ticks: 30 },
       { id: 'make_wire', inputs: ['1 copper_plate'], outputs: ['2 copper_wire'], ticks: 15 },
       { id: 'make_circuit', inputs: ['3 copper_wire', '1 iron_plate'], outputs: ['1 circuit'], ticks: 30 },
+      // C20's building recipes. The ingredients are §15's building table,
+      // transcribed; four of the times are C20's, because §15 authors one only
+      // for the belt, the inserter and the miner.
+      { id: 'make_miner', inputs: ['4 gear', '2 circuit', '4 iron_plate'], outputs: ['1 miner'], ticks: 60 },
+      { id: 'make_belt', inputs: ['1 gear', '1 iron_plate'], outputs: ['2 belt'], ticks: 15 },
+      {
+        id: 'make_splitter',
+        inputs: ['2 gear', '1 circuit', '2 iron_plate'],
+        outputs: ['1 splitter'],
+        ticks: 30,
+      },
+      {
+        id: 'make_inserter',
+        inputs: ['1 gear', '1 circuit', '1 iron_plate'],
+        outputs: ['1 inserter'],
+        ticks: 15,
+      },
+      { id: 'make_furnace', inputs: ['12 brick'], outputs: ['1 furnace'], ticks: 60 },
+      {
+        id: 'make_assembler',
+        inputs: ['8 gear', '4 circuit', '6 iron_plate'],
+        outputs: ['1 assembler'],
+        ticks: 120,
+      },
+      { id: 'make_chest', inputs: ['4 iron_plate'], outputs: ['1 chest'], ticks: 15 },
     ]);
   });
 

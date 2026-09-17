@@ -22,7 +22,7 @@ import type { CommandRejectionReason } from '../commands/command.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { initialBuildingState } from '../entities/building-init.js';
 import { footprintExtent, forEachFootprintTile, type Footprint } from '../entities/entity.js';
-import type { ItemCounts } from '../items/item-stack.js';
+import type { BuildMaterials } from '../items/build-materials.js';
 import { BuildingRegistry, type BuildingDefinition } from '../registries/building-registry.js';
 import { TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
 import type { World } from '../world/world.js';
@@ -32,12 +32,11 @@ export interface BuildSystemOptions {
   readonly entities: EntityStore;
   readonly buildings: BuildingRegistry;
   /**
-   * The player's items. Still `ItemCounts`: C08 built the real `SlotInventory`
-   * but it keys on registered item ids, and a build cost is paid in building
-   * items, which do not exist as items until C16 gives them recipes. C10's
-   * player state is where this moves.
+   * The player's items, as a build cost names them. Since C20 this is a view
+   * over their one real bag rather than a second container — see
+   * `items/build-materials.ts`.
    */
-  readonly inventory: ItemCounts;
+  readonly inventory: BuildMaterials;
 }
 
 /** A placement that would work, or the one reason it would not. */
@@ -47,7 +46,7 @@ export class BuildSystem {
   private readonly world: World;
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
-  private readonly inventory: ItemCounts;
+  private readonly inventory: BuildMaterials;
 
   constructor(options: BuildSystemOptions) {
     this.world = options.world;
@@ -128,6 +127,18 @@ export class BuildSystem {
    * all of them (C05) — a player removing a 2×2 miner should not have to find
    * its north-west corner. The entity goes at the end of the tick; the refund
    * is immediate, which is the same ordering every other command effect has.
+   *
+   * ## The refund is checked before the building is
+   *
+   * C20 made the player's bag the one that has slots, so a refund can now fail
+   * to fit. A demolition that half-refunded would delete the rest, and §7's
+   * rule is that nothing is ever silently deleted — the same rule C16's
+   * `setRecipe` follows. So a full bag refuses the removal, with the reason
+   * the player can act on, and the building stays standing.
+   *
+   * It also means the *contents* of what is demolished are still lost, which
+   * is the one thing this does not fix: a chest full of plates goes with the
+   * chest. That is C20's noted gap, not a decision.
    */
   remove(x: number, y: number): PlacementResult {
     if (x < TILE_MIN || x > TILE_MAX || y < TILE_MIN || y > TILE_MAX) return 'out_of_range';
@@ -137,8 +148,11 @@ export class BuildSystem {
     // second time would mint a free building out of a double right-click.
     if (entity === undefined || this.entities.isPendingRemoval(entity.id)) return 'nothing_there';
 
+    const refund = this.buildings.forEntityType(entity.type).buildCost;
+    if (!this.inventory.hasRoomFor(refund)) return 'inventory_full';
+
     this.entities.remove(entity.id);
-    this.inventory.give(this.buildings.forEntityType(entity.type).buildCost);
+    this.inventory.give(refund);
     return null;
   }
 

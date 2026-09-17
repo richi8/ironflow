@@ -94,6 +94,20 @@ export interface MachineView {
    * `production.ts` — so it reads 0 for a machine asked about in passing.
    */
   readonly ratePerMinute: number | null;
+  /**
+   * The tile the next item out of a splitter will go to, or null for every
+   * other building. C20.
+   *
+   * C17 left the splitter's panel completely empty — it has no ports, so it
+   * carried no contents — and wrote down what a player would actually want to
+   * see: "which way the next item is going, which is the one cursor the UI has
+   * no word for yet". This is that word.
+   *
+   * A **tile** rather than a side index, because "side 0" is a fact about
+   * `footprintTileAt`'s walk order and nothing a player can see. A coordinate
+   * is something they can look at, and it is what the panel prints.
+   */
+  readonly nextOutput: { readonly x: number; readonly y: number } | null;
   /** The footprint's north-west tile. */
   readonly x: number;
   readonly y: number;

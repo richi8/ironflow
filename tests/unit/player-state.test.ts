@@ -202,7 +202,8 @@ describe('serialization', () => {
     p.startMining(3, -3);
     p.miningTicks = 12;
     p.inventory.add(1, 7);
-    p.materials.add('chest', 2);
+    // One container since C20: a building item goes in the same bag as ore.
+    p.inventory.add(2, 2);
 
     const json = p.toJSON();
     expect(JSON.parse(JSON.stringify(json))).toEqual(json);

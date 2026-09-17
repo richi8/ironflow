@@ -30,6 +30,28 @@
  * authors `make_gear` at 1.0 s and the tier-1 assembler runs at speed 0.5, so
  * one gear takes 60 ticks. That division happens once, in
  * `registries/craft-durations.ts`, and never here.
+ *
+ * ## Building recipes (C20)
+ *
+ * The seven at the end are §15's "every building in the table has one, taking
+ * exactly the ingredients in its crafted-from column", and they are the pillar
+ * 1 moment the plan names: with them the factory builds itself, and gears and
+ * circuits stop banking up in a chest with nowhere to go (C16's last note).
+ * They are `crafting` because the assembler is the machine that runs them.
+ *
+ * The ingredients are §15's, transcribed and not invented. Four of the **times**
+ * are: §15 gives one only to `make_belt`, `make_inserter` and `make_miner`, so
+ * the splitter, the chest, the furnace and the assembler take C20's, chosen so
+ * that a building's craft time tracks the size of its bill rather than being
+ * flat — half a second for the two that are a handful of plates, one for the
+ * splitter, two for the furnace, four for the assembler, which at speed 0.5 is
+ * eight seconds and the longest single craft in the game. They are **balance
+ * numbers**, and §15's table now carries them.
+ *
+ * Four buildings of §15's eleven are still missing, and so are their recipes:
+ * the generator, the power pole, the lab and the radar belong to C21–C23, and
+ * a recipe for a building that cannot be placed is content no test can judge.
+ * That is the same rule `make_frame` and `make_data_core` wait under.
  */
 
 import type { RecipeDefinition } from '../registries/recipe-registry.js';
@@ -85,6 +107,83 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     ],
     outputs: [{ itemId: 'circuit', count: 1 }],
     seconds: 1.0,
+    category: 'crafting',
+  },
+
+  /* ---------------------------------------------------------------------- *
+   * Building recipes (C20). §15's building table, one row each, in its order.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'make_miner',
+    inputs: [
+      { itemId: 'gear', count: 4 },
+      { itemId: 'circuit', count: 2 },
+      { itemId: 'iron_plate', count: 4 },
+    ],
+    outputs: [{ itemId: 'miner', count: 1 }],
+    seconds: 2.0,
+    category: 'crafting',
+  },
+  {
+    // Two belts per craft, the one recipe in the game that makes more of its
+    // product than the bill suggests. §15 is explicit about it, and it is what
+    // keeps a belt cheap enough to lay by the dozen.
+    id: 'make_belt',
+    inputs: [
+      { itemId: 'gear', count: 1 },
+      { itemId: 'iron_plate', count: 1 },
+    ],
+    outputs: [{ itemId: 'belt', count: 2 }],
+    seconds: 0.5,
+    category: 'crafting',
+  },
+  {
+    id: 'make_splitter',
+    inputs: [
+      { itemId: 'gear', count: 2 },
+      { itemId: 'circuit', count: 1 },
+      { itemId: 'iron_plate', count: 2 },
+    ],
+    outputs: [{ itemId: 'splitter', count: 1 }],
+    seconds: 1.0,
+    category: 'crafting',
+  },
+  {
+    id: 'make_inserter',
+    inputs: [
+      { itemId: 'gear', count: 1 },
+      { itemId: 'circuit', count: 1 },
+      { itemId: 'iron_plate', count: 1 },
+    ],
+    outputs: [{ itemId: 'inserter', count: 1 }],
+    seconds: 0.5,
+    category: 'crafting',
+  },
+  {
+    // The only building made of brick, and therefore the only consumer stone
+    // has: `bake_brick` made bricks in C15 and nothing has wanted one since.
+    id: 'make_furnace',
+    inputs: [{ itemId: 'brick', count: 12 }],
+    outputs: [{ itemId: 'furnace', count: 1 }],
+    seconds: 2.0,
+    category: 'crafting',
+  },
+  {
+    id: 'make_assembler',
+    inputs: [
+      { itemId: 'gear', count: 8 },
+      { itemId: 'circuit', count: 4 },
+      { itemId: 'iron_plate', count: 6 },
+    ],
+    outputs: [{ itemId: 'assembler', count: 1 }],
+    seconds: 4.0,
+    category: 'crafting',
+  },
+  {
+    id: 'make_chest',
+    inputs: [{ itemId: 'iron_plate', count: 4 }],
+    outputs: [{ itemId: 'chest', count: 1 }],
+    seconds: 0.5,
     category: 'crafting',
   },
 ] satisfies readonly RecipeDefinition[]);

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { ProductionCounters, ProductionRate, RATE_WINDOW_TICKS } from '../../src/game/production.js';
+import {
+  MAX_RATE_WINDOW_TICKS,
+  ProductionCounters,
+  ProductionRate,
+  RATE_WINDOW_ITEMS,
+  RATE_WINDOW_TICKS,
+} from '../../src/game/production.js';
 import { TPS } from '../../src/game/simulation-clock.js';
 
 /**
@@ -16,6 +22,13 @@ import { TPS } from '../../src/game/simulation-clock.js';
  * cases that matter are the ones a miner cannot easily be made to produce: a
  * window shorter than 300 ticks, a machine that stops, and a switch between
  * two machines.
+ *
+ * **C20 made the window a range** rather than a number: 300 ticks at least,
+ * `MAX_RATE_WINDOW_TICKS` at most, and as long in between as it takes to hold
+ * `RATE_WINDOW_ITEMS` items. Slow machines were the complaint C15 and C16 both
+ * filed and both deferred here — a plate furnace had three items in its window
+ * and a readout that swung by a third while it did nothing unusual. The tests
+ * below are stated against the range.
  */
 
 /** §15's tier-1 miner: 0.5 items/s, which is 30 a minute and 60 ticks each. */
@@ -64,30 +77,66 @@ describe('ProductionCounters', () => {
 });
 
 describe('ProductionRate', () => {
-  it('reads a steady miner at exactly its content rate', () => {
+  it('reads a steady miner at its content rate', () => {
     const rate = new ProductionRate();
-    // Two full windows, so the reading is over 300 ticks of real history and
-    // not over whatever the warm-up left behind.
-    const perMinute = runProduction(rate, 1, RATE_WINDOW_TICKS * 2, MINER_TICKS_PER_ITEM);
+    // Four windows' worth, so the reading is over real history and not over
+    // whatever the warm-up left behind.
+    const perMinute = runProduction(rate, 1, RATE_WINDOW_TICKS * 4, MINER_TICKS_PER_ITEM);
     expect(perMinute).toBeCloseTo(MINER_PER_MINUTE, 10);
   });
 
-  it('is a rolling window: a machine that stops falls to zero within 300 ticks', () => {
+  it('grows the window for a slow machine, until it holds enough items', () => {
+    // §15's plate furnace: 0.3125 items/s, which is one item every 96 ticks
+    // and **three** in C12's ten-second window. That is the reading C15 and
+    // C16 called useless, and the fix is that the window keeps the samples it
+    // needs rather than the seconds it was told.
+    const rate = new ProductionRate();
+    runProduction(rate, 1, MAX_RATE_WINDOW_TICKS * 2, 96);
+
+    expect(rate.windowTicks).toBe(MAX_RATE_WINDOW_TICKS);
+    // The whole point: enough items in the reading to divide by, where C12's
+    // window had three.
+    expect(rate.itemsInWindow).toBeGreaterThanOrEqual(RATE_WINDOW_ITEMS);
+    // Within 5% of 18.75/min. Not exact, because the window's edge falls where
+    // a sample is and the items inside it are whole.
+    const expected = (30 * 60) / 96;
+    expect(rate.perMinuteFor(1)).toBeGreaterThan(expected * 0.95);
+    expect(rate.perMinuteFor(1)).toBeLessThan(expected * 1.05);
+  });
+
+  it('keeps a fast machine on the ten-second window C12 gave it', () => {
+    // Two items a second: eight of them fit in well under 300 ticks, so the
+    // reading stays on the narrow window and the responsiveness C12 tuned for
+    // is untouched.
+    const rate = new ProductionRate();
+    runProduction(rate, 1, MAX_RATE_WINDOW_TICKS * 2, 15);
+    expect(rate.windowTicks).toBe(RATE_WINDOW_TICKS);
+    expect(rate.perMinuteFor(1)).toBeCloseTo((30 * 60) / 15, 10);
+  });
+
+  it('is a rolling window: a machine that stops falls to zero', () => {
     const rate = new ProductionRate();
     runProduction(rate, 1, RATE_WINDOW_TICKS, MINER_TICKS_PER_ITEM);
     expect(rate.perMinuteFor(1)).toBeGreaterThan(0);
 
-    // Ten more seconds of nothing. The producing samples are now all outside
-    // the window, so the reading is the truth rather than a fading memory.
+    // A full ceiling of nothing. The producing samples are now all outside the
+    // window, so the reading is the truth rather than a fading memory. It
+    // takes longer than C12's ten seconds, and that is the price of the
+    // paragraph above — the machine's *status* is what says "stopped" at once.
     let tick = RATE_WINDOW_TICKS;
-    for (let i = 0; i < RATE_WINDOW_TICKS; i++) rate.sample(1, ++tick, 5);
+    for (let i = 0; i <= MAX_RATE_WINDOW_TICKS; i++) rate.sample(1, ++tick, 5);
     expect(rate.perMinuteFor(1)).toBe(0);
   });
 
-  it('never keeps more than a window of samples', () => {
+  it('never keeps more than the widest window of samples', () => {
     const rate = new ProductionRate();
-    runProduction(rate, 1, RATE_WINDOW_TICKS * 4, MINER_TICKS_PER_ITEM);
-    expect(rate.sampleCount).toBeLessThanOrEqual(RATE_WINDOW_TICKS + 1);
+    runProduction(rate, 1, MAX_RATE_WINDOW_TICKS * 4, MINER_TICKS_PER_ITEM);
+    expect(rate.sampleCount).toBeLessThanOrEqual(MAX_RATE_WINDOW_TICKS + 1);
+    // A miner puts exactly `RATE_WINDOW_ITEMS` items in the narrow window,
+    // which is the line C12 drew when it chose ten seconds. The rest of the
+    // history is kept so that a machine which *slows down* has something to be
+    // read over rather than having to build a new window first.
+    expect(rate.windowTicks).toBe(RATE_WINDOW_TICKS);
   });
 
   it('reads over the history it has when the window has only just opened', () => {

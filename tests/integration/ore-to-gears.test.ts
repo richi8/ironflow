@@ -270,7 +270,18 @@ describe('ore -> smelt -> assemble -> chest', () => {
     expect(view?.name).toBe('Assembler');
     expect(view?.recipe?.id).toBe('make_gear');
     // Every crafting recipe is offered, with exactly one of them lit.
-    expect(view?.recipes?.map((choice) => choice.id)).toEqual(['make_gear', 'make_wire', 'make_circuit']);
+    expect(view?.recipes?.map((choice) => choice.id)).toEqual([
+      'make_gear',
+      'make_wire',
+      'make_circuit',
+      'make_miner',
+      'make_belt',
+      'make_splitter',
+      'make_inserter',
+      'make_furnace',
+      'make_assembler',
+      'make_chest',
+    ]);
     expect(view?.recipes?.filter((choice) => choice.selected).map((choice) => choice.id)).toEqual(['make_gear']);
     // 60 ticks a gear is 30 a minute — the machine's nominal rate, beside the
     // measured one the panel shows for what it is actually achieving.

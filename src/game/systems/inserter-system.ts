@@ -85,6 +85,7 @@ import {
   type InserterEntity,
 } from '../entities/inserter-entity.js';
 import { MachineStatus } from '../entities/machine-status.js';
+import type { AlertLog } from '../alerts.js';
 import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
 import type { BuildingRegistry, InserterConfig } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
@@ -98,6 +99,8 @@ export interface InserterSystemOptions {
   readonly items: ItemRegistry;
   /** Needed to know what a machine beside it will accept (C15). */
   readonly recipes: RecipeRegistry;
+  /** Where "this inserter is pointed at nothing" is reported (C20). */
+  readonly alerts: AlertLog;
 }
 
 /** Is this a tile the occupancy index can be asked about without throwing? */
@@ -108,6 +111,8 @@ function inTileRange(x: number, y: number): boolean {
 export class InserterSystem {
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
+
+  private readonly alerts: AlertLog;
 
   /**
    * What every neighbour that is not a belt offers and accepts (C15).
@@ -131,6 +136,7 @@ export class InserterSystem {
   constructor(options: InserterSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
+    this.alerts = options.alerts;
     this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
     this.configs = Object.freeze(
       Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) =>
@@ -200,7 +206,7 @@ export class InserterSystem {
         // An empty hand at the drop means the player took the item out of it
         // (`HandSystem`). There is nothing to deliver and no reason to stall.
         if (inserter.heldItem !== NO_ITEM && !this.deliver(inserter)) {
-          inserter.status = MachineStatus.OutputFull;
+          this.setStatus(inserter, this.canEverDeliver(inserter) ? MachineStatus.OutputFull : MachineStatus.NoDestination);
           return;
         }
         inserter.heldItem = NO_ITEM;
@@ -226,16 +232,46 @@ export class InserterSystem {
    * The destination check is what keeps a stalled inserter's hands empty.
    */
   private beginCycle(inserter: InserterEntity): void {
+    // Asked before the source, and it is the only ordering question here worth
+    // a comment: an inserter pointed at bare ground is misconfigured whether
+    // or not there is anything behind it to pick up, and telling the player
+    // "nothing to take" about an arm that could never deliver would send them
+    // to look at the wrong end of it (C20).
+    if (!this.canEverDeliver(inserter)) {
+      this.setStatus(inserter, MachineStatus.NoDestination);
+      return;
+    }
+
     const itemId = this.sourceItem(inserter);
     if (itemId === NO_ITEM) {
-      inserter.status = MachineStatus.Idle;
+      this.setStatus(inserter, MachineStatus.Idle);
       return;
     }
     if (!this.hasRoom(inserter, itemId)) {
-      inserter.status = MachineStatus.OutputFull;
+      this.setStatus(inserter, MachineStatus.OutputFull);
       return;
     }
     this.enter(inserter, InserterState.Pickup);
+  }
+
+  /**
+   * Is there anything in front of this inserter that could **ever** take an
+   * item from it? C20.
+   *
+   * The question C14 never asked, and C17 noticed the consequence of: a
+   * splitter has no input port, so an inserter aimed at one reported a full
+   * output for ever and the player was told to empty something that was never
+   * full. So is an inserter aimed at bare ground, at water, or at a second
+   * inserter.
+   *
+   * It asks about the *destination's shape* and not about its contents, which
+   * is what separates it from `hasRoom`: a chest with no room is a chest that
+   * will have room, and a splitter will never have a port.
+   */
+  private canEverDeliver(inserter: InserterEntity): boolean {
+    const target = this.destination(inserter);
+    if (target === undefined) return false;
+    return asBelt(target) !== null || inputPortOf(target, this.ports) !== null;
   }
 
   /** Begin a timed stage. */
@@ -249,7 +285,30 @@ export class InserterSystem {
   private park(inserter: InserterEntity): void {
     inserter.state = InserterState.Idle;
     inserter.stateTicks = 0;
-    inserter.status = MachineStatus.Idle;
+    this.setStatus(inserter, MachineStatus.Idle);
+  }
+
+  /**
+   * Record the status, raising an alert on the transition into one the player
+   * has to act on.
+   *
+   * The same shape `MiningSystem` and `ProductionSystem` use, and the same
+   * reason: the condition is true every tick that follows, and a toast per
+   * tick is how a legible game becomes an unreadable one. See
+   * `views/alert.ts` on why `no_destination` is worth a toast and
+   * `output_full` is not.
+   */
+  private setStatus(inserter: InserterEntity, status: MachineStatus): void {
+    if (inserter.status === status) return;
+    inserter.status = status;
+    if (status === MachineStatus.NoDestination) {
+      this.alerts.push({
+        type: 'inserter_no_destination',
+        entityId: inserter.id,
+        x: inserter.x,
+        y: inserter.y,
+      });
+    }
   }
 
   /* ---------------------------------------------------------------- *

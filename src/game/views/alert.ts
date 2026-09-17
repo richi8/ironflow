@@ -14,12 +14,41 @@
  * C11's depletion alert has both. A stalled belt, a furnace out of fuel and an
  * overloaded power network are C13, C15 and C21's to add, each with the
  * sentence a player will read.
+ *
+ * ## Why C20 added two, and only two
+ *
+ * C20 task 5 asks for "clear stall alerts", and the temptation is an alert per
+ * `MachineStatus`. Most of them would be noise: `output_full` is what a
+ * *working* factory looks like the moment a chest fills, and a toast every
+ * time one does would train the player to ignore the corner of the screen the
+ * important ones appear in.
+ *
+ * The test is whether the player has to **do** something, and whether the
+ * condition will clear on its own if they do not:
+ *
+ * ```text
+ *   alert        no_resource      the patch is gone; move the miner
+ *                no_fuel          feed it; it will not restart by itself
+ *                no_destination   it is pointed at nothing; turn it round
+ *                no_recipe        it has never been told what to make
+ *
+ *   no alert     output_full      the consumer will catch up, or it will not,
+ *                                 and either way the panel says so
+ *                no_input         the same fact one machine upstream
+ *                idle / running   nothing happened
+ * ```
  */
 
 import type { EntityId } from '../entities/entity.js';
 
 /** What happened. One name per kind, because a toast has to say which. */
-export type AlertType = 'miner_no_resource' | 'machine_no_fuel';
+export type AlertType =
+  | 'miner_no_resource'
+  | 'machine_no_fuel'
+  /** C20: an inserter with nowhere to put what it is holding. */
+  | 'inserter_no_destination'
+  /** C20: a machine the player has placed and never told what to make. */
+  | 'machine_no_recipe';
 
 /**
  * It carries the tile as well as the entity id because the id alone is not

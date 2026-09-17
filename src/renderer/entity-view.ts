@@ -31,11 +31,21 @@ import type {
   InserterConfig,
 } from '../game/registries/building-registry.js';
 import { NO_ITEM, type ItemRegistry } from '../game/registries/item-registry.js';
+import type { RecipeRegistry } from '../game/registries/recipe-registry.js';
+import { asChest } from '../game/entities/chest-entity.js';
+import { asMachine } from '../game/entities/machine-entity.js';
+import { asMiner } from '../game/entities/miner-entity.js';
+import { resourceItemId } from '../game/world/resource.js';
 import { DIRECTION_OFFSETS, type Rotation } from '../game/world/coordinates.js';
 
 import type { PlayerView } from '../game/views/player-view.js';
 
-import { RenderLayer, type PlayerRenderView, type RenderEntity } from './render-state.js';
+import {
+  RenderLayer,
+  type MachineAnnotation,
+  type PlayerRenderView,
+  type RenderEntity,
+} from './render-state.js';
 import {
   BELT_CHEVRON_PHASES,
   INSERTER_SWING_STEPS,
@@ -288,4 +298,95 @@ export function describePlayer(view: PlayerView): PlayerRenderView {
     buildRange: view.buildRange,
     mining: view.mining,
   };
+}
+
+/**
+ * What every machine in the world is making, for C20's alt-mode overlay.
+ *
+ * ```text
+ *   miner      the ore under it                   resourceType
+ *   furnace    the recipe it is running           recipe -> outputs[0]
+ *   assembler  the recipe it was told to run      recipe -> outputs[0]
+ *   chest      the item it holds most of          contents
+ *   belt       nothing
+ * ```
+ *
+ * Four rules and one omission. Belts are left out because there are hundreds
+ * of them, they are a tile each, and what they carry is already drawn *on*
+ * them — a badge over every belt tile would bury the machines the mode exists
+ * to label. Splitters are left out for the same reason.
+ *
+ * ## Why it reads the entities rather than the view models
+ *
+ * `GameController` builds a `MachineView` per machine on demand, and forty of
+ * them a frame is forty frozen objects with recipe lists in them. This is the
+ * same walk `describeEntities` already makes, one tile lookup deeper, and it
+ * produces the two numbers a badge needs. §4 is satisfied the way
+ * `describeEntities` satisfies it: the renderer may *read* `game/`, and what
+ * it may not do is let `game/` know what a sprite is.
+ *
+ * Called only while the mode is on, so a player who never presses Alt pays
+ * nothing for it.
+ */
+export function describeAnnotations(
+  store: EntityStore,
+  buildings: BuildingRegistry,
+  recipes: RecipeRegistry,
+  items: ItemRegistry,
+): MachineAnnotation[] {
+  const out: MachineAnnotation[] = [];
+
+  store.forEach((entity) => {
+    const badge = annotationItem(entity, buildings, recipes, items);
+    if (badge === null) return;
+
+    const definition = buildings.forEntityType(entity.type);
+    const extent = footprintExtent(definition.size, entity.rotation);
+    out.push({
+      x: entity.x,
+      y: entity.y,
+      width: extent.width,
+      height: extent.height,
+      sprite: itemSprite(badge.itemId),
+      count: badge.count,
+    });
+  });
+
+  return out;
+}
+
+/** The item a machine's badge names, and how many of it, or null for no badge. */
+function annotationItem(
+  entity: Entity,
+  buildings: BuildingRegistry,
+  recipes: RecipeRegistry,
+  items: ItemRegistry,
+): { readonly itemId: string; readonly count: number | null } | null {
+  const miner = asMiner(entity);
+  if (miner !== null) {
+    const itemId = resourceItemId(miner.resourceType);
+    return itemId === null ? null : { itemId, count: miner.outputCount };
+  }
+
+  const machine = asMachine(entity, buildings);
+  if (machine !== null) {
+    if (!recipes.isRecipeId(machine.recipe)) return null;
+    const product = recipes.byId(machine.recipe).outputs[0];
+    if (product === undefined) return null;
+    return { itemId: items.byId(product.itemId).id, count: null };
+  }
+
+  const chest = asChest(entity);
+  if (chest !== null) {
+    // The one it holds most of, and ties go to the lower item id so the badge
+    // does not flicker between two equal stacks as they fill.
+    let best: readonly [number, number] | null = null;
+    for (const entry of chest.contents) {
+      if (best === null || entry[1] > best[1]) best = entry;
+    }
+    if (best === null || !items.isItemId(best[0])) return null;
+    return { itemId: items.byId(best[0]).id, count: best[1] };
+  }
+
+  return null;
 }

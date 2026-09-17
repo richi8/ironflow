@@ -12,8 +12,8 @@
 import type { TileCoord } from '../../game/world/coordinates.js';
 import type { Camera } from '../camera.js';
 import { FONT_STACK, color } from '../palette.js';
-import type { GhostView, PlayerRenderView, RenderState } from '../render-state.js';
-import { TILE_HALF_WIDTH, groundFacePath, type SpriteAtlas } from '../sprite-atlas.js';
+import type { GhostView, MachineAnnotation, PlayerRenderView, RenderState } from '../render-state.js';
+import { TILE_HALF_HEIGHT, TILE_HALF_WIDTH, groundFacePath, type SpriteAtlas } from '../sprite-atlas.js';
 
 /** Restores a solid stroke after the dashed range circle. */
 const EMPTY_DASH: number[] = [];
@@ -54,6 +54,46 @@ const MINING_RING_RADIUS = TILE_HALF_WIDTH * 0.42;
 /** Stroke weight of the progress ring, in CSS pixels at zoom 1. */
 const MINING_RING_WIDTH = 4;
 
+/* -------------------------------------------------------------------------- *
+ * Alt mode (C20 task 5). All fixed CSS pixels — see `drawAnnotation`.
+ * -------------------------------------------------------------------------- */
+
+/** Height of a badge's item icon, in CSS pixels. */
+const BADGE_SIZE = 18;
+
+/** Space between the icon and the count. */
+const BADGE_GAP = 4;
+
+/** Padding inside the badge's plate. */
+const BADGE_PAD = 4;
+
+/** How far above the footprint's north corner the badge sits. */
+const BADGE_OFFSET = 6;
+
+const BADGE_TEXT_SIZE = 11;
+
+/** How solid the plate behind a badge is. Dark enough to read over ore. */
+const BADGE_PLATE_ALPHA = 0.8;
+
+/** A rounded rectangle, because `roundRect` is not in every target browser. */
+function roundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius = 3,
+): void {
+  const r = Math.min(radius, width * 0.5, height * 0.5);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
 export class OverlayLayer {
   private readonly atlas: SpriteAtlas;
 
@@ -87,6 +127,68 @@ export class OverlayLayer {
     if (state.ghost !== null) {
       this.drawGhost(ctx, camera, state.ghost);
     }
+    // Last, so a badge is never hidden by an outline or a ghost — the mode
+    // exists to be read across the whole screen at once.
+    for (const annotation of state.annotations) {
+      this.drawAnnotation(ctx, camera, annotation);
+    }
+  }
+
+  /**
+   * One machine's "this is what I make" badge (C20 task 5).
+   *
+   * Drawn at a **fixed pixel size** above the footprint's north corner, for
+   * the reason the mining ring and the ghost's ore count are: it is a readout,
+   * and the whole value of the mode is being able to read forty of them at
+   * once at the zoom where forty machines fit on screen. A badge that
+   * foreshortened with the tile would be unreadable exactly when it is
+   * wanted.
+   *
+   * The item sprite is drawn at zoom 1 into a dark rounded plate, because the
+   * colours it has to stay legible against are the terrain and the machines —
+   * §11 gives no token for "over anything", and a plate is what the HUD's own
+   * chips already do.
+   */
+  private drawAnnotation(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    annotation: MachineAnnotation,
+  ): void {
+    const centre = camera.worldToScreen(
+      annotation.x + annotation.width * 0.5,
+      annotation.y + annotation.height * 0.5,
+    );
+    const top = centre.y - (annotation.width + annotation.height) * TILE_HALF_HEIGHT * camera.zoom * 0.5;
+    const y = top - BADGE_OFFSET;
+
+    const label = annotation.count === null ? '' : String(annotation.count);
+    const textWidth = label === '' ? 0 : this.measureBadge(ctx, label);
+    const width = BADGE_SIZE + (textWidth === 0 ? 0 : textWidth + BADGE_GAP);
+
+    roundedRect(ctx, centre.x - width * 0.5 - BADGE_PAD, y - BADGE_SIZE, width + BADGE_PAD * 2, BADGE_SIZE + BADGE_PAD);
+    ctx.fillStyle = color('bg-deep');
+    const previousAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = previousAlpha * BADGE_PLATE_ALPHA;
+    ctx.fill();
+    ctx.globalAlpha = previousAlpha;
+    ctx.strokeStyle = color('stroke');
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // At zoom 1 whatever the camera is doing: see the header above.
+    this.atlas.draw(ctx, annotation.sprite, centre.x - width * 0.5 + BADGE_SIZE * 0.5, y - BADGE_SIZE * 0.3, 1);
+
+    if (label === '') return;
+    ctx.font = `${BADGE_TEXT_SIZE}px ${FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color('text');
+    ctx.fillText(label, centre.x - width * 0.5 + BADGE_SIZE + BADGE_GAP, y - BADGE_SIZE * 0.4);
+  }
+
+  private measureBadge(ctx: CanvasRenderingContext2D, label: string): number {
+    ctx.font = `${BADGE_TEXT_SIZE}px ${FONT_STACK}`;
+    return ctx.measureText(label).width;
   }
 
   /**

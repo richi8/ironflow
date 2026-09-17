@@ -53,9 +53,11 @@ import { forEachFootprintTile, type Entity } from '../entities/entity.js';
 import { asMachine } from '../entities/machine-entity.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
 import {
+  handSourceOf,
   inputPortOf,
   machineBuffers,
   outputPortOf,
+  type ItemSource,
   type PortContext,
   type PortStack,
 } from '../items/item-port.js';
@@ -135,8 +137,8 @@ export class HandSystem {
    * What is waiting on a machine's *input* side: ingredients, then fuel.
    *
    * The inspector's INPUT section, which was empty for every building in the
-   * game until C15's furnace. It is read-only from the panel — the TAKE button
-   * belongs to outputs — but the player can fill it with `insertItems`.
+   * game until C15's furnace. Since C20 its rows have TAKE buttons too — see
+   * `sourcePortFor` — and the player can still fill it with `insertItems`.
    */
   inputsOf(entity: Entity): readonly PortStack[] {
     return inputPortOf(entity, this.ports)?.stacks() ?? NO_STACKS;
@@ -150,7 +152,21 @@ export class HandSystem {
    * there" rather than a second one that can disagree with the panel.
    */
   private availableOf(entity: Entity, itemId: ItemId): number {
-    return outputPortOf(entity, this.ports)?.count(itemId) ?? 0;
+    return this.sourcePortFor(entity)?.count(itemId) ?? 0;
+  }
+
+  /**
+   * Everything the player's hand may take out of a building.
+   *
+   * `handSourceOf` rather than `outputPortOf`, which is C20 filling in the
+   * hole C15 and C16 both noticed: ingredients stranded in a machine because
+   * the bag was full could only be recovered by switching the recipe twice.
+   * The one-way rule C15 built is about *inserters* and is untouched — see
+   * `items/item-port.ts`, which is still the only file that knows how a
+   * building holds things.
+   */
+  private sourcePortFor(entity: Entity): ItemSource | null {
+    return handSourceOf(entity, this.ports);
   }
 
   /**
@@ -178,8 +194,9 @@ export class HandSystem {
     if (moved === 0) return 'inventory_full';
 
     // Only by what the bag actually accepted — the remainder stays in the
-    // machine rather than evaporating between the two.
-    outputPortOf(entity, this.ports)?.take(runtimeId, moved);
+    // machine rather than evaporating between the two. The same port
+    // `availableOf` counted, so what is debited is what was offered.
+    this.sourcePortFor(entity)?.take(runtimeId, moved);
     return null;
   }
 

@@ -58,6 +58,16 @@ export type InputAction =
   | 'player.moveRight'
   /** Cycle the held building's rotation (C06 task 5). */
   | 'build.rotate'
+  /**
+   * Held, not tapped: turns a right-click into "copy this machine's recipe"
+   * and a left-click into "paste it here" (C20 task 5).
+   *
+   * The genre's gesture, and the reason it is worth having is that a factory
+   * is built by repetition: eight assemblers all making gears is eight trips
+   * into the recipe picker, and the eighth is where the player picks the wrong
+   * one without noticing.
+   */
+  | 'machine.copyModifier'
   | 'build.slot1'
   | 'build.slot2'
   | 'build.slot3'
@@ -69,6 +79,18 @@ export type InputAction =
   | 'build.slot9'
   /** Open and close the build menu (C07). */
   | 'ui.toggleBuildMenu'
+  /**
+   * Show what every machine is making, over the world (C20 task 5).
+   *
+   * A **toggle**, not a hold, which is the one decision in it. The genre's
+   * convention is to hold the key, and a browser cannot honour that: `Alt` is
+   * the window manager's on two platforms, and a key held while the pointer
+   * leaves the canvas is a key the page never sees released — so a held alt
+   * mode would stick on, and the player's only way out would be to press and
+   * release it over the canvas. A tap is unambiguous whatever the OS does
+   * with the key in between.
+   */
+  | 'ui.toggleAltMode'
   /** Hold the simulation still while the world keeps being drawn (C07, §8). */
   | 'game.togglePause'
   | 'debug.toggleOverlay';
@@ -105,7 +127,14 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyD: 'player.moveRight',
   Escape: 'selection.clear',
   KeyR: 'build.rotate',
+  ShiftLeft: 'machine.copyModifier',
+  ShiftRight: 'machine.copyModifier',
   KeyB: 'ui.toggleBuildMenu',
+  // Both alts, because which one is under the player's thumb depends on the
+  // keyboard, and `KeyV` beside it for the platforms that swallow alt entirely.
+  AltLeft: 'ui.toggleAltMode',
+  AltRight: 'ui.toggleAltMode',
+  KeyV: 'ui.toggleAltMode',
   KeyP: 'game.togglePause',
   Pause: 'game.togglePause',
   Digit1: 'build.slot1',

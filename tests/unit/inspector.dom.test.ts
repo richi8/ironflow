@@ -354,18 +354,45 @@ describe('no rebuild, and no reach into the game', () => {
     expect(takeButton().disabled).toBe(true);
   });
 
-  it('offers no take on an input buffer', () => {
+  it('hides the whole input section for a building that has no input buffer', () => {
     select(harness.miner.id);
     runTicks(60);
 
-    // Nothing in the game has an input buffer yet (C15 brings the first), so
-    // the section is hidden — but its rows exist, and none of them carries a
-    // button that could ask for something impossible.
+    // A miner has no way in, so the section is hidden whole — rows, buttons
+    // and all. C20 made those buttons *exist* (an input row is takeable now,
+    // which is C16's stranded-ingredients note), and a hidden section is still
+    // the right answer for a building with nothing in the section.
     const inputs = section('INPUT');
     expect(inputs.hidden).toBe(true);
-    for (const button of inputs.querySelectorAll<HTMLElement>('.if-stack__take')) {
-      expect(button.hidden).toBe(true);
-    }
+    expect(inputs.querySelectorAll('.if-stack__take').length).toBeGreaterThan(0);
+  });
+
+  it('lets the player take an ingredient back out of a machine (C20)', () => {
+    // C16's note: ingredients left in a machine because the bag was full could
+    // only be recovered by switching the recipe twice. An inserter still
+    // cannot touch them — that rule lives in `items/item-port.ts` and is
+    // tested there — but the hand can.
+    const furnace = harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.Furnace, PATCH.x + 2, PATCH.y + 2, NORTH),
+    );
+    const ore = harness.simulation.items.idOf('iron_ore');
+    furnace.input.push([ore, 10]);
+
+    select(furnace.id);
+    runTicks(1);
+    settle();
+
+    const inputs = section('INPUT');
+    expect(inputs.hidden).toBe(false);
+    const button = inputs.querySelector<HTMLButtonElement>('.if-stack__take');
+    expect(button?.hidden).toBe(false);
+    expect(button?.dataset['item']).toBe('iron_ore');
+    expect(button?.disabled).toBe(false);
+
+    button?.click();
+    runTicks(1);
+    expect(harness.simulation.commands.takeRejections()).toEqual([]);
+    expect(harness.simulation.player.inventory.count(ore)).toBeGreaterThan(0);
   });
 });
 
@@ -389,10 +416,19 @@ describe('the recipe picker (C16)', () => {
     select(assembler().id);
 
     expect(picker().hidden).toBe(false);
+    // Every crafting recipe, C20's seven building ones included: with them the
+    // assembler is the machine that makes the factory's own parts.
     expect(buttons().map((button) => button.dataset['recipe'])).toEqual([
       'make_gear',
       'make_wire',
       'make_circuit',
+      'make_miner',
+      'make_belt',
+      'make_splitter',
+      'make_inserter',
+      'make_furnace',
+      'make_assembler',
+      'make_chest',
     ]);
     // The ingredients and the rate, which is what task 3 asks the grid to show.
     expect(buttons()[0]?.textContent).toContain('2 Iron Plate');

@@ -65,6 +65,10 @@ export function rejectionMessage(reason: CommandRejectionReason): string {
 const ALERT_TEXT: Readonly<Record<AlertType, (alert: Alert) => string>> = Object.freeze({
   miner_no_resource: (alert) => `Miner at ${alert.x}, ${alert.y} has run out of ore — move it to a fresh patch.`,
   machine_no_fuel: (alert) => `The machine at ${alert.x}, ${alert.y} is out of fuel — feed it coal to carry on.`,
+  inserter_no_destination: (alert) =>
+    `The inserter at ${alert.x}, ${alert.y} has nowhere to put anything — turn it towards a belt, a chest or a machine.`,
+  machine_no_recipe: (alert) =>
+    `The machine at ${alert.x}, ${alert.y} has not been told what to make — open it and pick a recipe.`,
 });
 
 export function alertMessage(alert: Alert): string {

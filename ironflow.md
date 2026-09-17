@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C19 complete — a new seed is a new run.** Next: C20 — content & balance pass ⛔ the stop-and-tune gate. |
+| **Status** | **C20 complete — the factory builds itself.** ⛔ Gate passed: one weak acceptance answer (the opening is given, not earned), four strong. Next: C21 — power. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C20 — Content & balance pass** |
+| **First action** | Chunk **C21 — Power** |
 
 ---
 
@@ -861,11 +861,37 @@ disagreement between the two in either direction.
   --if-terrain-stone: #55606e;
   --if-terrain-water: #23516e;
 
-  /* resource tint — matches the reference sheet node colours */
-  --if-iron:   #7d94ad;
+  /* resource tint — matches the reference sheet node colours.
+     C20 retuned iron and stone: at #7d94ad and #9aa3ad they were four points
+     apart in hue, and iron ore on stone terrain (#55606e) was near-invisible
+     on a generated map. Iron went warmer and lighter, stone went to a warm
+     grey, so the two read apart at a glance. C19 noticed it; this is the
+     balance pass owning it. */
+  --if-iron:   #8fa6c6;
   --if-copper: #c96a3a;
   --if-coal:   #2b3242;
-  --if-stone:  #9aa3ad;
+  --if-stone:  #b9b2a2;
+
+  /* smelted and assembled goods (C15, C16) — an item whose id strips to a
+     token above is drawn in that colour, so only the ones that are nobody's
+     ore are listed. */
+  --if-steel:   #b8c4d0;
+  --if-brick:   #a8543a;
+  --if-gear:    #8b96a4;
+  --if-circuit: #3f8f6a;
+
+  /* building items (C20). §15's building recipes make a building into a thing
+     that rides a belt, so each one needs a colour of its own: a single shared
+     "machine grey" would make a mixed line unreadable. The token *is* the
+     item id, exactly as a resource's is, so adding a building adds a colour
+     here and nothing anywhere else. */
+  --if-miner:     #e0913f;
+  --if-belt:      #4f7fa8;
+  --if-splitter:  #6b8fd4;
+  --if-inserter:  #7a6ec4;
+  --if-chest:     #8a7250;
+  --if-furnace:   #c25a4a;
+  --if-assembler: #46a88f;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', monospace;
@@ -4134,6 +4160,276 @@ without re-deriving the ratios.
 
 **Out of scope.** Everything that is not tuning.
 
+**Decisions taken while implementing this chunk.**
+
+- **The building recipes are the whole chunk.** Task 1 says "fill out the
+  content bible", and the thing that was actually missing was not a row in a
+  table: it was that a `chest` was a string in a second bag the player carried
+  beside their real inventory, because no item table had ever heard of it. C08
+  recorded that as a deviation, C16 said it would fix it and did not, and until
+  it was fixed **no building in the game could be made by the game**. Twenty
+  chunks of factory and the only source of a belt was a kit `main.ts` handed
+  out at boot. Seven building items, seven building recipes and a merged
+  inventory later, `tests/integration/factory-builds-itself.test.ts` runs ore
+  into an assembler and takes a placeable chest out of the other end. That is
+  §15's "the factory eventually builds itself", and it is the pillar-1 moment
+  the plan promised.
+
+- **`ItemCounts` is deleted; `items/build-materials.ts` replaces it.** A build
+  cost is authored as `{ itemId: 'chest' }` because that is how a human writes
+  content, and an inventory counts in the numeric ids a hot loop compares. One
+  file translates, with the surface the build system and the controller already
+  spoke, and it owns nothing: every count comes from the player's one bag.
+
+- **The player's bag can now be full, and that is the point.** Thirty slots
+  hold ore, plates and buildings together. Two consequences were decided rather
+  than inherited: a **demolition is refused** when the refund will not fit,
+  because §7's rule is that nothing is silently deleted (the same rule C16's
+  `setRecipe` follows); and a player who fills their bag with plates has to put
+  them somewhere before they can carry a hundred belts, which is what makes a
+  chest something to want rather than something to have.
+
+- **The starting kit shrank by about three quarters**, to 2 miners, 40 belts,
+  6 inserters, 2 furnaces, 1 assembler and 4 chests — and **no splitter**,
+  because the splitter is the one building whose recipe needs a circuit and
+  C17's layout puzzle is worth more built than given. Every chunk from C13 to
+  C17 grew that list because a building the player could not make had to be
+  given; with recipes it becomes a decision about the first five minutes
+  instead.
+
+- **A machine's input buffer is takeable by the player and still not by an
+  inserter.** C15 built the port split so a furnace between two inserters could
+  not become a place items shuffle back and forth in, and that rule is
+  untouched — `InserterSystem` asks `outputPortOf` and only ever will. What C15
+  did not intend is that the rule also caught the *player*, who is standing in
+  front of the machine with their hand in it. `handSourceOf` is the second
+  question, asked by the hand alone, and the INPUT section's rows grew TAKE
+  buttons. Closes C15's and C16's notes.
+
+- **`MachineStatus` gained an eighth member, `NoDestination`.** The enum was
+  meant to be complete on day one and this is the one it was missing: seven of
+  them answer "why has this machine stopped" and the eighth answers "it has not
+  stopped, it was never going to start". An inserter aimed at a splitter, at a
+  miner or at bare ground used to report `OutputFull` — a condition that clears
+  itself, and never did. Appending is safe; no existing number moves.
+
+- **Two new alerts, and only two.** The rule, written into `views/alert.ts`, is
+  that an alert is earned when the player has to *do* something and the
+  condition will not clear on its own: `no_destination` ("turn it round") and
+  `no_recipe` ("you never told it what to make"). `output_full` gets nothing,
+  deliberately — it is what a working factory looks like the moment a chest
+  fills, and a toast every time would train the player to ignore the corner of
+  the screen the important ones appear in.
+
+- **The rate window is a range, not a number.** C15 and C16 both filed the same
+  complaint and both deferred it here: at 300 ticks a plate furnace has three
+  items in its window and reads 12/min, then 24, then 18, while doing exactly
+  the same thing. The window now runs from 300 ticks to 900 and widens until it
+  holds five items — which is precisely where C12 drew its line without saying
+  so, since a miner puts five items in ten seconds. Miners, inserters, belts
+  and assemblers keep C12's window and C12's responsiveness untouched; the
+  furnaces widen. The first attempt trimmed to "the shortest span holding five
+  items" and read 14% high, because a window whose edge is chosen by looking at
+  the items always ends just after one; it is two fixed spans instead.
+
+- **Alt mode is a toggle, not a hold.** The genre holds the key and a browser
+  cannot honour that: `Alt` belongs to the window manager on two platforms, and
+  a key held while the pointer leaves the canvas is never seen released — so a
+  held alt mode would stick on. Bound to both alts and to `V`.
+
+- **Copy-settings is shift-right to copy, shift-left to paste**, the genre's
+  split. Copying a machine that is making *nothing* copies null and pasting it
+  clears the destination, which is the only way to stop a row of assemblers
+  without opening every panel; a copy click that hits bare ground leaves the
+  clipboard alone.
+
+**Deviations.**
+
+- **The v1 content target is not met, and cannot be without breaking the
+  chunk's own rule.** §15 wants 11 buildings, 13 materials and 20 recipes; C20
+  ships 7, 11 and 14. The remainder are gated on systems C20 is forbidden to
+  add:
+
+  ```text
+               §15 v1   C20 ships   waiting on
+  buildings        11           7   generator, power_pole (C21), lab (C22), radar (C23)
+  materials        13          11   frame, data_core (C22's lab consumes them)
+  recipes          20          14   4 building recipes, make_frame, make_data_core
+  ```
+
+  This is the rule `data/items.ts` has followed since C08: content no building
+  in the game can produce or consume is a row no test can tell is wrong.
+  `tests/balance/content.test.ts` asserts the three counts, so the day C21 adds
+  a generator the test fails and points the reader at the table.
+
+- **Hand-crafting is not implemented.** §15 lists five hand-craftable buildings
+  "so a new game is never soft-locked". It is a system — a craft queue, a
+  command, a readout — and is therefore out of scope here. The soft-lock is
+  unreachable anyway: the kit contains an assembler, demolition refunds in
+  full, and the recipe graph is provably closed over the raw resources. §15 now
+  says so. **This is the single most consequential thing C20 did not do**; see
+  the acceptance answers.
+
+- **Task 3's two time targets are met by a factor of twenty, which means they
+  were measuring something else.** `tests/balance/first-factory.test.ts` plays
+  a real new game on four generated seeds — a bot that walks on the game's own
+  legs and places every building through a validated `build` command — and
+  reaches its first automated plate in **22–35 simulated seconds**, not ten
+  minutes. The targets assumed an opening spent hand-crafting the first miner.
+  Rather than nudge a number, the milestone was re-derived: the test now also
+  measures **the first building the factory made for itself**, which is the
+  thing C20's recipes created and which lands at **58–71 seconds**. Both
+  numbers are asserted as ceilings with room in them, and the *floor* is
+  asserted too — under three minutes — so that a later chunk lengthening the
+  opening has to mean to.
+
+- **Adding a building now takes two content rows, not one.** C06's acceptance
+  was "zero code changes elsewhere", and that still holds: a building needs an
+  entry in `data/buildings.ts`, an entry in `data/items.ts`, a recipe and a
+  palette token, none of which is code. The alternative — deriving the item
+  from the building definition — would have put a buildings-to-items dependency
+  in the registry layer and made item ids depend on building order, which is
+  exactly what the persisted id mapping exists to prevent. A test asserts the
+  correspondence in both directions instead.
+
+- **`tests/balance/` is a fourth test directory.** §17 names unit, integration
+  and determinism. These are simulation tests by every mechanical measure and
+  run in the same project; what makes them worth separating is *what a failure
+  means* — a balance test that goes red is a content decision to re-derive, not
+  a defect to fix.
+
+- **Belt drag-build was not refined.** Task 5 names it and this pass found
+  nothing in it to fix: C13 implemented task 7 in full, and the rejection
+  spam a drag across occupied tiles produces is bounded by `MAX_TOASTS` and was
+  a **deliberate** C07 decision ("collapsing repeats into ×3 would make a fast
+  drag look like one event when it was thirty"). What the pass found instead is
+  that `rotate` has been in §7's command union since C04 and **has no
+  implementation at all** — so a belt laid the wrong way must be demolished and
+  rebuilt. That is the real friction, it is a new command arm, and it is
+  recorded below rather than smuggled in here.
+
+**Acceptance — answered honestly, in writing.**
+
+- **Can the player automate something within 10 minutes of starting?**
+  Yes, in about thirty seconds, measured on four seeds. That is the *wrong
+  side* of the target: the early game is closer to "trivially fast" than to a
+  grind, and it is because the starting kit is a working factory in a bag. The
+  fix is hand-crafting — earn the first miner rather than be handed it — and
+  that is a system, so it is C21+'s. **Weak.**
+
+- **Is improving throughput satisfying rather than fiddly?**
+  Yes, and more so than before this chunk. The measurable reason is the sixth
+  derived ratio: a gear assembler eats exactly one inserter's throughput, so
+  the obvious build runs at 89% and the fix is a second inserter rather than a
+  bigger number. That is a layout decision with a visible payoff, which is what
+  the pillar asks for. The alt-mode overlay is what makes it *findable* — the
+  question "which of these forty furnaces is on copper" could not be asked
+  before it. **Strong.**
+
+- **Does at least one stall force a layout change rather than a number tweak?**
+  Yes, and it is asserted: the reference factory's four furnaces feed an
+  assembler that wants 3.2 of them, the surplus fills the assembler's buffer,
+  the belt fills behind it and the furnaces stop with a full output. Nothing
+  can be tuned to fix that — the consumer has to be widened or the producer
+  narrowed. **Strong.**
+
+- **Do two different seeds produce two different factories?**
+  Yes. The four seeds the opening test plays put the nearest solid iron between
+  5 and 19 tiles from spawn and the nearest coal between 9 and 16, in different
+  directions, and one of them puts the coal across an inlet the first
+  greedy-walking bot could not get round. The factories those starts produce
+  differ in shape, not only in coordinates. **Strong.**
+
+- **Would you start another run?**
+  Yes — and the honest reason is that C20 is the first chunk where a run has
+  somewhere to go. Before it, the loop ended at "a chest fills with gears";
+  after it, the loop ends at "the factory is making its own belts and the
+  question is how many". What would make the *second* run different from the
+  first is the thing that is missing: the opening is identical every time
+  because the kit is identical every time. **Adequate, with the opening as the
+  known weakness.**
+
+> **Gate decision.** One weak answer, four strong-to-adequate. The rule is
+> "stay in C20 if two or more are weak", so C21 is open. The weak one is a
+> single, named, well-understood thing — the opening is given rather than
+> earned — and its fix is a system, which is precisely what C20 may not add.
+> It is carried forward as the first item below.
+
+**Tests.** `tests/balance/` is C20's, and it is three files.
+
+- `content.test.ts` — the content bible checked against itself: every building
+  is a registered item and every building item is placeable, in the same order;
+  every non-raw item is made by exactly one recipe; the recipe graph is closed
+  over the raw resources, so nothing in the game is unreachable; and the three
+  v1 counts, so the day a system lands the table's shortfall is a failing test
+  rather than a comment.
+- `ratios.test.ts` — §15's five derived ratios plus C20's sixth, computed from
+  the content tables rather than written down; then the **reference factory**,
+  which is C20's "10-machine factory producing a known items/minute": four
+  miners, four furnaces, an assembler and a chest, wired with twelve inserters
+  and a sixteen-tile belt, making **exactly 30 gears a minute** over ten
+  measured simulated minutes after a five-minute warm-up. It also asserts the
+  backpressure that surplus causes, because the stall is the design.
+- `first-factory.test.ts` — the opening, played. Four generated seeds, a bot
+  that routes breadth-first over walkable tiles and walks with `movePlayer`
+  commands, every building placed through a validated `build`. Both milestones
+  timed; both ceilings and one floor asserted.
+
+Elsewhere: `factory-builds-itself.test.ts` is the pillar-1 chain end to end,
+including the player taking a crafted chest out and placing it, and the full
+bag refusing a demolition; `alt-mode.test.ts` covers what the overlay labels
+and — the one a later chunk could break silently — what it does not;
+`stall-alerts.test.ts` covers the two new alerts, the one that deliberately
+gets none, and the hand-versus-inserter split on a machine's input buffer;
+`production-rate.test.ts` gained the slow-machine and fast-machine window
+cases; `inserter-system.test.ts` now asserts `no_destination` where it used to
+assert a lying `output_full`.
+
+**Noticed, not fixed.**
+
+- **The opening is given, not earned, and that is C20's one weak acceptance
+  answer.** Without hand-crafting the starting kit *has* to contain a working
+  factory, so the first automated plate costs a walk and four clicks. The whole
+  of the fix is one system — a craft queue and a `craftItem` command — and
+  §15 already specifies exactly which five buildings it covers. Whichever chunk
+  takes it should re-run `tests/balance/first-factory.test.ts`, whose floor
+  assertion exists to make that change visible.
+- **`rotate` is in §7's command union and has no implementation.** Declared in
+  C04, never built, and nothing produces it — so a belt, an inserter or a
+  miner placed facing the wrong way can only be demolished and rebuilt. It is
+  the most-felt missing interaction in the game and it is what "belt drag-build
+  refinement" would actually be built on: a drag crossing a belt that faces the
+  wrong way should re-aim it. The work is a `BuildSystem.rotate` plus a
+  decision about the one building whose footprint changes shape with rotation
+  (the 1×2 splitter) and about what happens to items on a belt that turns.
+- **`steel` has no consumer.** `smelt_steel` makes it, nothing spends it, and
+  the recipe that would — `make_frame` — belongs to C22's lab. A player can
+  smelt it and has nothing to do with it. `content.test.ts` carries it as a
+  named exception and fails when that stops being true, so the exception cannot
+  rot.
+- **A demolished building's *contents* are still lost.** C20 made the refund
+  honest — a full bag refuses the removal rather than voiding it — but a chest
+  full of plates still goes with the chest. That is a bigger decision than a
+  refund (where do fifty plates go when the bag holds thirty?) and belongs with
+  whatever chunk gives the player somewhere to put them.
+- **The alt-mode badge is drawn per machine per frame, unculled.** It walks the
+  whole entity store and allocates one object per labelled machine, which is
+  the shape `describeEntities` already has and the same answer applies: C28
+  measures it, C29 makes it incremental. It only runs while the mode is on.
+- **The reference factory is refuelled by hand, once a minute.** Fifty coal is
+  400 simulated seconds and the measurement is fifteen minutes, so a fuel belt
+  would be a second chain between the measurement and the thing measured. It is
+  a seam a later chunk could close by feeding it from a coal miner, and C21's
+  generator will want the same fixture.
+- **`ProductionRate` now keeps up to 900 samples in two arrays**, up from 300,
+  and still drops the oldest with `shift()`. C12 called that "nothing" at 301
+  and it is three times nothing now; a ring buffer is still more code than it
+  saves until a profiler says otherwise (§19 rule 20).
+- **A machine that stops takes up to thirty seconds to read zero** if it was
+  slow enough to earn the wide window. The status says "stalled" immediately
+  and the rate is a different question, but it is a real consequence of the
+  window change and worth knowing before C28 measures anything against a rate.
+
 ---
 
 ## C21 — Power
@@ -4663,6 +4959,32 @@ player bag        = 30 slots
 adds `gear`, `copper_wire` and `circuit` with the recipes that make them, and
 `frame` and `data_core` wait for C22's lab, which is what consumes them.
 
+**Building items (C20).** The thirteen above are the *materials*. Every
+building in the table below is also an item — that is what "placed by consuming
+their item" means — and C20 registered the seven that exist, in building-table
+order, with `category: 'building'`:
+
+| id | stack |
+|---|---|
+| `miner` | 50 |
+| `belt` | 100 |
+| `splitter` | 50 |
+| `inserter` | 50 |
+| `furnace` | 50 |
+| `assembler` | 50 |
+| `chest` | 50 |
+
+A hundred belts and fifty of everything else: belts are spent a dozen at a time
+and a stack that runs out mid-drag reads as a bug (C13); fifty of anything else
+is past what a player carries before they run out of somewhere to put it. Both
+are **balance numbers**. The four buildings still owed — generator, power pole,
+lab, radar — bring their items with them in C21–C23.
+
+Adding a building is therefore now **two** content rows and not one: an entry in
+`data/buildings.ts`, an entry in `data/items.ts`, a recipe, and a palette token
+named after the item id. C06's "zero code changes elsewhere" still holds — none
+of those is code — and `tests/balance/content.test.ts` fails if any is missing.
+
 **Recipe selection.** A machine either reads its own input buffer and runs
 whatever the items in it name (`auto` — the furnace) or makes what the player
 told it and nothing else, through an empty buffer included (`player` — the
@@ -4700,8 +5022,22 @@ divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
 
 The last three are examples of the **building recipes**: every building in the
 table below has one, taking exactly the ingredients in its "crafted from" column.
-They are not re-listed here. Total v1 recipe count: **9 processing + 11 building
-= 20**.
+Total v1 recipe count: **9 processing + 11 building = 20**.
+
+C20 shipped seven of the eleven — one per building that exists — and authored
+the four times this table did not give. They are **balance numbers**, chosen so
+a building's craft time tracks the size of its bill rather than being flat:
+
+| id | time | why |
+|---|---|---|
+| `make_splitter` | 1.0 s | twice a belt's pair-worth, plus a circuit |
+| `make_furnace` | 2.0 s | a miner's, and its twelve bricks are the real cost |
+| `make_assembler` | 4.0 s | the biggest bill; at speed 0.5 it is eight seconds, the longest single craft in the game |
+| `make_chest` | 0.5 s | four plates, the cheapest thing in the table |
+
+`make_furnace` is the only consumer `brick` has, and therefore the only reason
+to bake one — which is the only reason to mine `stone`. `steel` still has none:
+`make_frame` is its consumer and belongs to C22's lab. See C20's noted gaps.
 
 Building items being craftable is what lets the factory eventually build itself —
 a strong pillar-1 moment, and the reason `make_miner` is worth its cost.
@@ -4715,11 +5051,27 @@ a strong pillar-1 moment, and the reason `make_miner` is worth its cost.
                              needs  1.0 plate/s  =  3.2 plate furnaces
 1 belt tier 1 (8 items/s)    saturated by 16 miners, or 8 std inserters
 1 std inserter (1 item/s)    feeds  3.2 plate furnaces
+1 gear assembler             eats   1.0 plate/s  =  exactly 1 std inserter
 ```
 
-The last two lines are the interesting ones: a single inserter cannot saturate a
-belt, and a single belt can carry the output of an implausible number of miners.
-That asymmetry is where layout decisions live.
+The last three lines are the interesting ones: a single inserter cannot saturate
+a belt, and a single belt can carry the output of an implausible number of
+miners. That asymmetry is where layout decisions live.
+
+**The sixth line is C20's, and it is the sharpest ratio in the game.** A gear
+assembler consumes exactly 1.0 plate/s and a standard inserter moves exactly
+1.0 item/s. They are *equal*, so one inserter can only feed a gear assembler if
+it never misses a swing — and it always misses some, because the belt slot
+under it is sometimes empty. Measured in the reference factory, one inserter
+delivers about 0.89 plates/s and the assembler runs at 89% of its rate for ever,
+with no stall, no alert and nothing on screen to say why. **Two inserters per
+gear assembler** is the answer; a player who has not worked that out has a
+factory that is quietly a ninth slow.
+
+That is a feature, not a defect — it is the layout puzzle arriving at the
+smallest scale it can — but it is written down so that a later tweak to either
+number makes a decision about it rather than an accident.
+`tests/balance/ratios.test.ts` holds all six.
 
 ### Buildings
 
@@ -4745,6 +5097,15 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 Hand-craftable without a machine (so a new game is never soft-locked):
 `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they need.
 Everything else requires an assembler.
+
+**Not implemented, and deliberately so (C20).** Hand-crafting is a *system* —
+a craft queue, a command and a progress readout — and C20 forbids adding one.
+The soft-lock it guards against cannot be reached without it either: the
+starting kit contains an assembler, demolition refunds in full, and
+`tests/balance/content.test.ts` proves every item in the game is reachable from
+raw resources through the recipe graph. It belongs to whichever chunk wants the
+*opening* to be a hand-crafted bootstrap rather than a given kit — see C20's
+report on why that matters more than it sounds.
 
 11 buildings — above the "5–8" of the previous revision, but each one is a
 distinct verb, not a variant.
@@ -4850,6 +5211,7 @@ optimisation requires a simulation change, the layering is wrong.
 |---|---|---|
 | Unit | node | inventory, recipes, belts, inserters, collision, depletion, prerequisites, command validation, serialization, migration, worldgen, projection |
 | Integration | node, **no DOM, no canvas** | full production chains |
+| Balance | node | §15's ratios against the content tables, and against a factory that runs (C20) |
 | Determinism | node | hash equality across reruns, frame patterns, build orders, save round-trips |
 | Benchmark | node | per-system tick cost against committed baselines |
 | UI | jsdom | panel mount/update, no-subtree-rebuild, controller boundary |
@@ -4866,6 +5228,7 @@ miner -> belt -> inserter -> chest                (C14)
 miner -> belt -> inserter -> furnace -> inserter -> chest      (C15)
 ore -> smelt -> assemble -> chest                 (C16, tests/integration/ore-to-gears.test.ts)
 belt -> splitter -> 2 belts -> 2 chests           (C17, tests/integration/belt-splitter-chests.test.ts)
+ore -> smelt -> assemble -> a placed building     (C20, tests/integration/factory-builds-itself.test.ts)
 full chain with power browning out                (C21)
 full chain producing data cores -> lab -> research complete    (C22)
 ```
@@ -4878,6 +5241,13 @@ full chain producing data cores -> lab -> research complete    (C22)
 3. Save round-trip equality (C24) — protects saves.
 4. The C15 vertical-slice chain — protects the game.
    (`tests/integration/vertical-slice.test.ts`, written in C15.)
+
+A fifth joined them in C20 and is named separately because it protects
+something the other four do not — the **content**, rather than the code:
+`tests/balance/ratios.test.ts`. Every rate in §15 is derived from every other,
+and a number changed without re-deriving the table produces a game that still
+runs and is no longer balanced, which no defect test can see. If it fails, the
+answer is to re-derive §15, not to widen the tolerance.
 
 If a refactor breaks one of these, the refactor is wrong. Do not update the test
 to match the new behaviour without an explicit, reasoned decision recorded in the

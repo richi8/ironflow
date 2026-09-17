@@ -48,10 +48,23 @@ export const FIRST_ITEM_ID: ItemId = 1;
  * Where an item sits in the production chain. Drives UI grouping and, later,
  * the order the inventory panel lists things in. Not a rule about recipes —
  * recipes say what turns into what, this only says what to call the result.
+ *
+ * `building` is C20's, and it is the category that finally makes §15's
+ * sentence true: "buildings are placed by consuming their item from the
+ * player's inventory". A building item is an ordinary item in every respect —
+ * it stacks, it rides a belt, an assembler makes it — and the category exists
+ * so the build menu and the inventory panel can tell it from an ingredient
+ * without a list of ids (§19 rule 17). Nothing in `game/` branches on it.
  */
-export type ItemCategory = 'raw' | 'plate' | 'intermediate' | 'science';
+export type ItemCategory = 'raw' | 'plate' | 'intermediate' | 'science' | 'building';
 
-const ITEM_CATEGORIES: readonly ItemCategory[] = Object.freeze(['raw', 'plate', 'intermediate', 'science']);
+const ITEM_CATEGORIES: readonly ItemCategory[] = Object.freeze([
+  'raw',
+  'plate',
+  'intermediate',
+  'science',
+  'building',
+]);
 
 /**
  * The largest stack any item may declare.

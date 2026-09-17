@@ -158,6 +158,8 @@ describe('the shipped item table', () => {
     const registry = new ItemRegistry(ITEMS);
 
     expect(registry.all().map((item) => item.id)).toEqual([
+      // §15's materials: eleven of its thirteen. `frame` and `data_core` wait
+      // for C22's lab, which is the only thing that consumes them.
       'iron_ore',
       'copper_ore',
       'coal',
@@ -169,10 +171,20 @@ describe('the shipped item table', () => {
       'gear',
       'copper_wire',
       'circuit',
+      // Building items (C20), in `data/buildings.ts` order.
+      'miner',
+      'belt',
+      'splitter',
+      'inserter',
+      'furnace',
+      'assembler',
+      'chest',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);
     expect(registry.stackSizeOf(registry.idOf('copper_wire'))).toBe(200);
+    expect(registry.stackSizeOf(registry.idOf('belt'))).toBe(100);
+    expect(registry.stackSizeOf(registry.idOf('assembler'))).toBe(50);
   });
 
   it('burns coal for §15’s eight seconds, and nothing else at all', () => {

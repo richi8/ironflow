@@ -5,7 +5,10 @@ import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { EntityStore } from '../../src/game/entities/entity-store.js';
 import { footprintTiles } from '../../src/game/entities/entity.js';
 import { EntityType } from '../../src/game/entities/entity-types.js';
-import { ItemCounts } from '../../src/game/items/item-stack.js';
+import { BuildMaterials } from '../../src/game/items/build-materials.js';
+import { SlotInventory } from '../../src/game/items/inventory.js';
+import { ITEMS } from '../../src/game/data/items.js';
+import { ItemRegistry, type ItemDefinition } from '../../src/game/registries/item-registry.js';
 import { BuildingRegistry, type BuildingDefinition } from '../../src/game/registries/building-registry.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { BuildSystem } from '../../src/game/systems/build-system.js';
@@ -90,16 +93,41 @@ const PIPE: BuildingDefinition = {
 interface Harness {
   readonly world: World;
   readonly entities: EntityStore;
-  readonly inventory: ItemCounts;
+  readonly inventory: BuildMaterials;
   readonly buildings: BuildingRegistry;
   readonly system: BuildSystem;
+}
+
+/**
+ * The item a synthetic building is paid for with.
+ *
+ * Since C20 a build cost is paid out of the player's one real inventory, which
+ * keys on the item registry's numeric ids — so a building invented in a test
+ * needs an item invented with it, exactly as a building added to
+ * `data/buildings.ts` needs a row in `data/items.ts`. That correspondence is
+ * asserted for the shipped content in `tests/balance/content.test.ts`; here it
+ * is just what makes a made-up building purchasable.
+ */
+function itemFor(definition: BuildingDefinition): ItemDefinition {
+  const cost = definition.buildCost[0];
+  return {
+    id: cost?.itemId ?? definition.id,
+    name: definition.name,
+    stackSize: 50,
+    sprite: `item:${cost?.itemId ?? definition.id}`,
+    category: 'building',
+  };
 }
 
 function harness(extra: readonly BuildingDefinition[] = [PIPE], stock = 10): Harness {
   const world = testWorld();
   const buildings = new BuildingRegistry([...BUILDINGS, ...extra]);
   const entities = new EntityStore({ footprintOf: buildings.footprintOf });
-  const inventory = new ItemCounts();
+  const items = new ItemRegistry([...ITEMS, ...extra.map(itemFor)]);
+  const inventory = new BuildMaterials(
+    new SlotInventory({ slots: 200, stackSizeOf: items.stackSizeOf }),
+    items,
+  );
   for (const definition of buildings.all()) inventory.add(definition.id, stock);
   return {
     world,
@@ -244,8 +272,10 @@ describe('placement validation', () => {
       world: h.world,
       buildings: h.buildings,
       entities: h.entities,
-      inventory: h.inventory,
     });
+    // Stocked through the simulation's own bag: since C20 there is only one,
+    // and it is the player's — `Simulation` no longer takes one to hold.
+    for (const definition of h.buildings.all()) simulation.inventory.add(definition.id, 10);
     for (const [x, y] of [
       [0, 0],
       [20, 5],
@@ -528,56 +558,78 @@ describe('adding a building', () => {
   });
 });
 
-describe('ItemCounts', () => {
+describe('BuildMaterials', () => {
+  /**
+   * The string-keyed view that replaced C06's `ItemCounts` bag (C20).
+   *
+   * What is worth testing is not the arithmetic — a `SlotInventory` already
+   * owns that — but the three things the *view* decides: an unknown id is
+   * worth nothing rather than throwing, a cost is paid all or not at all, and
+   * a refund that will not fit is refused rather than half-made. The last one
+   * is new: the old bag had no capacity and could not fail to accept a refund.
+   */
+  function materials(slots = 10): BuildMaterials {
+    const items = new ItemRegistry(ITEMS);
+    return new BuildMaterials(new SlotInventory({ slots, stackSizeOf: items.stackSizeOf }), items);
+  }
+
   it('adds, removes partially, and reports what happened', () => {
-    const items = new ItemCounts();
-    expect(items.add('gear', 5)).toBe(5);
-    expect(items.count('gear')).toBe(5);
-    expect(items.remove('gear', 7)).toBe(5);
-    expect(items.count('gear')).toBe(0);
-    expect(items.remove('gear', 1)).toBe(0);
-    expect(items.isEmpty()).toBe(true);
+    const bag = materials();
+    expect(bag.add('gear', 5)).toBe(5);
+    expect(bag.count('gear')).toBe(5);
+    expect(bag.remove('gear', 7)).toBe(5);
+    expect(bag.count('gear')).toBe(0);
+    expect(bag.remove('gear', 1)).toBe(0);
+  });
+
+  it('is worth nothing in an item no registry knows, rather than throwing', () => {
+    const bag = materials();
+    expect(bag.count('sprocket')).toBe(0);
+    expect(bag.add('sprocket', 4)).toBe(0);
+    expect(bag.canAfford([{ itemId: 'sprocket', count: 1 }])).toBe(false);
+    expect(bag.hasRoomFor([{ itemId: 'sprocket', count: 1 }])).toBe(false);
   });
 
   it('pays a cost in full or not at all', () => {
-    const items = new ItemCounts();
-    items.add('gear', 2);
-    items.add('plate', 1);
+    const bag = materials();
+    bag.add('gear', 2);
+    bag.add('iron_plate', 1);
     const cost = [
       { itemId: 'gear', count: 2 },
-      { itemId: 'plate', count: 4 },
+      { itemId: 'iron_plate', count: 4 },
     ];
 
-    expect(items.canAfford(cost)).toBe(false);
-    expect(items.take(cost)).toBe(false);
+    expect(bag.canAfford(cost)).toBe(false);
+    expect(bag.take(cost)).toBe(false);
     // The gears are still there: a partial payment for a building that never
     // appeared is items the player cannot account for.
-    expect(items.count('gear')).toBe(2);
+    expect(bag.count('gear')).toBe(2);
 
-    items.add('plate', 3);
-    expect(items.take(cost)).toBe(true);
-    expect(items.toJSON()).toEqual({});
+    bag.add('iron_plate', 3);
+    expect(bag.take(cost)).toBe(true);
+    expect(bag.toJSON()).toEqual({});
   });
 
-  it('serializes sorted, so two routes to the same contents look the same', () => {
-    const a = new ItemCounts();
-    a.add('plate', 2);
-    a.add('gear', 1);
+  it('refuses a refund that will not fit, rather than losing half of it', () => {
+    // One slot, holding a full stack of something else: there is nowhere for a
+    // chest to go, and `give` must change nothing rather than drop it.
+    const bag = materials(1);
+    expect(bag.add('iron_plate', 100)).toBe(100);
 
-    const b = new ItemCounts();
-    b.add('gear', 3);
-    b.add('plate', 5);
-    b.remove('gear', 2);
-    b.remove('plate', 3);
-
-    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-    expect(Object.keys(a.toJSON())).toEqual(['gear', 'plate']);
+    const refund = [{ itemId: 'chest', count: 1 }];
+    expect(bag.hasRoomFor(refund)).toBe(false);
+    expect(bag.give(refund)).toBe(false);
+    expect(bag.count('chest')).toBe(0);
+    expect(bag.count('iron_plate')).toBe(100);
   });
 
-  it('refuses an amount that is not a whole number of items', () => {
-    const items = new ItemCounts();
-    expect(() => items.add('gear', -1)).toThrow(RangeError);
-    expect(() => items.remove('gear', 0.5)).toThrow(RangeError);
+  it('serializes sorted by string id, so the HUD rows never reorder', () => {
+    const bag = materials();
+    bag.add('iron_plate', 2);
+    bag.add('gear', 1);
+    bag.add('coal', 3);
+
+    expect(Object.keys(bag.toJSON())).toEqual(['coal', 'gear', 'iron_plate']);
   });
 });
 
@@ -596,7 +648,11 @@ describe('the playground world', () => {
     const world = new World(createPlaygroundGenerator());
     const buildings = new BuildingRegistry(BUILDINGS);
     const entities = new EntityStore({ footprintOf: buildings.footprintOf });
-    const inventory = new ItemCounts();
+    const items = new ItemRegistry(ITEMS);
+    const inventory = new BuildMaterials(
+      new SlotInventory({ slots: 30, stackSizeOf: items.stackSizeOf }),
+      items,
+    );
     for (const definition of buildings.all()) inventory.add(definition.id, 1);
     const system = new BuildSystem({ world, entities, buildings, inventory });
 

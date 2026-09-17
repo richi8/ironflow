@@ -7,6 +7,7 @@ import {
   type BeltEntity,
 } from '../../src/game/entities/belt-entity.js';
 import { newChest, type ChestEntity } from '../../src/game/entities/chest-entity.js';
+import { newSplitter } from '../../src/game/entities/splitter-entity.js';
 import {
   InserterState,
   newInserter,
@@ -232,9 +233,14 @@ describe('an inserter that cannot finish', () => {
 
     // Nothing in IronFlow deletes an item the player mined, and there is no
     // ground to drop one on (§2). It waits, and says why.
+    //
+    // `no_destination` since C20, where this used to read `output_full`. The
+    // chest is *gone*: nothing will ever take from this arm again until the
+    // player builds something under it, and "output full" named a condition
+    // that was going to clear itself and never would.
     expect(inserter.state).toBe(InserterState.Drop);
     expect(inserter.heldItem).toBe(IRON);
-    expect(inserter.status).toBe(MachineStatus.OutputFull);
+    expect(inserter.status).toBe(MachineStatus.NoDestination);
 
     // A new chest under the arm and the held item goes straight in.
     const replacement = simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
@@ -243,13 +249,28 @@ describe('an inserter that cannot finish', () => {
     expect(stored(replacement)).toBe(1);
   });
 
-  it('stays idle with nothing behind it and nothing in front of it', () => {
+  it('says it has nowhere to put anything, with nothing behind it and nothing in front', () => {
     const simulation = new Simulation({ world: flatWorld() });
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
 
     expect(() => run(simulation, 100)).not.toThrow();
     expect(inserter.state).toBe(InserterState.Idle);
-    expect(inserter.status).toBe(MachineStatus.Idle);
+    // C20: the destination is asked about before the source, because an arm
+    // pointed at bare ground is misconfigured whether or not there is
+    // anything behind it — and "nothing to do" would send the player to look
+    // at the wrong end of it.
+    expect(inserter.status).toBe(MachineStatus.NoDestination);
+    expect(simulation.alerts.take().map((alert) => alert.type)).toEqual(['inserter_no_destination']);
+  });
+
+  it('raises the no-destination alert once, not once a tick', () => {
+    const simulation = new Simulation({ world: flatWorld() });
+    simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
+
+    run(simulation, 1);
+    expect(simulation.alerts.take()).toHaveLength(1);
+    run(simulation, 300);
+    expect(simulation.alerts.take()).toHaveLength(0);
   });
 
   it('refuses a miner as a destination, because a miner has no way in', () => {
@@ -268,7 +289,23 @@ describe('an inserter that cannot finish', () => {
 
     run(simulation, CONFIG.ticksPerItem * 3);
     expect(inserter.state).toBe(InserterState.Idle);
-    expect(inserter.status).toBe(MachineStatus.OutputFull);
+    // C17's complaint, generalised and answered: a miner has no input port and
+    // neither does a splitter, so an arm aimed at one waits for ever. Since
+    // C20 it says so, in the one status the player can act on (`no_destination`
+    // means "turn it round"), and the ore stays where it is either way.
+    expect(inserter.status).toBe(MachineStatus.NoDestination);
+    expect(stored(source)).toBe(10);
+  });
+
+  it('says the same about a splitter, which is what C17 noticed', () => {
+    const simulation = new Simulation({ world: flatWorld() });
+    const source = simulation.entities.create<ChestEntity>(newChest(0, 5, NORTH));
+    source.contents = [[IRON, 10]];
+    const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 5, EAST));
+    simulation.entities.create(newSplitter(2, 5, EAST));
+
+    run(simulation, CONFIG.ticksPerItem * 3);
+    expect(inserter.status).toBe(MachineStatus.NoDestination);
     expect(stored(source)).toBe(10);
   });
 });

@@ -51,11 +51,14 @@ export const PALETTE = Object.freeze({
   'terrain-stone': '#55606e',
   'terrain-water': '#23516e',
 
-  /* resources */
-  iron: '#7d94ad',
+  /* resources. C20 pulled `iron` warmer and `stone` cooler and lighter: on a
+     generated map the two sat four points apart in hue and iron ore on stone
+     terrain (`#55606e`) was near-invisible, which C19 noticed and which is a
+     §11 decision C20's pass owns. */
+  iron: '#8fa6c6',
   copper: '#c96a3a',
   coal: '#2b3242',
-  stone: '#9aa3ad',
+  stone: '#b9b2a2',
 
   /* smelted goods (C15). A plate takes its ore's colour — `item:iron_plate`
      strips the suffix — so only the two that are nobody's ore need their own. */
@@ -67,6 +70,20 @@ export const PALETTE = Object.freeze({
      is what makes a belt of copper read as one line from ore to wire. */
   gear: '#8b96a4',
   circuit: '#3f8f6a',
+
+  /* building items (C20). §15's building recipes make a building into a thing
+     that rides a belt, so every one of them needs a colour — and one shared
+     "machine grey" would make a mixed line of them unreadable, which is the
+     one thing a placeholder palette still has to get right. The token *is* the
+     item id, exactly as a resource's is, so adding a building adds a colour
+     here and nothing anywhere else. */
+  miner: '#e0913f',
+  belt: '#4f7fa8',
+  splitter: '#6b8fd4',
+  inserter: '#7a6ec4',
+  chest: '#8a7250',
+  furnace: '#c25a4a',
+  assembler: '#46a88f',
 });
 
 /** Every colour token the renderer may name. */

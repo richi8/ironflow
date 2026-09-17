@@ -207,6 +207,20 @@ export interface InputManagerOptions {
    * else decides what it means".
    */
   readonly onAction?: (action: InputAction, phase: 'down' | 'up') => void;
+  /**
+   * What recipe a machine is running, for copy-settings (C20 task 5).
+   *
+   * A single function rather than a controller, for the reason `picker` and
+   * `camera` are narrow interfaces: this layer may ask one question about the
+   * world and may not reach into it. The answer is a **string recipe id**,
+   * which is the vocabulary a command speaks (§7) — so what gets copied is
+   * exactly what gets pasted, with nothing in between that could translate it
+   * differently.
+   *
+   * Optional, because every test that drives clicks predates it and a manager
+   * without one simply has nothing to copy.
+   */
+  readonly recipeOf?: (entityId: EntityId) => string | null;
 }
 
 /** Keyboard pan speed, in CSS pixels per second. About a screen every 1.5 s. */
@@ -325,12 +339,27 @@ export class InputManager {
   /** True while the left button is held over a tile with an empty hand. */
   private mining = false;
 
+  /**
+   * The recipe the player last shift-right-clicked, or null (C20 task 5).
+   *
+   * Presentation state, held here rather than in the simulation because it is
+   * a fact about the player's *intention* and not about the world: a clipboard
+   * that survived a save would paste a recipe into a factory the player had
+   * forgotten they copied it from. It is cleared by nothing, which is what
+   * makes it useful — one copy, then a row of pastes.
+   */
+  private copiedRecipe: string | null = null;
+
+  /** See `InputManagerOptions.recipeOf`. Undefined in tests that predate C20. */
+  private readonly recipeOf: ((entityId: EntityId) => string | null) | undefined;
+
   constructor(options: InputManagerOptions) {
     this.canvas = options.canvas;
     this.camera = options.camera;
     this.picker = options.picker;
     this.commands = options.commands;
     this.onAction = options.onAction;
+    this.recipeOf = options.recipeOf;
 
     this.mouse = new MouseInput(options.canvas, {
       onPointerDown: (sample) => this.handleDown(sample),
@@ -502,6 +531,12 @@ export class InputManager {
     }
 
     if (sample.button === BUTTON_LEFT) {
+      // Paste, before anything else the left button means: with the modifier
+      // held this click is not a placement and must not begin a drag.
+      if (this.keyboard.isHeld('machine.copyModifier')) {
+        this.pasteRecipe();
+        return;
+      }
       this.beginDrag(sample, 'tile');
       // Placing does not move the selection: dragging out a row of chests
       // should not drag the inspector along behind it. With an empty hand the
@@ -523,6 +558,13 @@ export class InputManager {
     }
 
     if (sample.button === BUTTON_RIGHT) {
+      // Copy, before the demolish: shift-right-click on a machine must never
+      // be the click that removes it, which is the same rule the cancel below
+      // follows and the more expensive one to get wrong.
+      if (this.keyboard.isHeld('machine.copyModifier')) {
+        this.copyRecipe();
+        return;
+      }
       // With a building held, the right button puts it down — the genre's
       // universal "cancel", and the reason it does not also demolish: the
       // click that cancels a misplaced ghost must never be the click that
@@ -843,6 +885,35 @@ export class InputManager {
   }
 
   /** Ask the simulation to demolish whatever stands on a tile (C06 task 6). */
+  /**
+   * Remember what the machine under the cursor is making (C20 task 5).
+   *
+   * A machine that is making *nothing* copies as null, deliberately: pasting
+   * that clears the destination's recipe, which is the only way to say "stop
+   * making gears" to a row of assemblers without opening eight panels. Bare
+   * ground copies nothing at all and leaves the clipboard alone — a
+   * shift-right-click that missed should not silently empty it.
+   */
+  private copyRecipe(): void {
+    const entityId = this.hoveredEntity;
+    if (entityId === null || this.recipeOf === undefined) return;
+    this.copiedRecipe = this.recipeOf(entityId);
+  }
+
+  /**
+   * Set the machine under the cursor to the copied recipe.
+   *
+   * The simulation is still the authority (§7): a chest, a belt or a furnace
+   * refuses with `not_accepted` and the player gets the toast. Nothing here
+   * pre-checks it, because the check would be a second copy of a rule that
+   * already exists in `hand-system.ts` and the two would drift.
+   */
+  private pasteRecipe(): void {
+    const entityId = this.hoveredEntity;
+    if (entityId === null) return;
+    this.commands.enqueue({ type: 'setRecipe', entityId, recipeId: this.copiedRecipe });
+  }
+
   private removeAt(tile: TileCoord | null): void {
     if (tile === null) return;
     this.commands.enqueue({ type: 'remove', x: tile.x, y: tile.y });

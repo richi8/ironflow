@@ -14,10 +14,16 @@ import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
 import { CanvasRenderer } from './renderer/canvas-renderer.js';
-import { buildingSprite, describeBeltItems, describeEntities, describePlayer } from './renderer/entity-view.js';
+import {
+  buildingSprite,
+  describeAnnotations,
+  describeBeltItems,
+  describeEntities,
+  describePlayer,
+} from './renderer/entity-view.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
-import type { GhostView, RenderState } from './renderer/render-state.js';
+import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
 import { GameUI } from './ui/ui.js';
 
 /**
@@ -63,14 +69,16 @@ function describeOre(world: World, x: number, y: number): string {
 
 /** What the player starts carrying. See the note at the assignment below. */
 const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
-  miner: 5,
-  belt: 100,
-  splitter: 10,
-  inserter: 20,
-  furnace: 10,
-  assembler: 3,
-  chest: 10,
+  miner: 2,
+  belt: 40,
+  inserter: 6,
+  furnace: 2,
+  assembler: 1,
+  chest: 4,
 });
+
+/** The alt-mode overlay, off. Shared and frozen: every frame the key is not on. */
+const NO_ANNOTATIONS: readonly MachineAnnotation[] = Object.freeze([]);
 
 /** Fraction of the viewport the player may roam before the camera follows. */
 const FOLLOW_DEADZONE = 0.5;
@@ -136,28 +144,40 @@ function bootstrap(): void {
   surface.onResize(applySize);
 
   /**
-   * What the player starts with (C10).
+   * What the player starts with (C10, retuned in C20).
    *
-   * C06 handed out fifty of everything, which was scaffolding to make "place a
-   * building" reachable at all. This is the real thing: enough to get a first
-   * miner onto ore, a run of belt away from it and a chest at the end, and not
-   * enough to cover the map without ever mining. A hundred belts is the odd
-   * one out — belts are cheap, they are spent a dozen at a time, and running
-   * out of them mid-drag is the one shortage that makes the game feel broken
-   * rather than constrained (C13). Twenty inserters is four per miner, which is
-   * enough to wire a first factory and not enough to skip thinking about where
-   * they go (C14). Ten furnaces is two per miner, which is just over §15's
-   * 1.6 and is the first number here that comes out of the content table
-   * rather than out of the feel of the thing (C15). Three assemblers is the
-   * same arithmetic one step along: §15 says a gear assembler needs 3.2 plate
-   * furnaces, so ten furnaces feed three of them (C16). Ten splitters is
-   * two per miner, which is the number it takes to fan one ore line out to
-   * four consumers — one split, then a split of each half — and the first
-   * layout the player has to think about rather than the last (C17). All of
-   * them are **balance numbers**, and all of them are still temporary in one respect —
-   * §15's building recipes make buildings craftable, and a starting stock then
-   * becomes a decision about the first five minutes rather than about whether
-   * the game can be played at all.
+   * Every chunk up to C19 grew this list, because a building the player could
+   * not make was a building they had to be given: C06 handed out fifty of
+   * everything, and C13 through C17 each added their own with a paragraph of
+   * arithmetic behind it. C20's building recipes end that. A starting stock is
+   * now a decision about **the first five minutes** and nothing else, so it
+   * shrank by about three quarters.
+   *
+   * What it buys, and why each number is the number:
+   *
+   * ```text
+   * 2 miner      one on iron, one on coal — the smallest factory that runs
+   *              itself, and one short of the copper the assembler wants
+   * 40 belt      twenty tiles each way; enough to reach ore that is not
+   *              underfoot, not enough to cross the map (C13)
+   * 6 inserter   two per furnace and two spare: ore in, plates out
+   * 2 furnace    §15 says a miner feeds 1.6 of them, so two is one miner's
+   *              worth and the ratio is visible in the first thing built
+   * 1 assembler  the machine that makes everything else, including more of
+   *              itself. One, so the second one is earned
+   * 4 chest      somewhere to put plates, and the answer to a full bag
+   * ```
+   *
+   * **No splitter.** It is the one building here whose recipe needs a circuit,
+   * and C17's layout puzzle is worth more when it arrives as something the
+   * player built than as something they woke up holding.
+   *
+   * The whole kit is worth about 90 iron plates and 20 copper, which at one
+   * miner and two furnaces is roughly five minutes of production — so it reads
+   * as a head start rather than as a finished factory. All of these are
+   * **balance numbers**; the acceptance they are tuned against is C20's "first
+   * automated plate within 10 minutes", measured in
+   * `tests/balance/first-factory.test.ts`.
    */
   for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
     simulation.inventory.add(buildingId, count);
@@ -183,6 +203,17 @@ function bootstrap(): void {
    */
   let renderSeconds = 0;
 
+  /**
+   * Is the alt-mode overlay on? C20 task 5.
+   *
+   * Presentation state and nothing else: it changes what is drawn over the
+   * world and touches neither the simulation nor the DOM, so it lives here
+   * beside `renderSeconds` rather than in `GameController` — §13's rule is
+   * that a view model carries what exists, and "is the player holding a key"
+   * is not a fact about the game.
+   */
+  let altMode = false;
+
   /* ------------------------------------------------------------------ *
    * Input (C04).
    *
@@ -193,12 +224,17 @@ function bootstrap(): void {
    * `ScenePicker` satisfy theirs structurally; neither knows this layer exists.
    * ------------------------------------------------------------------ */
   const picker = new ScenePicker(camera, () => renderEntities);
-  const input = new InputManager({
+  const input: InputManager = new InputManager({
     canvas,
     keyTarget: document,
     camera,
     picker,
     commands: simulation.commands,
+    // Copy-settings (C20 task 5). Deferred through a closure because the
+    // controller is built *from* this manager — it is the cursor — so the two
+    // cannot both be constructed first. It is only ever called from a click,
+    // which is long after both exist.
+    recipeOf: (entityId): string | null => controller.getBuildingView(entityId)?.recipe?.id ?? null,
     onAction: (action, phase) => {
       if (phase === 'down') handleAction(action);
     },
@@ -219,6 +255,10 @@ function bootstrap(): void {
     }
     if (action === 'ui.toggleBuildMenu') {
       ui.toggleBuildMenu();
+      return;
+    }
+    if (action === 'ui.toggleAltMode') {
+      altMode = !altMode;
       return;
     }
     if (action === 'game.togglePause') {
@@ -307,6 +347,12 @@ function bootstrap(): void {
       hover: input.hover,
       ghost: currentGhost(),
       selected: controller.getSelectionView(),
+      // Only walked while the mode is on: a player who never presses the key
+      // pays nothing, and `NO_ANNOTATIONS` is shared so an off frame allocates
+      // nothing either.
+      annotations: altMode
+        ? describeAnnotations(simulation.entities, simulation.buildings, simulation.recipes, simulation.items)
+        : NO_ANNOTATIONS,
     };
     renderer.render(state, camera, alpha);
 
@@ -356,7 +402,7 @@ function bootstrap(): void {
   // `InputManager` satisfies `BuildCursor` structurally and has never heard of
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
-  const controller = new GameController({ game, cursor: input });
+  const controller: GameController = new GameController({ game, cursor: input });
   const ui = new GameUI({ root: uiRoot, controller });
   ui.mount();
 

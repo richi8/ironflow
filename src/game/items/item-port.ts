@@ -99,6 +99,75 @@ export function outputPortOf(entity: Entity, ctx: PortContext): ItemSource | nul
 }
 
 /**
+ * Where the **player's hand** can take an item from this building. C20.
+ *
+ * Every buffer a building has, not just its output: a furnace hands back its
+ * ore and its coal as readily as its plates. That is the difference between
+ * this and `outputPortOf`, and the difference is *who is asking*.
+ *
+ * ```text
+ *   inserter -> outputPortOf   output only, for ever
+ *   player   -> handSourceOf   output, then ingredients, then fuel
+ * ```
+ *
+ * C15 built the one-way rule so that a furnace between two inserters could not
+ * become a place items shuffle back and forth in, and that rule is untouched —
+ * `InserterSystem` asks `outputPortOf` and nothing here changes what it gets.
+ * What C15 did not intend, and C16 wrote down, is that the rule also caught
+ * the *player*: ingredients left in a machine because the bag was full could
+ * only be recovered by switching the recipe twice.
+ *
+ * The order is output, input, fuel — what the player most likely wants, then
+ * what they put in. It only matters when a machine holds the same item in two
+ * buffers, which no valid recipe allows (`RecipeRegistry` refuses an item that
+ * is both an ingredient and a product), so in practice it is a formality that
+ * keeps the function total.
+ */
+export function handSourceOf(entity: Entity, ctx: PortContext): ItemSource | null {
+  const machine = asMachine(entity, ctx.buildings);
+  if (machine === null) return outputPortOf(entity, ctx);
+
+  const buffers = machineBuffers(machine, production(entity, ctx));
+  return unionSource([buffers.output, buffers.input, buffers.fuel]);
+}
+
+/**
+ * Several sources read as one, in order. For `handSourceOf`.
+ *
+ * Takes from the first that has any, and keeps taking from the next until the
+ * amount is met — partial and honest, like every transfer in the game (C08).
+ */
+function unionSource(sources: readonly ItemSource[]): ItemSource {
+  return {
+    peek(): ItemId {
+      for (const source of sources) {
+        const itemId = source.peek();
+        if (itemId !== NO_ITEM) return itemId;
+      }
+      return NO_ITEM;
+    },
+    count(itemId: ItemId): number {
+      let total = 0;
+      for (const source of sources) total += source.count(itemId);
+      return total;
+    },
+    take(itemId: ItemId, amount: number): number {
+      let taken = 0;
+      for (const source of sources) {
+        if (taken >= amount) break;
+        taken += source.take(itemId, amount - taken);
+      }
+      return taken;
+    },
+    stacks(): readonly PortStack[] {
+      const out: PortStack[] = [];
+      for (const source of sources) out.push(...source.stacks());
+      return Object.freeze(out);
+    },
+  };
+}
+
+/**
  * Where an item can be put into this building, or null if nowhere.
  *
  * For a machine this routes: anything that burns goes in the fuel buffer, and
