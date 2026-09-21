@@ -109,4 +109,22 @@ export const ITEMS: readonly ItemDefinition[] = Object.freeze([
   { id: 'lab', name: 'Lab', stackSize: 50, sprite: 'item:lab', category: 'building' },
   { id: 'miner_2', name: 'Miner Mk2', stackSize: 50, sprite: 'item:miner_2', category: 'building' },
   { id: 'assembler_2', name: 'Assembler Mk2', stackSize: 50, sprite: 'item:assembler_2', category: 'building' },
+
+  /* ---------------------------------------------------------------------- *
+   * C23. The radar §15 has owed since revision 2, and the underground belt
+   * §9 named in the belt model's own table. Appended, like everything since
+   * C21, because this file's order is the runtime id order and the hotbar's.
+   *
+   * A hundred underground belts rather than fifty, which is the belt's stack
+   * and for the belt's reason (C13): they are spent two at a time and a run
+   * of them is laid in one go.
+   * ---------------------------------------------------------------------- */
+  { id: 'radar', name: 'Radar', stackSize: 50, sprite: 'item:radar', category: 'building' },
+  {
+    id: 'underground_belt',
+    name: 'Underground Belt',
+    stackSize: 100,
+    sprite: 'item:underground_belt',
+    category: 'building',
+  },
 ] satisfies readonly ItemDefinition[]);

@@ -1142,3 +1142,47 @@ body {
 [hidden] {
   display: none !important;
 }
+
+/* -------------------------------------------------------------------------- *
+ * Map (C23)
+ *
+ * The one panel whose body is a canvas rather than rows of text, so the rules
+ * here are about fitting a picture: `image-rendering: pixelated` because a map
+ * cell is deliberately one device pixel at the smallest scale and smoothing it
+ * turns a resource patch into a smudge.
+ * -------------------------------------------------------------------------- */
+.if-map {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(680px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.if-map__canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-self: center;
+  width: 100%;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg-deep);
+  cursor: crosshair;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.if-map__hint {
+  flex: none;
+  padding-top: 8px;
+  color: var(--if-text-dim);
+  text-align: center;
+}

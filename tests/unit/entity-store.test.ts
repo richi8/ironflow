@@ -79,15 +79,18 @@ function isAscending(ids: readonly number[]): boolean {
 }
 
 describe('EntityType', () => {
-  it('covers §15s eleven buildings and the three appended since, rejecting anything else', () => {
-    // Eleven from §15's building table, plus `ElectricFurnace` (C21) and the
-    // tier-2 miner and assembler C22's tech tree unlocks. §15 has a row for
-    // none of the three, and appending is what keeps every existing number —
+  it('covers §15s eleven buildings and the four appended since, rejecting anything else', () => {
+    // Eleven from §15's building table, plus `ElectricFurnace` (C21), the
+    // tier-2 miner and assembler C22's tech tree unlocks, and C23's
+    // underground belt — which §9 named rather than §15. §15 has a row for
+    // none of the four, and appending is what keeps every existing number —
     // and therefore every save that carries one — valid.
-    expect(ENTITY_TYPE_COUNT).toBe(14);
+    expect(ENTITY_TYPE_COUNT).toBe(15);
     expect(isEntityType(EntityType.ElectricFurnace)).toBe(true);
     expect(isEntityType(EntityType.Assembler2)).toBe(true);
+    // Reserved on day one and given a definition at last by C23.
     expect(isEntityType(EntityType.Radar)).toBe(true);
+    expect(isEntityType(EntityType.UndergroundBelt)).toBe(true);
     expect(isEntityType(ENTITY_TYPE_COUNT)).toBe(false);
     expect(isEntityType(-1)).toBe(false);
     expect(isEntityType(1.5)).toBe(false);

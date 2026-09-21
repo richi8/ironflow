@@ -150,6 +150,12 @@ export function canonicalState(simulation: Simulation): Record<string, unknown> 
     // function of this (`research/unlocks.ts`), and hashing both would hide a
     // rebuild that had gone wrong behind the state it was derived from.
     research: simulation.research.toJSON(),
+    // §10 and §14: the explored world-chunk set is authoritative and persisted
+    // (C23). It is here rather than in `world` because it is deliberately not
+    // a property of a world chunk — a world chunk the player crossed and one
+    // they never approached are byte-identical, and this set is the only thing
+    // that knows which is which.
+    explored: simulation.world.explored.keysAscending(),
     world: chunks,
   };
 }
@@ -195,6 +201,7 @@ export function canonicalLayout(simulation: Simulation): Record<string, unknown>
     entities: byTile,
     player: state['player'],
     research: state['research'],
+    explored: state['explored'],
     world: state['world'],
   };
 }

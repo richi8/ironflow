@@ -21,7 +21,20 @@
 import type { CommandRejectionReason } from '../commands/command.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { initialBuildingState } from '../entities/building-init.js';
-import { footprintExtent, forEachFootprintTile, type Footprint } from '../entities/entity.js';
+import {
+  NO_ENTITY,
+  footprintExtent,
+  forEachFootprintTile,
+  type Entity,
+  type Footprint,
+} from '../entities/entity.js';
+import {
+  asUnderground,
+  isUndergroundEntrance,
+  unlinkUnderground,
+  type UndergroundBeltEntity,
+} from '../entities/underground-belt-entity.js';
+import { DIRECTION_OFFSETS } from '../world/coordinates.js';
 import type { BuildMaterials } from '../items/build-materials.js';
 import type { Unlocks } from '../research/unlocks.js';
 import { BuildingRegistry, type BuildingDefinition } from '../registries/building-registry.js';
@@ -110,6 +123,15 @@ export class BuildSystem {
       return 'no_resource';
     }
 
+    // C23. The one rule in this file about a *pair*: a mouth laid in line with
+    // an unfinished run and out of its reach is refused, because the player is
+    // plainly finishing that run and two stubs that look joined and carry
+    // nothing is the silent failure §7 exists to prevent.
+    if (definition.underground !== undefined) {
+      const partner = this.findUndergroundPartner(definition.underground.maxSpan, x, y, facing);
+      if (partner !== null && partner.distance > definition.underground.maxSpan) return 'span_too_long';
+    }
+
     return this.inventory.canAfford(definition.buildCost) ? null : 'unaffordable';
   }
 
@@ -129,9 +151,23 @@ export class BuildSystem {
     // What kind of state a new building starts with is `building-init.ts`'s
     // job, not this file's: a miner's progress counter and buffer are no more
     // a placement rule than its sprite is (see the file header).
-    this.entities.create(
-      initialBuildingState(definition, x, y, BuildingRegistry.normalizeRotation(definition, rotation)),
-    );
+    const facing = BuildingRegistry.normalizeRotation(definition, rotation);
+    const placed = this.entities.create(initialBuildingState(definition, x, y, facing));
+
+    // C23. A mouth laid behind an unfinished run completes it. `validate` has
+    // already refused the out-of-reach case, so anything found here is in
+    // range — which is what makes pairing an effect rather than a second
+    // decision that could disagree with the one the ghost showed.
+    if (definition.underground !== undefined) {
+      const partner = this.findUndergroundPartner(definition.underground.maxSpan, x, y, facing);
+      if (partner !== null && partner.distance <= definition.underground.maxSpan) {
+        const mouth = asUnderground(placed, this.buildings);
+        if (mouth !== null) {
+          mouth.link = partner.mouth.id;
+          partner.mouth.link = placed.id;
+        }
+      }
+    }
     return null;
   }
 
@@ -172,8 +208,74 @@ export class BuildSystem {
     const refund = this.buildings.forEntityType(entity.type).buildCost;
     if (!this.inventory.hasRoomFor(refund)) return 'inventory_full';
 
+    // C23. The survivor of a demolished pair becomes a lone mouth, and what
+    // was still in the tunnel goes with the tunnel — the same bargain a belt
+    // tile makes when it is removed with items on it, said one tile further.
+    // Done now rather than in cleanup, because the removal was ordered in
+    // phase 1 and phase 5 must not find a run whose far end is a ghost.
+    const mouth = asUnderground(entity, this.buildings);
+    if (mouth !== null && mouth.link !== NO_ENTITY) {
+      const partner = this.entities.get(mouth.link);
+      const other = partner === undefined ? null : asUnderground(partner, this.buildings);
+      if (other !== null) unlinkUnderground(other);
+      unlinkUnderground(mouth);
+    }
+
     this.entities.remove(entity.id);
     this.inventory.give(refund);
+    return null;
+  }
+
+  /**
+   * The nearest unpaired mouth this placement would join, or null for none.
+   *
+   * Scans **backwards** along the facing — the direction items would arrive
+   * from — one tile at a time, and stops at the first thing that ends the
+   * search:
+   *
+   * ```text
+   *   an unpaired mouth facing the same way   the candidate; report it
+   *   a mouth that is already half of a run   a wall: a finished run is not
+   *                                           something to reach across
+   *   nothing, for the whole window           no run is being finished here
+   * ```
+   *
+   * The window is `2 * maxSpan`, which is the one arbitrary number in this
+   * file and is written down rather than hidden: within a second run's length
+   * of an unfinished run, in line with it and facing the same way, the player
+   * is finishing it and deserves to be told the span is too long. Beyond that
+   * they are starting a new one somewhere else on the same line, and refusing
+   * would make a long straight belt route impossible to bury in two hops.
+   */
+  private findUndergroundPartner(
+    maxSpan: number,
+    x: number,
+    y: number,
+    facing: Rotation,
+  ): { readonly mouth: UndergroundBeltEntity; readonly distance: number } | null {
+    const step = DIRECTION_OFFSETS[facing];
+    if (step === undefined) return null;
+
+    const window = 2 * maxSpan;
+    for (let distance = 1; distance <= window; distance++) {
+      const tileX = x - step.x * distance;
+      const tileY = y - step.y * distance;
+      if (tileX < TILE_MIN || tileX > TILE_MAX || tileY < TILE_MIN || tileY > TILE_MAX) return null;
+
+      const occupant: Entity | undefined = this.entities.at(tileX, tileY);
+      if (occupant === undefined || this.entities.isPendingRemoval(occupant.id)) continue;
+
+      const mouth = asUnderground(occupant, this.buildings);
+      if (mouth === null || mouth.rotation !== facing) continue;
+      // A finished run is a wall. Without this, a third mouth laid past a
+      // complete pair would re-pair with its entrance and orphan its exit.
+      if (mouth.link !== NO_ENTITY) return null;
+      // A lone mouth counts as an entrance (see its entity file), so this is
+      // always true here — asserted rather than assumed, because the day a
+      // mouth can be unpaired and still an exit is the day this breaks.
+      if (!isUndergroundEntrance(mouth, undefined)) return null;
+      return { mouth, distance };
+    }
     return null;
   }
 

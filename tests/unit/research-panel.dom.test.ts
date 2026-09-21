@@ -133,7 +133,8 @@ describe('the tree', () => {
     expect(cards().map((element) => element.dataset['technology'])).toEqual(
       harness.simulation.technologies.all().map((technology) => technology.id),
     );
-    expect(cards()).toHaveLength(5);
+    // Five from C22, plus C23's `exploration_1` leaf.
+    expect(cards()).toHaveLength(6);
   });
 
   it('says what each node is in, and what it would give', () => {

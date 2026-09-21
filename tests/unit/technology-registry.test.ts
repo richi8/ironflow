@@ -240,9 +240,12 @@ describe('the shipped technology tree', () => {
         unlocks: technology.unlocks.map((unlock) => unlock.id),
       })),
     ).toEqual([
-      { id: 'logistics_1', units: 10, needs: [], unlocks: ['splitter'] },
+      { id: 'logistics_1', units: 10, needs: [], unlocks: ['splitter', 'underground_belt'] },
       { id: 'smelting_2', units: 20, needs: ['logistics_1'], unlocks: ['smelt_steel'] },
       { id: 'power_1', units: 40, needs: ['smelting_2'], unlocks: ['electric_furnace'] },
+      // C23's leaf, hanging off `power_1` beside `mining_2`: appending a node
+      // needs no save migration where inserting one into the spine would.
+      { id: 'exploration_1', units: 50, needs: ['power_1'], unlocks: ['radar'] },
       { id: 'mining_2', units: 60, needs: ['power_1'], unlocks: ['miner_2'] },
       { id: 'construction_1', units: 100, needs: ['mining_2'], unlocks: ['make_frame', 'assembler_2'] },
     ]);

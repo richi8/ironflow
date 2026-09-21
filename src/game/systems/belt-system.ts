@@ -87,7 +87,20 @@ import {
 } from '../entities/belt-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { ENTITY_TYPE_COUNT, EntityType } from '../entities/entity-types.js';
-import { UNIT_FOOTPRINT, forEachOutputTile, type Entity, type EntityId, type Footprint } from '../entities/entity.js';
+import {
+  NO_ENTITY,
+  UNIT_FOOTPRINT,
+  forEachOutputTile,
+  type Entity,
+  type EntityId,
+  type Footprint,
+} from '../entities/entity.js';
+import {
+  asUnderground,
+  isUndergroundEntrance,
+  undergroundLaneUnits,
+  type UndergroundBeltEntity,
+} from '../entities/underground-belt-entity.js';
 import {
   SPLITTER_LANES,
   asSplitter,
@@ -178,7 +191,12 @@ export class BeltSystem {
       types.map((type) => {
         const belt = this.buildings.beltFor(type);
         if (belt !== null) return belt.unitsPerTick;
-        return this.buildings.splitterFor(type)?.unitsPerTick ?? null;
+        const splitter = this.buildings.splitterFor(type);
+        if (splitter !== null) return splitter.unitsPerTick;
+        // C23's tunnel is a carrier like the other two: content gives it a
+        // `tilesPerSecond`, so it lands in the same table and the walk below
+        // needs no third branch to find it.
+        return this.buildings.undergroundFor(type)?.unitsPerTick ?? null;
       }),
     );
     this.carrierSizes = Object.freeze(types.map((type) => this.buildings.footprintOf(type)));
@@ -208,7 +226,18 @@ export class BeltSystem {
       }
 
       const splitter = asSplitter(carrier);
-      if (splitter !== null) this.advanceSplitter(splitter, units);
+      if (splitter !== null) {
+        this.advanceSplitter(splitter, units);
+        continue;
+      }
+
+      const mouth = asUnderground(carrier, this.buildings);
+      // Only the *entrance* of a run is advanced: the lane belongs to it and
+      // spans the whole tunnel, so an exit has nothing of its own to move.
+      // See `entities/underground-belt-entity.ts`.
+      if (mouth !== null && this.isEntrance(mouth)) {
+        this.advanceLane(mouth.items, units, mouth, this.laneUnitsOf(mouth));
+      }
     }
 
     this.unloadMachines();
@@ -230,8 +259,19 @@ export class BeltSystem {
    * `owner` is the carrier the lane belongs to, and is used only when an item
    * reaches the end of it: `exit` is the single place that knows a belt has
    * one way out and a splitter two.
+   *
+   * `laneUnits` is how long the lane is in fixed-point units — one tile for a
+   * belt and a splitter, and `(span + 1)` tiles for C23's underground run,
+   * which is the whole of what makes a tunnel take the time a surface belt of
+   * the same length would. It is a parameter rather than a lookup because this
+   * loop runs once per carrier per tick and the answer is the caller's already.
    */
-  private advanceLane(items: BeltItem[], unitsPerTick: number, owner: Entity): void {
+  private advanceLane(
+    items: BeltItem[],
+    unitsPerTick: number,
+    owner: Entity,
+    laneUnits = BELT_TILE_UNITS,
+  ): void {
     let write = 0;
     let frontPos = 0;
     let hasFront = false;
@@ -243,7 +283,7 @@ export class BeltSystem {
       let target = item.pos + unitsPerTick;
 
       if (!hasFront) {
-        if (target >= BELT_TILE_UNITS && this.exit(owner, item.itemId, target - BELT_TILE_UNITS)) {
+        if (target >= laneUnits && this.exit(owner, item.itemId, target - laneUnits)) {
           // Gone to the next carrier: not written back, and the item behind it
           // becomes the head of this lane on the next pass of the loop.
           continue;
@@ -252,7 +292,7 @@ export class BeltSystem {
         // with nowhere to go waits *at the exit edge*, which is what makes the
         // lane look full from the outside and what the tile behind measures
         // its own room against.
-        if (target > BELT_MAX_POSITION) target = BELT_MAX_POSITION;
+        if (target > laneUnits - 1) target = laneUnits - 1;
       } else {
         const cap = frontPos - BELT_SLOT_SPACING;
         if (target > cap) target = cap;
@@ -315,6 +355,17 @@ export class BeltSystem {
       return target !== undefined && this.deposit(target, belt.x, belt.y, belt.rotation, itemId, desired);
     }
 
+    const mouth = asUnderground(owner, this.buildings);
+    if (mouth !== null) {
+      // An item leaves a run from the tile of the *far* mouth, not from the
+      // entrance it went in at — which is the one place in this file that has
+      // to know a run has two ends. A lone mouth is its own far end, so the
+      // arithmetic is the belt's above with no special case.
+      const far = this.partnerOf(mouth) ?? mouth;
+      const target = this.tileAhead(far.x, far.y, mouth.rotation);
+      return target !== undefined && this.deposit(target, far.x, far.y, mouth.rotation, itemId, desired);
+    }
+
     const splitter = asSplitter(owner);
     if (splitter === null) return false;
 
@@ -373,6 +424,18 @@ export class BeltSystem {
       const side = splitterSideFedFrom(splitter, this.sizeOf(splitter.type), fromX, fromY);
       if (side === null) return false;
       return laneAccept(splitter.lanes[side], itemId, entry);
+    }
+
+    const mouth = asUnderground(target, this.buildings);
+    if (mouth !== null) {
+      // Only into an entrance. The far mouth's back is underground, so a belt
+      // run into it has nowhere to put an item — and saying so here is what
+      // stops a line silently emptying into the wrong end of a tunnel.
+      if (!this.isEntrance(mouth)) return false;
+      if (facesBack(fromRotation, mouth.rotation)) return false;
+      // Its own end, not a belt tile's: an empty run must be able to take an
+      // item as far forward as it fits, which for a tunnel is several tiles.
+      return laneAccept(mouth.items, itemId, entry, this.laneUnitsOf(mouth) - 1);
     }
 
     if (this.buildings.storageFor(target.type) === null) return false;
@@ -557,12 +620,21 @@ export class BeltSystem {
     let fromY = carrier.y;
 
     const splitter = asSplitter(carrier);
+    const mouth = asUnderground(carrier, this.buildings);
     if (splitter !== null) {
       const tile = splitterTile(splitter, this.sizeOf(splitter.type), edge as SplitterSide);
       fromX = tile.x;
       fromY = tile.y;
     } else if (edge > 0) {
       return -1;
+    } else if (mouth !== null) {
+      // An exit has no edge of its own: the run's one way out belongs to the
+      // entrance that owns the lane, and giving the exit a second copy of it
+      // would put the same edge in the graph twice.
+      if (!this.isEntrance(mouth)) return -1;
+      const far = this.partnerOf(mouth) ?? mouth;
+      fromX = far.x;
+      fromY = far.y;
     }
 
     const target = this.tileAhead(fromX, fromY, carrier.rotation);
@@ -582,8 +654,33 @@ export class BeltSystem {
     const belt = asBelt(target);
     if (belt !== null) return !facesBack(fromRotation, belt.rotation);
 
+    const mouth = asUnderground(target, this.buildings);
+    if (mouth !== null) return this.isEntrance(mouth) && !facesBack(fromRotation, mouth.rotation);
+
     const splitter = asSplitter(target);
     if (splitter === null) return false;
     return splitterSideFedFrom(splitter, this.sizeOf(splitter.type), fromX, fromY) !== null;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Underground runs
+   * ---------------------------------------------------------------- */
+
+  /** The other mouth of this run, or undefined for a lone or half-removed one. */
+  private partnerOf(mouth: UndergroundBeltEntity): Entity | undefined {
+    if (mouth.link === NO_ENTITY) return undefined;
+    const partner = this.entities.get(mouth.link);
+    if (partner === undefined || this.entities.isPendingRemoval(partner.id)) return undefined;
+    return partner;
+  }
+
+  /** Is this the mouth items go into? A lone mouth is — see its entity file. */
+  private isEntrance(mouth: UndergroundBeltEntity): boolean {
+    return isUndergroundEntrance(mouth, this.partnerOf(mouth));
+  }
+
+  /** How long this entrance's lane is, in fixed-point units. */
+  private laneUnitsOf(mouth: UndergroundBeltEntity): number {
+    return undergroundLaneUnits(mouth, this.partnerOf(mouth));
   }
 }

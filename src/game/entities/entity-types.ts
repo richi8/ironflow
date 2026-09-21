@@ -50,6 +50,18 @@ export enum EntityType {
    */
   Miner2 = 12,
   Assembler2 = 13,
+  /**
+   * C23. The underground belt `logistics_1` gains as a second unlock, and the
+   * one building on this list that §15's table never named — §9 did, in its
+   * own row: "a pair of entities with a validated span".
+   *
+   * `Radar` above is the exception that proves this enum's rule. It has held
+   * number 10 since day one because §15's building table named it, and C23 is
+   * the chunk that finally gives it a definition; nothing had to move for it.
+   * The underground belt was named by §9 rather than by §15, so it takes the
+   * next free number like every other latecomer.
+   */
+  UndergroundBelt = 14,
 }
 
 /**
@@ -73,6 +85,7 @@ const ENTITY_TYPE_NAMES: readonly string[] = Object.freeze([
   'electric_furnace',
   'miner_2',
   'assembler_2',
+  'underground_belt',
 ]);
 
 /** How many entity types exist. Kept in step with the table, not hand-written. */

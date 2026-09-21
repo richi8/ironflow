@@ -362,4 +362,45 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     seconds: 5.0,
     category: 'crafting',
   },
+
+  /* ---------------------------------------------------------------------- *
+   * C23. The radar's recipe is §15's building-table row, transcribed; the
+   * underground belt's is a **balance number**, because §15 never gave it one.
+   * ---------------------------------------------------------------------- */
+  {
+    // §15's row: 5 gear, 5 circuit, 10 iron_plate. Three seconds, which is
+    // `make_generator`'s, on C20's rule that a craft time tracks the size of
+    // a bill — twenty items apiece.
+    id: 'make_radar',
+    inputs: [
+      { itemId: 'gear', count: 5 },
+      { itemId: 'circuit', count: 5 },
+      { itemId: 'iron_plate', count: 10 },
+    ],
+    outputs: [{ itemId: 'radar', count: 1 }],
+    seconds: 3.0,
+    category: 'crafting',
+  },
+  {
+    // **Two at a time**, like `make_belt`, and for a reason stronger than
+    // symmetry: an underground belt is *useless alone*. A run is a pair, so a
+    // recipe that made one would leave the player with an odd number of
+    // mouths and a stub they could not finish. Twice a belt pair's gears for
+    // the two mouths, four plates for the casing they are sunk in, and twice
+    // `make_belt`'s half-second — all **balance numbers**.
+    //
+    // **Not** hand-craftable, though `make_belt` is. §15's hand-craft column
+    // exists so that a new game is never soft-locked, and nothing behind a
+    // technology can be on that path by definition — which is why the other
+    // half of `logistics_1`, the splitter, needs an assembler too. See C23's
+    // decisions in the plan.
+    id: 'make_underground_belt',
+    inputs: [
+      { itemId: 'gear', count: 2 },
+      { itemId: 'iron_plate', count: 4 },
+    ],
+    outputs: [{ itemId: 'underground_belt', count: 2 }],
+    seconds: 1.0,
+    category: 'crafting',
+  },
 ] satisfies readonly RecipeDefinition[]);

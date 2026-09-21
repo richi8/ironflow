@@ -22,7 +22,7 @@
  *
  * | Lane | Rate | Drives |
  * |---|---|---|
- * | `hud` | 5 Hz | the status bar's counters |
+ * | `hud` | 5 Hz | the status bar's counters, the bag, the tech tree, the map |
  * | `live` | 10 Hz | the inspector's bar and rate, and toast expiry |
  *
  * §13 names the 10 Hz lane for "inspector progress bars, live rates", and C12
@@ -41,6 +41,7 @@ import type { GameController } from '../game/game-controller.js';
 import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
+import { MapPanel } from './map-panel.js';
 import { InventoryPanel } from './inventory.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
 import { ResearchPanel } from './research-panel.js';
@@ -58,6 +59,18 @@ const LIVE_INTERVAL_MS = 1000 / LIVE_HZ;
 export interface GameUIOptions {
   readonly root: HTMLElement;
   readonly controller: GameController;
+  /**
+   * Centre the world view on a tile — the map panel's "click to jump" (C23
+   * task 4).
+   *
+   * Injected rather than reached for, exactly as `Cursor` is injected into
+   * `GameController` in the other direction: §4 forbids `ui/**` from importing
+   * `renderer/**`, and the camera is the renderer's. The composition root is
+   * the one place that holds both. Optional so that a test mounting the UI
+   * need not invent a camera; the panel is then drawn and clickable and the
+   * click goes nowhere, which is what it would do with no world on screen.
+   */
+  readonly onJumpTo?: (x: number, y: number) => void;
 }
 
 export class GameUI {
@@ -69,6 +82,7 @@ export class GameUI {
   private readonly inspector: Inspector;
   private readonly inventory: InventoryPanel;
   private readonly research: ResearchPanel;
+  private readonly map: MapPanel;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -98,6 +112,7 @@ export class GameUI {
       onToggleBuildMenu: () => this.toggleBuildMenu(),
       onToggleInventory: () => this.toggleInventory(),
       onToggleResearch: () => this.toggleResearch(),
+      onToggleMap: () => this.toggleMap(),
     });
     this.buildMenu = new BuildMenu({
       onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
@@ -128,6 +143,13 @@ export class GameUI {
       onCancel: (index) => this.controller.cancelCraft(index),
       onClose: () => this.toggleInventory(),
     });
+    this.map = new MapPanel({
+      // The one panel that asks for something the controller cannot give: a
+      // camera is the renderer's (§4), so the composition root supplies it and
+      // a UI mounted without one simply does not jump.
+      onJumpTo: (x, y) => options.onJumpTo?.(x, y),
+      onClose: () => this.toggleMap(),
+    });
     this.research = new ResearchPanel({
       // The same arrangement every other panel uses: the panel names a
       // technology, the controller builds the command, the simulation decides.
@@ -148,6 +170,7 @@ export class GameUI {
     this.inspector.mount(this.root);
     this.inventory.mount(this.root, this.controller.getInventoryView());
     this.research.mount(this.root, this.controller.getResearchView());
+    this.map.mount(this.root);
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
@@ -222,6 +245,9 @@ export class GameUI {
       // what it shows is a unit count and a queue, which change at the speed
       // of a lab rather than of a machine.
       this.refreshResearch();
+      // And the map, for a reason one step slower again: what it shows moves
+      // at the speed of a walk and of a radar sweep (C23).
+      this.refreshMap();
     }
 
     this.liveAccumulatorMs += frameMs;
@@ -241,6 +267,7 @@ export class GameUI {
     // question from opposite ends — "what can I build" and "what am I made
     // of" — so opening one puts the other away rather than stacking them.
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (open && this.map.isOpen()) this.setMapOpen(false);
     return open;
   }
 
@@ -249,6 +276,7 @@ export class GameUI {
     const open = this.setInventoryOpen(!this.inventory.isOpen());
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.research.isOpen()) this.setResearchOpen(false);
+    if (open && this.map.isOpen()) this.setMapOpen(false);
     return open;
   }
 
@@ -257,7 +285,25 @@ export class GameUI {
     const open = this.setResearchOpen(!this.research.isOpen());
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (open && this.map.isOpen()) this.setMapOpen(false);
     return open;
+  }
+
+  /** Open or close the map. Returns the new state (C23). */
+  toggleMap(): boolean {
+    const open = this.setMapOpen(!this.map.isOpen());
+    // The fourth panel to want the same half of the screen. One at a time,
+    // for the reason the build menu and the bag are exclusive: they answer
+    // different questions and stacking them answers neither.
+    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
+    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (open && this.research.isOpen()) this.setResearchOpen(false);
+    return open;
+  }
+
+  /** Is the map on screen? For the composition root and the tests. */
+  isMapOpen(): boolean {
+    return this.map.isOpen();
   }
 
   /** Is the research panel on screen? For the composition root and the tests. */
@@ -274,6 +320,7 @@ export class GameUI {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.map.destroy();
     this.research.destroy();
     this.inventory.destroy();
     this.inspector.destroy();
@@ -321,6 +368,25 @@ export class GameUI {
   private refreshResearch(): void {
     if (!this.research.isOpen()) return;
     this.research.update(this.controller.getResearchView());
+  }
+
+  /**
+   * Show or hide the map, repainting on the way in.
+   *
+   * The repaint is the inventory's and the research panel's, for their reason:
+   * a player who pauses to plan is exactly the player who opens the map, and
+   * both lanes are stopped then.
+   */
+  private setMapOpen(open: boolean): boolean {
+    this.map.setOpen(open);
+    this.toolbar.setMapOpen(open);
+    if (open) this.refreshMap();
+    return open;
+  }
+
+  private refreshMap(): void {
+    if (!this.map.isOpen()) return;
+    this.map.update(this.controller.getMapView());
   }
 
   /** Read a fresh snapshot of the selected machine, or close the panel. */

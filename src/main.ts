@@ -265,6 +265,10 @@ function bootstrap(): void {
       ui.toggleResearch();
       return;
     }
+    if (action === 'ui.toggleMap') {
+      ui.toggleMap();
+      return;
+    }
     if (action === 'ui.toggleAltMode') {
       altMode = !altMode;
       return;
@@ -411,7 +415,13 @@ function bootstrap(): void {
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
   const controller: GameController = new GameController({ game, cursor: input });
-  const ui = new GameUI({ root: uiRoot, controller });
+  const ui = new GameUI({
+    root: uiRoot,
+    controller,
+    // C23's map, click to jump. The composition root is the one place that
+    // holds both the UI and the camera (§4), so it is where the two meet.
+    onJumpTo: (x, y) => camera.setPosition(x, y),
+  });
   ui.mount();
 
   // §8: the game does not run in a background tab. Time away costs nothing and

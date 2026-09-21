@@ -102,7 +102,18 @@ export const TECHNOLOGIES: readonly TechnologyDefinition[] = Object.freeze([
     // available", which is exactly what a first technology should hand over:
     // the player has a working factory and no way to divide a line, and after
     // fifty seconds of lab time they have one.
-    unlocks: [{ kind: 'building', id: 'splitter' }],
+    //
+    // C23 appends the **underground belt** here, which is where §15 always
+    // put it, and appending to an existing node is deliberate: adding a
+    // prerequisite to one would need a save migration, and adding an unlock
+    // does not. The cost stays at ten. Two unlocks for the price of one is
+    // not generosity — they are the same sentence said twice, because both
+    // answer "this line has to go somewhere else": the splitter divides it
+    // and the underground belt gets it past whatever is in the way.
+    unlocks: [
+      { kind: 'building', id: 'splitter' },
+      { kind: 'building', id: 'underground_belt' },
+    ],
   },
   {
     id: 'smelting_2',
@@ -130,6 +141,30 @@ export const TECHNOLOGIES: readonly TechnologyDefinition[] = Object.freeze([
     cost: [{ itemId: 'data_core', count: 40 }],
     seconds: UNIT_SECONDS,
     unlocks: [{ kind: 'building', id: 'electric_furnace' }],
+  },
+  {
+    // C23's, and §15's fifth name restored. It is a **leaf** hanging off
+    // `power_1` rather than a link in the spine: appending a node needs no
+    // save migration, where inserting one into the chain would renumber what
+    // depends on what. So the tree is now one chain with a fork at `power_1`
+    // and a second at `mining_2`.
+    id: 'exploration_1',
+    name: 'Exploration 1',
+    summary: 'A radar that maps the ground you have not walked.',
+    prerequisites: ['power_1'],
+    // Fifty, between `power_1`'s forty and `mining_2`'s sixty, and the
+    // ordering is the point rather than the number: a player who has just
+    // electrified their smelting should find the next patch *before* they
+    // double the rate they empty the current one. A **balance number**.
+    cost: [{ itemId: 'data_core', count: 50 }],
+    seconds: UNIT_SECONDS,
+    // §15's tree writes this node's unlocks as "radar, map". Only the radar
+    // is here: the **map panel is not gated**, because the explored set fills
+    // from the player's own legs from the first tick and a map you cannot
+    // open until the fifth technology is an hour of walking with nothing to
+    // show for it. What the radar unlocks is ground the player has *not*
+    // walked, which is the part that is worth earning. See C23's deviations.
+    unlocks: [{ kind: 'building', id: 'radar' }],
   },
   {
     id: 'mining_2',

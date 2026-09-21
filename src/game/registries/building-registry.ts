@@ -40,7 +40,14 @@ export type BuildingCategory =
   | 'logistics'
   | 'storage'
   | 'power'
-  | 'research';
+  | 'research'
+  /**
+   * C23's radar, and the seventh. It is not `research` — nothing it does
+   * touches the tech tree — and it is not `logistics`, because it moves
+   * nothing. What it produces is *knowledge of the map*, which is a category
+   * of one until something else reveals ground.
+   */
+  | 'exploration';
 
 /** Where a building may stand. `onTerrain` narrows the terrain table (C02). */
 export interface PlacementRules {
@@ -358,6 +365,99 @@ export interface PoleProperties {
   readonly supplyArea: number;
 }
 
+/**
+ * A belt that runs under things, as content authors it. See ironflow.md §9
+ * and C23 task 2.
+ *
+ * Its presence is what makes a building an underground belt —
+ * `building-init.ts` branches on this field and on nothing else — so a second
+ * tier with a longer span is a table entry rather than a code change.
+ *
+ * It is a **third** carrier field beside `belt` and `splitter`, for the reason
+ * those two are separate from each other: the three are different *shapes*.
+ * A belt is one tile with one way out, a splitter is two tiles with two, and
+ * an underground belt is a *pair* of tiles with one way out at the far end of
+ * a run the player chose the length of. `belt-system.ts` has to know which it
+ * is holding before it can move an item off the end of it.
+ */
+export interface UndergroundProperties {
+  /**
+   * Tiles per second, the same number the belt it replaces carries.
+   *
+   * Deliberately equal to §9's tier-1 anchor rather than a penalty or a bonus:
+   * an underground run is exactly as fast as the surface belt of the same
+   * length, so the decision it creates is about *space* and never about
+   * throughput. A slower one would be a throughput cliff the player cannot
+   * see; a faster one would make burying a line an upgrade rather than a
+   * routing choice.
+   */
+  readonly tilesPerSecond: number;
+  /**
+   * The furthest apart the two ends of one run may be, in tiles. §9: 6.
+   *
+   * A **balance number**, and the whole of what makes the building a decision
+   * rather than a teleport: six tiles crosses a belt line, a rail of poles or
+   * a 3x3 assembler, and does not cross a factory. It is measured between the
+   * two mouths, so the tunnel itself is at most five tiles of covered ground.
+   */
+  readonly maxSpan: number;
+}
+
+/**
+ * What a radar reveals, as content authors it. See ironflow.md C23 task 3.
+ *
+ * Its presence is what makes a building a radar. Both numbers are in **world
+ * chunks** rather than tiles, because a world chunk is the unit the explored
+ * set is recorded in (§14) and a radius in tiles would have to be rounded to
+ * one anyway — at a rounding rule the player could not see.
+ */
+export interface RadarProperties {
+  /**
+   * How far its coverage reaches, in world chunks, as a square radius: a
+   * radius of 5 is the 11x11 block of world chunks centred on the radar.
+   *
+   * A square rather than a disc, for the power pole's reason: this is a shape
+   * the player lays *against*, and on a map drawn as a grid of world chunks a
+   * square is the only coverage whose edge can be judged by eye.
+   */
+  readonly chunkRadius: number;
+  /**
+   * Seconds per world chunk of its sweep. See `radar-entity.ts`.
+   *
+   * A radar does not reveal its coverage at once: it walks it one world chunk
+   * per sweep step, which is what C23 task 3's "low-rate refresh" is and what
+   * makes a radar something the player watches fill in rather than a switch.
+   */
+  readonly sweepSeconds: number;
+}
+
+/**
+ * The same, in the integers the belt system runs on.
+ *
+ * Identical arithmetic to `BeltConfig`, because a tunnel *is* a belt lane —
+ * one that happens to be several tiles long (see
+ * `entities/underground-belt-entity.ts`). An item that changed speed as it
+ * went under would make burying a line a throughput decision, which is
+ * exactly what `UndergroundProperties.tilesPerSecond` refuses to be.
+ */
+export interface UndergroundConfig {
+  /** Fixed-point units an item advances each tick. `1..BELT_TILE_UNITS - 1`. */
+  readonly unitsPerTick: number;
+  /** What the content table said, kept for the renderer's chevron animation. */
+  readonly tilesPerSecond: number;
+  /** The furthest apart two mouths of one run may be, in tiles. */
+  readonly maxSpan: number;
+}
+
+/** The same, in the integer ticks the exploration phase counts (§6 R3). */
+export interface RadarConfig {
+  readonly chunkRadius: number;
+  /** Exactly `Math.round(sweepSeconds * TPS)`, at least 1. */
+  readonly sweepTicks: number;
+  /** World chunks in one full sweep: `(2 * chunkRadius + 1)²`. */
+  readonly coverage: number;
+}
+
 /** Who picks a machine's recipe. See `ProductionProperties.recipeSelection`. */
 export type RecipeSelection = 'auto' | 'player';
 
@@ -409,6 +509,10 @@ export interface BuildingDefinition {
   readonly pole?: PoleProperties;
   /** Present only on buildings that turn science items into progress (C22). */
   readonly research?: ResearchProperties;
+  /** Present only on buildings that carry items under other buildings (C23). */
+  readonly underground?: UndergroundProperties;
+  /** Present only on buildings that reveal world chunks on the map (C23). */
+  readonly radar?: RadarProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -434,6 +538,8 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   if (definition.generator !== undefined) Object.freeze(definition.generator);
   if (definition.pole !== undefined) Object.freeze(definition.pole);
   if (definition.research !== undefined) Object.freeze(definition.research);
+  if (definition.underground !== undefined) Object.freeze(definition.underground);
+  if (definition.radar !== undefined) Object.freeze(definition.radar);
   return Object.freeze(definition);
 }
 
@@ -572,6 +678,45 @@ function validate(definition: BuildingDefinition): void {
     }
   }
 
+  const underground = definition.underground;
+  if (underground !== undefined) {
+    checkCarrierSpeed(underground.tilesPerSecond, where);
+    if (!Number.isInteger(underground.maxSpan) || underground.maxSpan < 2) {
+      throw new Error(
+        `BuildingRegistry: ${where} spans ${underground.maxSpan} tiles; it must be whole and at least 2.`,
+      );
+    }
+    // One tile, because the two mouths are *separate entities* and the geometry
+    // that pairs them steps one tile at a time along a single axis (see
+    // `entities/underground-belt-entity.ts`). A wider mouth would make "the
+    // tile six steps back" ambiguous, and the error would show up as a pair
+    // that links across a corner.
+    const { width, height } = definition.size;
+    if (width !== 1 || height !== 1) {
+      throw new Error(`BuildingRegistry: ${where} runs underground, so it must be 1x1; it is ${width}x${height}.`);
+    }
+    if (belt !== undefined || splitter !== undefined) {
+      throw new Error(`BuildingRegistry: ${where} is both a surface carrier and an underground one; it must be one.`);
+    }
+  }
+
+  const radar = definition.radar;
+  if (radar !== undefined) {
+    if (!Number.isInteger(radar.chunkRadius) || radar.chunkRadius < 1) {
+      throw new Error(
+        `BuildingRegistry: ${where} reveals a radius of ${radar.chunkRadius} world chunks; it must be whole and above 0.`,
+      );
+    }
+    if (!Number.isFinite(radar.sweepSeconds) || radar.sweepSeconds <= 0) {
+      throw new Error(`BuildingRegistry: ${where} sweeps every ${radar.sweepSeconds} s, which is not an interval.`);
+    }
+    if (Math.round(radar.sweepSeconds * TPS) < 1) {
+      throw new Error(
+        `BuildingRegistry: ${where} sweeps every ${radar.sweepSeconds} s, which is under one tick a world chunk.`,
+      );
+    }
+  }
+
   const research = definition.research;
   if (research !== undefined) {
     checkCapacity(research.inputCapacity, `${where} science buffer`);
@@ -647,6 +792,16 @@ function checkCarrierSpeed(tilesPerSecond: number, where: string): void {
   }
 }
 
+/** A radar's content as whole ticks and a chunk count (§6 R3). See `RadarConfig`. */
+function radarConfig(radar: RadarProperties): RadarConfig {
+  const side = 2 * radar.chunkRadius + 1;
+  return Object.freeze({
+    chunkRadius: radar.chunkRadius,
+    sweepTicks: Math.max(1, Math.round(radar.sweepSeconds * TPS)),
+    coverage: side * side,
+  });
+}
+
 /** How many timed stages one inserter cycle has. See `InserterConfig`. */
 const INSERTER_STAGES = 4;
 
@@ -713,6 +868,12 @@ export class BuildingRegistry {
   /** Research content (C22). One field, unconverted: see `ResearchProperties`. */
   private readonly researchByType = new Map<EntityType, ResearchProperties>();
 
+  /** Underground-belt content (C23), converted exactly as a belt's is. */
+  private readonly undergroundByType = new Map<EntityType, UndergroundConfig>();
+
+  /** Radar content (C23), converted to whole ticks once (§6 R3). */
+  private readonly radarByType = new Map<EntityType, RadarConfig>();
+
   /**
    * Entity types that run recipes, ascending. What `ProductionSystem` walks,
    * in a fixed order that does not depend on the content table's (§6 R4).
@@ -752,6 +913,9 @@ export class BuildingRegistry {
    * power lists above make.
    */
   private readonly researchTypeList: readonly EntityType[];
+
+  /** Entity types that reveal world chunks, ascending by type number (C23). */
+  private readonly radarTypeList: readonly EntityType[];
 
   constructor(definitions: readonly BuildingDefinition[]) {
     const frozen: BuildingDefinition[] = [];
@@ -817,6 +981,19 @@ export class BuildingRegistry {
       if (value.research !== undefined) {
         this.researchByType.set(value.entityType, value.research);
       }
+      if (value.underground !== undefined) {
+        this.undergroundByType.set(
+          value.entityType,
+          Object.freeze({
+            unitsPerTick: unitsPerTick(value.underground.tilesPerSecond),
+            tilesPerSecond: value.underground.tilesPerSecond,
+            maxSpan: value.underground.maxSpan,
+          }),
+        );
+      }
+      if (value.radar !== undefined) {
+        this.radarByType.set(value.entityType, radarConfig(value.radar));
+      }
     }
 
     this.definitions = Object.freeze(frozen);
@@ -829,6 +1006,7 @@ export class BuildingRegistry {
     this.generatorTypeList = Object.freeze(allTypes.filter((type) => this.generatorByType.has(type)));
     this.poleTypeList = Object.freeze(allTypes.filter((type) => this.poleByType.has(type)));
     this.researchTypeList = Object.freeze(allTypes.filter((type) => this.researchByType.has(type)));
+    this.radarTypeList = Object.freeze(allTypes.filter((type) => this.radarByType.has(type)));
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */
@@ -988,6 +1166,27 @@ export class BuildingRegistry {
   /** Every entity type that researches, ascending by type number (C22). */
   researchTypes(): readonly EntityType[] {
     return this.researchTypeList;
+  }
+
+  /**
+   * How this kind of building runs underground, or null if it does not (C23).
+   *
+   * This is also the answer to "is this entity an underground belt":
+   * `asUnderground` asks it rather than testing the entity type, exactly as
+   * `asLab` asks `researchFor` (§19 rule 17).
+   */
+  undergroundFor(type: EntityType): UndergroundConfig | null {
+    return this.undergroundByType.get(type) ?? null;
+  }
+
+  /** How this kind of building sweeps, or null if it is not a radar (C23). */
+  radarFor(type: EntityType): RadarConfig | null {
+    return this.radarByType.get(type) ?? null;
+  }
+
+  /** Every entity type that reveals world chunks, ascending by type (C23). */
+  radarTypes(): readonly EntityType[] {
+    return this.radarTypeList;
   }
 
   /**

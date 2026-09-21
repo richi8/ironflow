@@ -74,13 +74,27 @@ function testWorld(): World {
 }
 
 /**
+ * The shipped table with one building's entity type left free.
+ *
+ * C23 was the chunk that ran out of spare numbers: every member of
+ * `EntityType` now has a definition, so a synthetic building can no longer
+ * borrow one that "nothing has implemented yet". Rather than adding an enum
+ * member for the tests' benefit — a number every save migration would then
+ * have to learn, for a building that does not exist — a fixture takes the
+ * radar's number and the radar steps out of the table for the length of the
+ * test. Nothing under test cares that the radar is there.
+ */
+function withoutRadar(): BuildingDefinition[] {
+  return BUILDINGS.filter((definition) => definition.entityType !== EntityType.Radar);
+}
+
+/**
  * A 1×2 building, so the extent swap has something non-square to swap.
  *
- * It borrows a §15 entity type nothing has implemented yet, and has moved
- * twice — from `Splitter` when C17 made the splitter real, and from
- * `PowerPole` to `Radar` when C21 did the same. The point of the fixture is a
- * rotation-count of 2 and a non-square footprint, neither of which any shipped
- * building has.
+ * It borrows the radar's entity type — see `withoutRadar` — having moved
+ * twice before, from `Splitter` when C17 made the splitter real and from
+ * `PowerPole` when C21 did. The point of the fixture is a rotation-count of 2
+ * and a non-square footprint, neither of which any shipped building has.
  */
 const PIPE: BuildingDefinition = {
   id: 'pipe',
@@ -125,7 +139,10 @@ function itemFor(definition: BuildingDefinition): ItemDefinition {
 
 function harness(extra: readonly BuildingDefinition[] = [PIPE], stock = 10): Harness {
   const world = testWorld();
-  const buildings = new BuildingRegistry([...BUILDINGS, ...extra]);
+  // The radar steps out only when there is a synthetic building to make room
+  // for: a harness with no extras is the shipped table exactly, which is what
+  // the simulation-level tests need, since the tech tree names the radar.
+  const buildings = new BuildingRegistry(extra.length === 0 ? [...BUILDINGS] : [...withoutRadar(), ...extra]);
   const entities = new EntityStore({ footprintOf: buildings.footprintOf });
   const items = new ItemRegistry([...ITEMS, ...extra.map(itemFor)]);
   const inventory = new BuildMaterials(
@@ -159,6 +176,8 @@ describe('BuildingRegistry', () => {
       'lab',
       'miner_2',
       'assembler_2',
+      'radar',
+      'underground_belt',
     ]);
   });
 
@@ -183,12 +202,16 @@ describe('BuildingRegistry', () => {
     const registry = new BuildingRegistry(BUILDINGS);
     expect(registry.footprintOf(EntityType.Miner)).toEqual({ width: 2, height: 2 });
     expect(registry.footprintOf(EntityType.Chest)).toEqual({ width: 1, height: 1 });
-    // C22 gave the lab a definition, so the 3x3 is now content. The fallback
-    // it used to stand for is still the rule and still needs a type nothing
-    // defines: `Radar`, until C23. 1x1 is the only size that cannot claim a
-    // tile it was not given.
+    // C22 gave the lab a definition, so the 3x3 is now content, and C23 gave
+    // the radar one — which left no entity type undefined at all. The fallback
+    // is still the rule, so it is asked of a registry the radar is missing
+    // from: 1x1 is the only size that cannot claim a tile it was not given.
     expect(registry.footprintOf(EntityType.Lab)).toEqual({ width: 3, height: 3 });
-    expect(registry.footprintOf(EntityType.Radar)).toEqual({ width: 1, height: 1 });
+    expect(registry.footprintOf(EntityType.Radar)).toEqual({ width: 2, height: 2 });
+    expect(new BuildingRegistry(withoutRadar()).footprintOf(EntityType.Radar)).toEqual({
+      width: 1,
+      height: 1,
+    });
   });
 
   it.each([
@@ -207,11 +230,11 @@ describe('BuildingRegistry', () => {
     ['a nameless building', [{ ...PIPE, name: '' }], /no name/],
     ['no sprite', [{ ...PIPE, sprite: '' }], /no sprite/],
   ])('refuses %s at construction', (_label, extra, message) => {
-    expect(() => new BuildingRegistry([...BUILDINGS, ...(extra as BuildingDefinition[])])).toThrow(message);
+    expect(() => new BuildingRegistry([...withoutRadar(), ...(extra as BuildingDefinition[])])).toThrow(message);
   });
 
   it('cycles rotation within the rotations a building actually has', () => {
-    const registry = new BuildingRegistry([...BUILDINGS, PIPE]);
+    const registry = new BuildingRegistry([...withoutRadar(), PIPE]);
     const miner = registry.get('miner');
     const chest = registry.get('chest');
     const pipe = registry.get('pipe');
@@ -222,7 +245,7 @@ describe('BuildingRegistry', () => {
   });
 
   it('normalises a rotation a building cannot have', () => {
-    const registry = new BuildingRegistry([...BUILDINGS, PIPE]);
+    const registry = new BuildingRegistry([...withoutRadar(), PIPE]);
     expect(BuildingRegistry.normalizeRotation(registry.get('chest'), SOUTH)).toBe(NORTH);
     expect(BuildingRegistry.normalizeRotation(registry.get('pipe'), WEST)).toBe(EAST);
     expect(BuildingRegistry.normalizeRotation(registry.get('miner'), WEST)).toBe(WEST);
@@ -281,7 +304,9 @@ describe('placement validation', () => {
   });
 
   it('checks the same thing for the ghost as for the command', () => {
-    const h = harness();
+    // The shipped table, with no synthetic building in it: this one builds a
+    // real `Simulation`, and the technology tree names the radar.
+    const h = harness([]);
     const simulation = new Simulation({
       world: h.world,
       buildings: h.buildings,
@@ -543,10 +568,10 @@ describe('adding a building', () => {
     const sawmill: BuildingDefinition = {
       id: 'sawmill',
       name: 'Sawmill',
-      // Any type no shipped building has claimed — C16's assembler took the
-      // one this used to borrow and C22's lab took the one after that, which
-      // is the registry refusing two buildings one entity type exactly as it
-      // is supposed to.
+      // The radar's, borrowed the way `PIPE` borrows it — see `withoutRadar`.
+      // C16's assembler took the one this used to use and C22's lab took the
+      // one after that, which is the registry refusing two buildings one
+      // entity type exactly as it is supposed to.
       entityType: EntityType.Radar,
       category: 'production',
       size: { width: 3, height: 2 },
@@ -555,10 +580,10 @@ describe('adding a building', () => {
       placement: { onTerrain: [TileType.Grass] },
       sprite: 'building:production:SA:3x2:2',
     };
-    // The sawmill alone, because it and `PIPE` are now the only two test
-    // buildings and the shipped table has taken every entity type but one
-    // (C22's lab took `Lab`, leaving `Radar` until C23). A harness of one
-    // proves the same thing: nothing outside `data/buildings.ts` was touched.
+    // The sawmill alone, because it and `PIPE` are the only two test buildings
+    // and the shipped table has now taken every entity type there is. A
+    // harness of one proves the same thing: nothing outside
+    // `data/buildings.ts` was touched.
     const h = harness([sawmill]);
 
     expect(h.system.place('sawmill', 8, 8, EAST)).toBeNull();

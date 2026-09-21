@@ -159,29 +159,31 @@ describe('the building recipes run in a machine that exists', () => {
 
 describe('the v1 target, and how far off it is', () => {
   /**
-   * §15's v1 target was 11 buildings, 13 materials and 20 recipes. C21 moved
-   * it once — the electric furnace is a twelfth building §15 never listed —
-   * and C22 moves it again: the tech tree it asks for names tier-2 buildings
-   * that §15's table does not have rows for, and two of them are shipped (see
-   * C22's deviations).
+   * §15's v1 target was 11 buildings, 13 materials and 20 recipes. It has moved
+   * three times, each time because a chunk shipped a building §15's *table*
+   * never listed: C21's electric furnace, C22's two tier-2 machines, and now
+   * C23's underground belt — which §9 named in the belt model rather than §15
+   * in the building table, and which has been a row of §9's contract since
+   * revision 2.
    *
    * ```text
-   *            v1 target   C22 ships   waiting on
-   * buildings         14          13   radar (C23)
+   *            v1 target   C23 ships   waiting on
+   * buildings         15          15   —
    * materials         13          13   —
-   * recipes           23          22   make_radar (C23)
+   * recipes           24          24   —
    * ```
    *
-   * The numbers are asserted so that the day C23 adds a radar, this test
-   * fails and the reader is pointed at the table rather than at a comment.
+   * **This is the chunk where the columns meet.** Every building §15's table
+   * names now exists, and so does every recipe. The numbers stay asserted so
+   * that the next chunk to add content has to come back and say why.
    */
-  it('ships exactly what C22 can ship, and the rest is accounted for', () => {
-    expect(BUILDINGS).toHaveLength(13);
-    // §15's thirteen materials, all of them at last: `frame` and `data_core`
-    // arrived with the lab that consumes them.
+  it('ships every building §15 names, and the two §9 and C23 added', () => {
+    expect(BUILDINGS).toHaveLength(15);
+    // §15's thirteen materials, all of them since C22: `frame` and `data_core`
+    // arrived with the lab that consumes them, and C23 added no fourteenth.
     expect(ITEMS.filter((item) => item.category !== 'building')).toHaveLength(13);
-    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(13);
-    expect(RECIPES).toHaveLength(22);
+    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(15);
+    expect(RECIPES).toHaveLength(24);
     // 9 processing recipes — §15's nine, now that `make_frame` and
     // `make_data_core` exist — plus one per building.
     expect(RECIPES.filter((recipe) => !buildings.has(recipe.outputs[0]?.itemId ?? ''))).toHaveLength(9);

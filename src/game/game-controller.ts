@@ -70,6 +70,7 @@ import type {
   InventorySlotView,
   InventoryView,
 } from './views/inventory-view.js';
+import { MAP_CELL_TILES, type MapChunkView, type MapEntityView, type MapView } from './views/map-view.js';
 import type { PlacementView } from './views/placement-view.js';
 import type {
   ResearchCostView,
@@ -88,6 +89,10 @@ import {
   type CraftOrder,
 } from './player/player-state.js';
 import { NORTH, type Rotation, type TileCoord } from './world/coordinates.js';
+import { CHUNK_SIZE } from './world/chunk.js';
+import { unpackChunkKey } from './world/explored.js';
+import { TILE_TYPE_COUNT, tileProperties, type TileType } from './world/tile.js';
+import { RESOURCE_TYPE_COUNT, resourceName, type ResourceType } from './world/resource.js';
 
 /** Hotbar slots the number row reaches. §13's toolbar, C07 task 3. */
 export const HOTBAR_SLOTS = 9;
@@ -216,6 +221,12 @@ export class GameController {
 
   /** The last selection told to the UI, so a change can become one event. */
   private lastSelection: EntityId | null = null;
+
+  /**
+   * Downsampled world chunks for the map panel, by `"cx,cy"`, with the
+   * `WorldChunk.revision` each was built from. Derived, never persisted (§10).
+   */
+  private readonly mapChunks = new Map<string, { revision: number; view: MapChunkView }>();
 
   constructor(options: GameControllerOptions) {
     this.game = options.game;
@@ -526,6 +537,112 @@ export class GameController {
       labs: labs.total,
       labsWorking: labs.working,
     });
+  }
+
+  /**
+   * The explored world, as the map panel draws it (C23 task 4).
+   *
+   * One frozen snapshot of every explored world chunk, downsampled to
+   * `MAP_CELL_TILES`-tile cells — see `views/map-view.ts` for the shape and
+   * for why the colours are names rather than colours.
+   *
+   * ## The cache, and the one thing it reads that nothing else in `game/` does
+   *
+   * A downsampled world chunk is 512 bytes and a fully explored §12 map is
+   * 1,600 of them, so rebuilding every one on every repaint is most of a
+   * megabyte a second for a picture that changes when a miner empties a tile.
+   * So each is cached against `WorldChunk.revision`, which is the same signal
+   * the renderer's terrain cache uses and the same one `world.ts` documents as
+   * "has this changed since I last drew it?".
+   *
+   * `revision` is described there as presentation-facing and read by nothing
+   * in `game/`. This is the exception, and it is a narrow one: the controller
+   * is the layer that *builds pictures* (§4), the alternative is a second
+   * change counter beside the first, and a stale map cell is the one bug the
+   * cache could cause — not a stale fact about the world.
+   *
+   * A world chunk that is explored but has never been **generated** is drawn
+   * from `peekChunk`, which answers `undefined` rather than generating it: a
+   * radar reveals ground without visiting it (`explored.ts`), and generating
+   * a hundred world chunks because a panel opened is exactly what §14's
+   * `peekChunk` exists to prevent. Such a cell is left at terrain index 0.
+   */
+  getMapView(): MapView {
+    const world = this.simulation.world;
+    const bounds = world.explored.bounds();
+
+    const chunks: MapChunkView[] = [];
+    for (const key of world.explored.keysAscending()) {
+      const coords = unpackChunkKey(key);
+      if (coords !== null) chunks.push(this.mapChunkView(coords.cx, coords.cy));
+    }
+
+    const entities: MapEntityView[] = [];
+    this.simulation.entities.forEach((entity) => {
+      if (!world.explored.hasTile(entity.x, entity.y)) return;
+      const definition = this.simulation.buildings.forEntityType(entity.type);
+      const extent = footprintExtent(definition.size, entity.rotation);
+      entities.push(
+        freeze({
+          x: entity.x,
+          y: entity.y,
+          width: extent.width,
+          height: extent.height,
+          buildingId: definition.id,
+        }),
+      );
+    });
+
+    return freeze({
+      cellTiles: MAP_CELL_TILES,
+      chunkTiles: CHUNK_SIZE,
+      chunks: freeze(chunks),
+      minCx: bounds.minCx,
+      minCy: bounds.minCy,
+      maxCx: bounds.maxCx,
+      maxCy: bounds.maxCy,
+      playerX: this.simulation.player.x,
+      playerY: this.simulation.player.y,
+      entities: freeze(entities),
+      terrainNames: TERRAIN_NAMES,
+      resourceNames: RESOURCE_NAMES,
+    });
+  }
+
+  /** One world chunk's cells, rebuilt only when its contents have moved. */
+  private mapChunkView(cx: number, cy: number): MapChunkView {
+    const chunk = this.simulation.world.peekChunk(cx, cy);
+    const revision = chunk?.revision ?? -1;
+    const key = `${cx},${cy}`;
+    const cached = this.mapChunks.get(key);
+    if (cached !== undefined && cached.revision === revision) return cached.view;
+
+    const cells = CHUNK_SIZE / MAP_CELL_TILES;
+    const terrain = new Uint8Array(cells * cells);
+    const resource = new Uint8Array(cells * cells);
+
+    if (chunk !== undefined) {
+      for (let cellY = 0; cellY < cells; cellY++) {
+        for (let cellX = 0; cellX < cells; cellX++) {
+          // The cell's north-west tile, and nothing else. A cell is two tiles
+          // square, and averaging four terrain types has no meaning — the
+          // types are names, not numbers. Taking a corner is a *sample*, which
+          // is what a downsampled map is, and it is the same corner every
+          // time, so the picture does not shimmer as a patch is mined out.
+          const index = (cellY * MAP_CELL_TILES) * CHUNK_SIZE + cellX * MAP_CELL_TILES;
+          terrain[cellY * cells + cellX] = chunk.terrain[index] ?? 0;
+          // Ore only where there is ore left: an exhausted tile keeps its
+          // resource *type* (`world.ts`) so the delta stays lossless, and a
+          // map that still showed it would send the player back to a patch
+          // they finished.
+          resource[cellY * cells + cellX] = (chunk.resourceAmount[index] ?? 0) > 0 ? (chunk.resource[index] ?? 0) : 0;
+        }
+      }
+    }
+
+    const view = freeze({ cx, cy, terrain, resource });
+    this.mapChunks.set(key, { revision, view });
+    return view;
   }
 
   /** One node of the tree: where it stands, what it costs, what it grants. */
@@ -1189,6 +1306,21 @@ const EMPTY_IDS: readonly string[] = Object.freeze([]);
  * traversal. `Object.freeze` returns its argument, so this reads as a wrapper
  * rather than as a statement between the value and its use.
  */
+/**
+ * Terrain names indexed by `TileType`, and resource names by `ResourceType`.
+ *
+ * Built from the two tables rather than written out, so a terrain type added
+ * later reaches the map with no line here — and taken as `name`, which is the
+ * §11 palette token (`--if-grass`, `--if-iron`). See `views/map-view.ts`.
+ */
+const TERRAIN_NAMES: readonly string[] = Object.freeze(
+  Array.from({ length: TILE_TYPE_COUNT }, (_unused, type) => tileProperties(type as TileType).name),
+);
+
+const RESOURCE_NAMES: readonly string[] = Object.freeze(
+  Array.from({ length: RESOURCE_TYPE_COUNT }, (_unused, type) => resourceName(type as ResourceType)),
+);
+
 function freeze<T>(value: T): Readonly<T> {
   return Object.freeze(value);
 }

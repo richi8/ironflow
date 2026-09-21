@@ -75,6 +75,12 @@
   --if-lab: #b45fd0;
   --if-miner_2: #f5b65c;
   --if-assembler_2: #63d6b6;
+  /* expansion (C23). A pale radar sweep-green that is nowhere near the belt
+     blues, and a darker, cooler tone of the belt's own colour for the tunnel
+     — near enough to say "that is a belt", far enough to say "that is not the
+     one on the surface". */
+  --if-radar: #7fd4c4;
+  --if-underground_belt: #35597a;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

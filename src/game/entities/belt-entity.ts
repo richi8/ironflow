@@ -114,9 +114,13 @@ export function asBelt(entity: Entity): BeltEntity | null {
  * the one rule that keeps a tile to four items and stops an arriving item
  * materialising on top of one that is already there.
  */
-export function laneEntryPosition(items: readonly BeltItem[], desired: number): number {
+export function laneEntryPosition(
+  items: readonly BeltItem[],
+  desired: number,
+  maxPosition = BELT_MAX_POSITION,
+): number {
   const last = items[items.length - 1];
-  const room = last === undefined ? BELT_MAX_POSITION : last.pos - BELT_SLOT_SPACING;
+  const room = last === undefined ? maxPosition : last.pos - BELT_SLOT_SPACING;
   const pos = Math.min(desired, room);
   return pos < 0 ? -1 : pos;
 }
@@ -129,9 +133,21 @@ export function laneEntryPosition(items: readonly BeltItem[], desired: number): 
  * splitter choosing a side (C17) all come through here — so "four to a tile"
  * and "front-first order" are properties of one function rather than of every
  * caller's care.
+ *
+ * `maxPosition` is how far along the lane an item may be put when the lane is
+ * empty, and it defaults to a belt tile's exit edge because that is what every
+ * lane was until C23. An underground run is one lane several tiles long, so it
+ * passes its own end — without which "as far forward as it fits" would mean
+ * "as far as the first tile", and a run would hold four items however long it
+ * was.
  */
-export function laneAccept(items: BeltItem[], itemId: ItemId, desired: number): boolean {
-  const pos = laneEntryPosition(items, desired);
+export function laneAccept(
+  items: BeltItem[],
+  itemId: ItemId,
+  desired: number,
+  maxPosition = BELT_MAX_POSITION,
+): boolean {
+  const pos = laneEntryPosition(items, desired, maxPosition);
   if (pos < 0) return false;
   items.push({ itemId, pos });
   return true;

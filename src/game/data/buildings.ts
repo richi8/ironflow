@@ -374,4 +374,60 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     },
     sprite: 'building:production:A2:3x3:2',
   },
+
+  /* ---------------------------------------------------------------------- *
+   * Expansion (C23). The radar §15's table has listed since revision 2 and
+   * `entity-types.ts` has held a number for since day one, and the
+   * underground belt §9's own table named — "a pair of entities with a
+   * validated span".
+   *
+   * Appended, for C21's reason: content order is hotkey order, and inserting
+   * a row renumbers a hotbar the player has already learned.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'radar',
+    name: 'Radar',
+    entityType: EntityType.Radar,
+    category: 'exploration',
+    size: { width: 2, height: 2 },
+    // One. A radar looks the same from every direction because what it
+    // produces leaves through the map panel rather than through a tile —
+    // which is the lab's argument, and the chest's before it.
+    rotationCount: 1,
+    buildCost: [{ itemId: 'radar', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // **Balance numbers**, both. Five world chunks is a 352-tile square —
+    // about a third of `SCALE_RANGE` in `world-generator.ts`, which is the
+    // distance at which patches are fully grown, so one radar shows the
+    // player roughly where the *next* factory could go without showing them
+    // where the one after that could. Half a second a world chunk makes a
+    // full sweep of its 121 chunks take a minute: long enough that the map
+    // fills in visibly while the player watches, short enough that a radar
+    // has paid for itself before they have finished walking back.
+    radar: { chunkRadius: 5, sweepSeconds: 0.5 },
+    // §15's power column. A radar is the second thing in the game that makes
+    // the grid worth having, and the first that is optional — a player who
+    // never builds one never misses the 300 kW.
+    power: { consumptionKw: 300 },
+    sprite: 'building:exploration:RA:2x2:3',
+  },
+  {
+    id: 'underground_belt',
+    name: 'Underground Belt',
+    entityType: EntityType.UndergroundBelt,
+    category: 'logistics',
+    size: { width: 1, height: 1 },
+    // Four, and like the belt the rotation is the mechanic: it is the
+    // direction items run, and it is also what decides which end of a pair a
+    // mouth is — the one whose partner lies *ahead* of it is the entrance.
+    rotationCount: 4,
+    buildCost: [{ itemId: 'underground_belt', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §9's tier-1 anchor, unchanged, and six tiles — see
+    // `UndergroundProperties` for why neither is free.
+    underground: { tilesPerSecond: 2.0, maxSpan: 6 },
+    // The rotation and which end it is are appended by the renderer, exactly
+    // as the belt's chevron phase is — see `entity-view.ts`.
+    sprite: 'underground',
+  },
 ]);

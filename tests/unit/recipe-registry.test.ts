@@ -113,6 +113,9 @@ describe('RecipeRegistry', () => {
       'make_lab',
       'make_miner_2',
       'make_assembler_2',
+      // C23's two, and the last of §15's twenty-three plus the one §9 named.
+      'make_radar',
+      'make_underground_belt',
     ]);
   });
 
@@ -241,6 +244,21 @@ describe('the shipped recipe table', () => {
         inputs: ['10 gear', '6 circuit', '4 frame'],
         outputs: ['1 assembler_2'],
         ticks: 150,
+      },
+      {
+        id: 'make_radar',
+        inputs: ['5 gear', '5 circuit', '10 iron_plate'],
+        outputs: ['1 radar'],
+        ticks: 90,
+      },
+      {
+        // **Two** out, which is the only recipe in the game besides
+        // `make_belt` that makes more than one of its product — and here the
+        // reason is stronger: an underground belt is useless alone.
+        id: 'make_underground_belt',
+        inputs: ['2 gear', '4 iron_plate'],
+        outputs: ['2 underground_belt'],
+        ticks: 30,
       },
     ]);
   });

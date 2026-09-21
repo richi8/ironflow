@@ -96,6 +96,14 @@ export type InputAction =
    */
   | 'ui.toggleResearch'
   /**
+   * Open and close the map (C23).
+   *
+   * `M`, which is what the word starts with and what the toolbar's button is
+   * labelled, and which is as free as `T` was: nowhere near the number row or
+   * WASD, so it cannot be hit mid-drag.
+   */
+  | 'ui.toggleMap'
+  /**
    * Show what every machine is making, over the world (C20 task 5).
    *
    * A **toggle**, not a hold, which is the one decision in it. The genre's
@@ -149,6 +157,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyI: 'ui.toggleInventory',
   KeyE: 'ui.toggleInventory',
   KeyT: 'ui.toggleResearch',
+  KeyM: 'ui.toggleMap',
   // Both alts, because which one is under the player's thumb depends on the
   // keyboard, and `KeyV` beside it for the platforms that swallow alt entirely.
   AltLeft: 'ui.toggleAltMode',

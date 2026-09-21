@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C22 complete — the factory can now change what it is allowed to be.** Labs turn data cores into technologies, five of them, each unlocking a new decision rather than a bigger number; locked buildings are visible in the build menu with the technology that would reveal them. §15's tech tree did not survive contact with §15's building table and was re-derived — see C22's deviations. Next: C23 — expansion, map & radar. |
+| **Status** | **C23 complete — the factory now has somewhere to go.** A radar turns 300 kW into map, the map panel draws what has been explored and jumps the camera to it, and the underground belt gets a line past whatever is in the way. Iron in the starting area is measured at a median 2.6 hours of a reference factory, which is the 2–4 band C23 asked for — no generator change was needed, and §15 now says so. Milestone C is done and every building §15 names exists. Next: C24 — save state model & serializer. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C23 — Expansion, map & radar** |
+| **First action** | Chunk **C24 — Save state model & serializer** |
 
 ---
 
@@ -778,8 +778,27 @@ changing it is a deliberate act with a changelog entry.
 6.  inserters         transfer items between belts / machines / chests
 7.  research          consume science, advance progress, apply unlocks
 8.  player            movement, manual mining, hand-crafting
-9.  cleanup           process removals, compact stores, emit events
+9.  exploration       the player and every radar reveal world chunks    (C23)
+10. cleanup           process removals, compact stores, emit events
 ```
+
+**Implementation note (C23).** Phase 9 is the first phase *added* to this list
+since it was written, and it is **appended** rather than inserted: cleanup is
+the only phase whose number moved, and it stays last because it has to. This
+is the changelog entry the paragraph above asks for.
+
+Appending is also what the phase needs on the merits. Its two producers want
+opposite ends of the tick — the player's reveal has to follow the player's
+*movement* or the map lags a tick behind the legs, and a radar built this frame
+should sweep on the tick it was built, exactly as C21's generator supplies on
+the tick it was placed. Running after phase 8 gives both. It could not be
+folded into phase 8, which is the player and not a building, nor into phase 4,
+which runs before the player has moved.
+
+Nothing in the simulation reads the explored set back. It is authoritative
+(§10) and persisted (§14) because nothing else records it — a world chunk the
+player crossed and one they never approached are byte-identical — and its only
+consumer is the map panel's view model.
 
 **Why this order.** Power resolves first so every machine in the tick sees the
 same satisfaction ratio. Mining before production so a freshly-mined ore can be
@@ -816,7 +835,7 @@ the renderer.
 | Position encoding | fixed-point integer, 0…255 across a tile | Exact, serializable, determinism-safe (§6 R3). |
 | Item representation | `{ itemId: number; pos: number }` in a per-tile ring | Belt items are **not** entities. Do not give them ids, do not put them in the `EntityStore`. |
 | Curves | Belt direction is per-tile; a curve is inferred by the renderer from neighbours | Simulation stays direction-only; the art sheet's curve sprite is a render concern. |
-| Underground belts | Tech unlock, C22 | High layout-decision value per unit of complexity. A pair of entities with a validated span. |
+| Underground belts | Tech unlock, C23 | High layout-decision value per unit of complexity. A pair of entities with a validated span. |
 
 ### Throughput
 
@@ -827,6 +846,31 @@ belt tier 2:  4.0 tiles/s  x  4 items/tile  = 16.0 items/s
 
 These numbers are the anchor for all machine rates in §15. Change them and the
 whole content bible must be re-derived.
+
+**Implementation note (C23).** The row above says "C22" and it was C23's; more
+usefully, it says "a pair of entities with a validated span" and that turned
+out to be three decisions rather than one.
+
+- **A run is one lane, as long as the run.** The entrance owns
+  `(span + 1) * BELT_TILE_UNITS` of fixed-point positions and an item leaves
+  when it passes the end of them, so transit time is distance over speed with
+  nothing added and nothing saved: **a buried run is exactly as fast as the
+  surface belt it replaces**, and holds exactly as many items. The obvious
+  alternative — the entrance holding one tile's lane and the item reappearing
+  at the exit — would make a six-tile run five tiles faster than the belt
+  beside it, and burying a line would become a *throughput* upgrade rather than
+  a routing choice. That is the one thing this building must not be.
+- **Which mouth is which is geometry, not a field.** Both mouths store `link`
+  and neither stores a role; the entrance is the one whose partner lies ahead
+  of it along its own rotation. A stored flag is a second copy of a fact that
+  two positions already carry. A mouth with no partner is an entrance with a
+  span of zero, so it behaves as an ordinary belt tile — pairing is a run
+  getting *longer*, and there is no inert state to explain (pillar 3).
+- **The span is validated against the run the player is finishing.** See C23's
+  decisions for the rule and for the one arbitrary number in it.
+
+`laneAccept` and `laneEntryPosition` gained an optional lane length for this,
+which is the only change C23 made to C13's belt code.
 
 **Implementation note (C13).** 256 units per tile over 30 ticks is 17.07 units
 per tick, and §6 R3 says that stores as the integer 17. A tier-1 belt therefore
@@ -861,6 +905,7 @@ feel fake.
 | resource tile remaining amounts | selected-building panel contents |
 | research state and unlocked technologies | spatial index / occupancy grid |
 | *(C22: the queue, the completed set, and part-finished units)* | *(C22: which buildings and recipes are unlocked — a pure function of the left column, `research/unlocks.ts`)* |
+| *(C23: the explored world-chunk set — `world/explored.ts`)* | *(C23: the map panel's downsampled cells, cached on `WorldChunk.revision`)* |
 | player position and inventory | belt network topology |
 | next entity id | reachability and connectivity graphs |
 
@@ -1155,6 +1200,34 @@ Two things about it are its own:
   out of reach of the UI. §7 lets a pre-check be stricter than the simulation
   nowhere — this is the pre-check agreeing with it exactly.
 
+**Implementation note (C23).** `MapPanel` is the **eighth** panel, and the
+first one §13's structure diagram above does not list — which is the honest
+place for it, because the diagram is C07's list of what the UI was going to
+need and a map was C23's idea of what C23 needed. It is also the only panel in
+the game whose body is a `<canvas>`, for a reason that is about scale rather
+than about taste: it draws a few hundred thousand cells, and a `<div>` each is
+not a panel. Every other rule holds — it is handed a frozen view model, it
+cannot reach the simulation, and it rides the 5 Hz lane with the bag and the
+tech tree, because what it shows moves at the speed of a walk and of a radar
+sweep.
+
+Two things about it are its own:
+
+- **Its colours come out of `tokens.css` at repaint**, through
+  `getComputedStyle`, rather than out of a table. §4 forbids `ui/**` from
+  importing `renderer/palette.ts`, and a third copy of §11's colours in `ui/`
+  is exactly the duplication that stylesheet exists to prevent. The view model
+  carries a **name** per cell — `'grass'`, `'iron'` — which is the §11 palette
+  token `--if-<name>`, the one-word-three-uses arrangement
+  `ResourceProperties.name` has documented since C09. A token that resolves to
+  nothing falls back to a neutral grey rather than throwing, so the panel is
+  still drawable and still clickable in a theme C30 has not written yet.
+- **It stays usable without a 2D context.** Sizing the canvas and working out
+  where the map sits on it happen *before* `getContext`, so a browser that has
+  lost the context — or a headless test — gets a blank panel that still turns a
+  click into the right tile. Drawing nothing is a blank map; forgetting the
+  placement would be a map the player cannot use.
+
 **A view model carries only what exists.** `HudView` had no research progress
 from C07 to C22, because there was no research; a field that is always `null`
 is a promise the view cannot keep, so the HUD drew the tile from §11's icon set
@@ -1227,6 +1300,19 @@ persisted:      seed
 regenerated:    every unmodified terrain tile
                 every untouched resource tile's initial amount
 ```
+
+**Implementation note (C23).** The explored set is real, in
+`game/world/explored.ts`, and it is a set of packed `chunkKey`s rather than a
+flag on `WorldChunk`. A flag would be simpler and wrong in both directions:
+reading a tile **generates** a world chunk, and the renderer reads every tile
+it is about to draw, so a flag would be set by the act of looking at the map —
+while a radar, which reveals ground nobody has visited, would have to generate
+a hundred world chunks in order to mark them. Holding keys means revealing
+ground costs one integer and brings no world chunk into existence.
+
+`restore` validates every key it is handed, because this is one of the two
+doors untrusted data comes through: a key outside the packable range would
+alias a world chunk somewhere else entirely.
 
 This keeps the reference factory's save inside the 2 MB budget and makes
 `generatorVersion` a first-class concern: if worldgen changes, old saves must
@@ -5123,6 +5209,161 @@ existing one would — and adds the underground belt as a second unlock on
 `logistics_1`, which is where §15 always put it. Both are content rows in
 `data/technologies.ts`; the machinery is in place.
 
+### What C23 shipped
+
+**Acceptance, one by one.**
+
+- The map shows explored terrain and updates as the player travels. *(Met.
+  Phase 9 reveals the 3x3 block of world chunks around the player each time
+  they cross into a new one, and the panel is handed a fresh snapshot on the
+  5 Hz lane and on the way open. Asserted through the view model rather than
+  through pixels — see the map panel's test on why.)*
+- A radar reveals a documented radius and its coverage persists across a save.
+  *(Half met, and the half that exists is the one C24 will build on. The radius
+  is documented and asserted: a 5-world-chunk square, 121 chunks, one every
+  half a second. There is no save format yet, so persistence is tested the way
+  C22 tested research — `ExploredChunks` round-trips through its own key list,
+  in the wrong order, and comes back identical. The determinism hash gained an
+  `explored` root, so the day C24 writes it, §6 R8 is already watching.)*
+- A starting-area-only factory visibly runs out of ore in a bounded time.
+  *(Met, in two halves that were already apart. "Visibly" is C11's — a dry
+  miner reports `no_resource` and raises exactly one alert. "In a bounded
+  time" is C23's, and it is measured rather than asserted by construction: see
+  §15's new scarcity section.)*
+- Underground belts validate their span and refuse invalid placements clearly.
+  *(Met. `span_too_long` is the refusal, it is a real sentence in the toast
+  table, and the ghost goes red on the same answer — `validate` is one path
+  with two callers, exactly as C06 built it.)*
+
+**Decisions.**
+
+- **A buried run is exactly as fast as the belt it replaces.** One lane,
+  `(span + 1)` tiles long, so transit is distance over speed with nothing added
+  and nothing saved. The alternative — teleport at the exit — would make
+  burying a line a *throughput* upgrade, and the only way a player would find
+  out is by racing two lines in a finished factory. Recorded in §9.
+- **The pairing rule, and the one arbitrary number in it.** Placing a mouth
+  scans **backwards** along its own facing for the nearest unpaired mouth
+  facing the same way, stopping at the first *paired* one — a finished run is a
+  wall, or a third mouth would steal its entrance and orphan its exit. Within
+  `maxSpan` it pairs; beyond it, `span_too_long`. The scan window is
+  `2 * maxSpan`, and that is the arbitrary number: within a second run's length
+  of an unfinished run, in line with it and facing the same way, the player is
+  finishing it and deserves to be told. Beyond that they are starting a new run
+  on the same line, and refusing would make a long belt impossible to bury in
+  two hops.
+- **A lone mouth is an entrance with a span of zero**, so it is an ordinary
+  belt tile until its partner arrives. There is no "unpaired" state to explain
+  (pillar 3), and pairing is simply a run getting longer. Demolishing one end
+  loses whatever was still in the tunnel — the same bargain a belt tile makes
+  when it is removed with items on it, said one tile further, and the
+  alternative would compact items backwards into a lane too short to hold them
+  and put negative positions into authoritative state (§6 R7).
+- **The map panel is not gated on research.** §15's tree writes
+  `exploration_1` as unlocking "radar, map", and only the radar is behind it:
+  the explored set fills from the player's own legs from the first tick, and a
+  map you cannot open until the fifth technology is an hour of walking with
+  nothing to show for it. Recorded in §15.
+- **A radar sweeps one world chunk at a time.** Revealing is idempotent, so a
+  radar *could* mark its whole coverage every tick and nothing observable would
+  change. The cursor exists for two reasons that are not correctness: 121
+  chunks per radar per tick is work §12 would notice, and a radar that fills
+  the map in over a minute is a building doing something where one that
+  completes the instant it is powered is a switch. The cursor wraps, which is
+  what task 3's "low-rate refresh" is.
+- **The explored set holds packed keys, not a flag on `WorldChunk`.** Reading a
+  tile *generates* a world chunk, so a flag would be set by looking at the map;
+  and a radar reveals ground nobody has visited, so it would have to generate a
+  hundred world chunks to mark them. Recorded in §14.
+- **The underground belt is not hand-craftable, though the belt is.** §15's
+  hand-craft column exists so a new game is never soft-locked, and nothing
+  behind a technology can be on that path by definition — which is why the
+  other half of `logistics_1`, the splitter, needs an assembler too.
+
+**Deviations.**
+
+- **§8 gained a phase.** Exploration is phase 9, **appended**, so cleanup is
+  the only phase whose number moved. The full reasoning is in §8; in short, its
+  two producers want opposite ends of the tick and running after phase 8 gives
+  both. This is the changelog entry §8 asks for.
+- **A fifteenth building, and it is one §15's table never named.** The
+  `underground_belt` belongs to §9's belt model rather than to §15's building
+  table, which is why `EntityType` had a reserved number for the radar from day
+  one and none for this. It takes the next free one, like every latecomer since
+  C21. §15's table now has a row for it.
+- **`EntityType` is full.** Every one of its fifteen members now has a
+  definition, which means a test can no longer borrow "a type nothing has
+  implemented yet" — `tests/unit/build-system.test.ts` has borrowed one three
+  times since C17. The fixture now takes the radar's number and the radar steps
+  out of the table for the length of the test, rather than adding an enum
+  member for the tests' benefit that every save migration would have to learn.
+- **`span_too_long` was added to §7's rejection vocabulary.** The one refusal in
+  the game that is about a *pair*.
+- **`laneAccept` and `laneEntryPosition` gained an optional lane length.** The
+  only change C23 made to C13's belt code, and it closed a latent inconsistency
+  as well as enabling the tunnel: an empty lane would accept an item "as far
+  forward as it fits" and mean one tile by that, however long the lane was.
+- **`BuildingCategory` gained `exploration`**, a seventh and a category of one.
+  The radar is not `research` — nothing it does touches the tech tree — and not
+  `logistics`, because it moves nothing.
+- **`GameController` reads `WorldChunk.revision`**, which `world.ts` documents
+  as presentation-facing and read by nothing in `game/`. It is the map's
+  per-chunk cache key, it is the same signal the renderer's terrain cache uses,
+  and the alternative is a second change counter beside the first. The worst a
+  stale entry can do is draw a stale map cell.
+
+**Tests.**
+
+- `tests/unit/underground-belt.test.ts` — pairing and every way it can go
+  wrong (off the axis, facing the other way, past a finished run, out of
+  reach), the lock, and the transit half: a buried run and a surface belt of
+  the same length fed the same item arrive on the **same tick**, a run holds a
+  belt's density and no more, a belt run into the far end backs up, and a
+  demolished far end leaves a working one-tile belt.
+- `tests/unit/exploration-system.test.ts` — the set (bounds, idempotence,
+  ascending keys, a rejected key, and revealing costing no world chunks), the
+  player's reveal and the fact that standing still reveals nothing, the radar's
+  documented radius chunk by chunk, no power, the lock, the wrap, and phase 9
+  running after phase 8.
+- `tests/unit/map-panel.dom.test.ts` — the panel through the real `GameUI`:
+  both ways in, exclusivity against the other three panels, the empty state,
+  the view growing as the player travels, names rather than colours, whole
+  cells, dots only on explored ground, the revision cache, and click-to-jump
+  landing on the tile under the pointer.
+- `tests/integration/belt-underground-chest.test.ts` — §17's chain for this
+  chunk, and the only one in that list that is a *comparison*: a buried line
+  and a surface line of the same length, saturated for a minute, deliver the
+  same count. Plus backpressure propagating back through six tiles of ground.
+- `tests/balance/scarcity.test.ts` — the measurement §15 now records, across
+  24 seeds.
+- `tests/determinism/state-hash.ts` gained an `explored` root, so the set is
+  covered by every determinism test that already exists.
+- `tests/unit/sprite-atlas.test.ts` — the two mouths are different pictures at
+  every facing, which is C22's argument against the fast belt one building on.
+
+**Noticed, not fixed.**
+
+- **A locked hand-craftable recipe would be invisible for ever.** C22 filters
+  locked recipes out of `InventoryView`, and `InventoryPanel` sizes its button
+  pool from the first view — so a recipe that is both hand-craftable and locked
+  gets no button, and researching it would never give it one. Nothing has been
+  both until now, and C23 kept it that way by making the underground belt
+  machine-only *for its own reasons*. The day one genuinely needs to be both,
+  the fix is to pool from `recipes.handCraftable()` and hide the locked rows.
+- **An inserter cannot reach into an underground belt**, because `asBelt` tests
+  the entity type. That is the same answer C17 gave for the splitter and it is
+  right for the same reason — a mouth is a belt fitting, not a place items are
+  loaded — but it is now true of two buildings rather than one, and the day a
+  player expects otherwise it will read as a bug rather than as a rule.
+- **`rotate` is still in §7's command union with no implementation.** Named by
+  C20, C21A and C22, and untouched again: three chunks in a row have declined
+  it, which is starting to look like a decision that should be written down as
+  one.
+- **The map does not draw the camera's viewport.** A player who jumps the
+  camera has no mark on the map saying where they just went. Cheap to add and
+  deliberately left out — the camera is the renderer's and the panel would need
+  a second injected reading beside `onJumpTo` for a rectangle C29 may move.
+
 ---
 
 # Milestone D — Persistence
@@ -5472,6 +5713,27 @@ nuisance, not decisions. Do not build them.**
 Implement only if the answer is "expansion is free" *and* the player has
 explicitly asked for combat.
 
+**Evaluated after C23: NO-GO.** Expansion is not free, and C23 is the chunk
+that made it cost. Four things the player now pays:
+
+```text
+  ore runs out          §15's scarcity section: the starting area's iron is a
+                        median 2.6 hours of a reference factory, so the second
+                        outpost is compulsory rather than optional
+  distance costs        a far patch is a belt run or a second smelting column;
+                        §19's generator makes distant deposits richer but
+                        *rarer*, so there is no second one behind the first
+  looking costs         a radar is 300 kW, the poles to reach it, and a minute
+                        of sweeping before it has told the player anything
+  the route costs       terrain, and now the six-tile span that gets a line
+                        past what is in the way — which is a decision rather
+                        than a detour
+```
+
+Enemies on top of that would add nuisance, not decisions, which is exactly
+what the test above exists to prevent. Re-evaluate only if a later chunk makes
+expansion cheap, or if the player asks for combat.
+
 **If greenlit, the minimum viable version:**
 
 ```text
@@ -5573,7 +5835,9 @@ and a stack that runs out mid-drag reads as a bug (C13); fifty of anything else
 is past what a player carries before they run out of somewhere to put it. Both
 are **balance numbers**. C21 added the generator, the pole and the electric
 furnace; C22 added the lab §15 owed and the two tier-2 buildings its tech tree
-unlocks. Only the radar is still outstanding, and it arrives with C23.
+unlocks. **C23 added the last two**: the `radar` this table has owed since
+revision 2, and an `underground_belt` at the belt's hundred — for the belt's
+reason, since a run of them is laid in one go.
 
 **Ten buildings is one more than the hotbar.** C21 is the chunk that overflows
 `HOTBAR_SLOTS`, and the tenth entry is reached through the build menu with no
@@ -5641,6 +5905,8 @@ lands on 150 kW by derivation rather than by choice. The constant lives in
 | `make_lab` | 10 `gear` + 10 `circuit` + 12 `brick` | 1 `lab` | 5.0 s | assembler |
 | `make_miner_2` | 6 `gear` + 4 `circuit` + 4 `steel` | 1 `miner_2` | 3.0 s | assembler |
 | `make_assembler_2` | 10 `gear` + 6 `circuit` + 4 `frame` | 1 `assembler_2` | 5.0 s | assembler |
+| `make_radar` | 5 `gear` + 5 `circuit` + 10 `iron_plate` | 1 `radar` | 3.0 s | assembler |
+| `make_underground_belt` | 2 `gear` + 4 `iron_plate` | **2** `underground_belt` | 1.0 s | assembler |
 
 A time in this table is the **recipe's own**. What a machine takes is that
 divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
@@ -5648,7 +5914,9 @@ divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
 
 The building rows are exactly that: every building in the table below has one,
 taking the ingredients in its "crafted from" column. Total v1 recipe count:
-**9 processing + 14 building = 23**, of which 22 exist — the radar's is C23's.
+**9 processing + 15 building = 24**, and as of C23 **all of them exist**. The
+fifteenth building recipe is `make_underground_belt`, which §15 never listed
+because §9 owned that building rather than this section.
 
 **`make_lab`'s bill is not the one the building table below used to give.** It
 said 10 gear, 10 circuit and **4 frame**, and the frames are gone: a frame is
@@ -5757,7 +6025,8 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8 (a radius), supply area 5 (a square) |
 | `electric_furnace` | 2×2 | 12 brick, 5 circuit, 3 steel | 150 kW | smelting, speed 1.0, **no fuel buffer**; buffers 50 in / 50 out, 4 rotations (C21) |
 | `lab` | 3×3 | 10 gear, 10 circuit, **12 brick** | 180 kW | consumes data cores; one research unit per 5 s (C22) |
-| `radar` | 2×2 | 5 gear, 5 circuit, 10 iron_plate | 300 kW | reveals map world chunks |
+| `radar` | 2×2 | 5 gear, 5 circuit, 10 iron_plate | 300 kW | reveals a 5-world-chunk square, one chunk every 0.5 s (C23) |
+| `underground_belt` | 1×1 | 2 gear, 4 iron_plate → **2 mouths** | — | 4 rotations, 8 items/s, span ≤ 6 tiles (C23) |
 | `miner_2` | 2×2 | 6 gear, 4 circuit, 4 steel | — | 1.0 items/s; unlocked by `mining_2` (C22) |
 | `assembler_2` | 3×3 | 10 gear, 6 circuit, 4 frame | — | speed 1.0; unlocked by `construction_1` (C22) |
 
@@ -5789,14 +6058,15 @@ assembler, so the assembler's whole value is automation rather than speed. See
 C21A's decisions for why that is the opposite of the genre's usual answer and
 why it is the right one here.
 
-14 buildings. Ten of them are distinct verbs, which is what the previous
-revision's "5–8" was protecting; four are variants, and each one is there
-because a **technology needed something to unlock**. The twelfth is C21's
-`electric_furnace`; the thirteenth and fourteenth are C22's `miner_2` and
-`assembler_2`, which §15's own tech tree has always named (`mining_2` unlocks
-"miner tier 2 (1.0/s)", `construction_1` unlocks "assembler tier 2") without
-giving them rows. C22 gave them rows. Thirteen of the fourteen exist; the
-radar is C23's.
+15 buildings, and **as of C23 every one of them exists**. Eleven are distinct
+verbs, which is what the previous revision's "5–8" was protecting; four are
+variants, and each one is there because a **technology needed something to
+unlock**. The twelfth is C21's `electric_furnace`; the thirteenth and
+fourteenth are C22's `miner_2` and `assembler_2`, which §15's own tech tree has
+always named (`mining_2` unlocks "miner tier 2 (1.0/s)", `construction_1`
+unlocks "assembler tier 2") without giving them rows, and C22 gave them rows.
+The fifteenth is C23's `underground_belt` — the one building in the game §15
+never named, because §9's belt model owned it from revision 2.
 
 **The fast belt and the fast inserter are not among them**, and the reason is
 the renderer rather than the tree: the procedural atlas draws a belt as a lane
@@ -5826,7 +6096,7 @@ leaves the rest free:
 ```text
 draws power    electric_furnace 150 kW      (C21)
                lab              180 kW      (C22)
-               radar            300 kW      (C23)
+               radar            300 kW      (C23, and it is charged)
 
 free in v1     miner, inserter, assembler   struck by C22 — see below
 ```
@@ -5910,8 +6180,9 @@ decision rather than a number.
                   on the path to a data core]
                                 |
                     logistics_1 (10 data_core)
-                    unlocks: splitter
-                    -> one line, two ways: the routing puzzle
+                    unlocks: splitter, underground belt  (C23)
+                    -> one line, two ways, and a line that
+                       goes under whatever is in the way
                                 |
                     smelting_2 (20 data_core)
                     unlocks: steel
@@ -5925,17 +6196,28 @@ decision rather than a number.
                                 |
                 +---------------+---------------+
                 |                               |
-        mining_2 (60)                   construction_1 (100)
-        unlocks: miner tier 2 (1.0/s)   unlocks: frame, assembler tier 2
-        -> every ratio re-derived       -> the machine §15's recipe times
+        exploration_1 (50)              mining_2 (60)
+        unlocks: radar          (C23)   unlocks: miner tier 2 (1.0/s)
+        -> find the next patch          -> every ratio re-derived
+           before you need it                       |
+                                        construction_1 (100)
+                                        unlocks: frame, assembler tier 2
+                                        -> the machine §15's recipe times
                                            were actually written for
 ```
 
-Five technologies, 230 data cores in total, and at one lab that is about
-twenty minutes of research spread across a game that has to build the science
-line to pay for it. `construction_1` requires `mining_2`, so the tree is a
-chain with one fork rather than a diamond — a five-node tree with three ways
-in would be a menu, not a progression.
+Six technologies, 280 data cores in total, and at one lab that is about
+twenty-five minutes of research spread across a game that has to build the
+science line to pay for it. `construction_1` requires `mining_2`, so the spine
+is a chain with two leaves hanging off it rather than a diamond — a tree with
+three ways in would be a menu, not a progression.
+
+**C23's node is a leaf, and that is the whole of why it is where it is.**
+Appending a node needs no save migration; inserting one into the spine would
+renumber what depends on what. Its fifty cores sit between `power_1`'s forty
+and `mining_2`'s sixty, and the *ordering* is the point rather than the number:
+a player who has just electrified their smelting should find the next patch
+before they double the rate at which they empty the current one.
 
 **What became of the other four names.** `electronics_1` is **struck**:
 everything it unlocked is on the path to the first lab, and a node that
@@ -5944,8 +6226,12 @@ as the starting kit contains an assembler — it is the strongest first unlock
 in the genre and it is unavailable while the player is handed the thing it
 would grant, which is a *content* decision about the kit and is named in C22's
 "Noticed, not fixed". `logistics_2` (fast belt, fast inserter) waits for a
-renderer that can tell two belt tiers apart. `exploration_1` is C23's, with
-the radar and the map panel it names, and C23 adds the underground belt to
+renderer that can tell two belt tiers apart. **`exploration_1` came back in
+C23**, and it unlocks the radar alone: the **map panel is not gated**, because
+the explored set fills from the player's own legs from the first tick and a map
+you cannot open until the fifth technology is an hour of walking with nothing
+to show for it. What the radar unlocks is ground the player has *not* walked,
+which is the part worth earning. C23 also added the underground belt to
 `logistics_1` — appending an unlock to an existing node, which needs no save
 migration, rather than adding a prerequisite to one, which would.
 
@@ -5953,6 +6239,44 @@ migration, rather than adding a prerequisite to one, which would.
 holds: doubling a miner to 1.0 items/s re-derives every ratio downstream of it,
 so a line built for tier-1 miners becomes short of furnaces rather than short
 of ore. Everything else unlocks a **new verb**.
+
+### How long the starting area lasts (C23)
+
+C23 task 1 asks that "starting-area patches must be exhaustible in roughly 2–4
+hours of play". That is a claim about a number nobody had measured, so C23
+measured it before changing anything — and **nothing needed changing**, which
+is the finding.
+
+The starting area is C19's disc: `START_RADIUS` tiles around spawn. Its budget
+is every resource tile in it; the draw it is measured against is a **reference
+starting factory**, and these four are **balance numbers** derived from §15's
+own chains rather than chosen:
+
+```text
+                 miners    draw      median across 24 seeds
+  iron              4      2.0/s     2.6 h      <- binding
+  copper            2      1.0/s     4.9 h
+  coal              2      1.0/s     3.4 h
+  stone             1      0.5/s     4.0 h
+```
+
+Four iron miners is what §15's ratios make a plausible first factory: one
+miner feeds 1.6 plate furnaces, so four feed six — about the smelting column a
+player has built by the time they are researching. Copper's draw is half
+iron's because copper only reaches wire and circuits; stone's is a quarter
+because brick's only consumer is `make_furnace`.
+
+**Iron is the binding resource, and that is the point.** It runs out first by a
+wide margin, because it is the material every recipe in §15 eventually reaches
+— so the "2–4 hours" is a statement about *iron*, and iron is what sends the
+player out of the starting area. A start that ran out of everything at once
+would be a start that ended rather than one that moved.
+
+`tests/balance/scarcity.test.ts` holds all of it: the band on iron's median,
+a per-seed ceiling on iron, a floor and a looser ceiling on the rest, and a
+guard that the reference draw is a whole number of tier-1 miners. The "visibly
+runs out" half of C23's acceptance was already tested — C11's miner reports
+`no_resource` and raises exactly one alert when its tiles are dry.
 
 ---
 
@@ -6049,7 +6373,14 @@ ore -> smelt -> assemble -> a placed building     (C20, tests/integration/factor
 coal -> belt -> generator -> poles -> electric furnace          (C21, tests/integration/coal-to-power.test.ts)
 full chain with power browning out                (C21, tests/unit/power-system.test.ts)
 full chain producing data cores -> lab -> research complete    (C22)
+belt -> underground run -> belt -> chest          (C23, tests/integration/belt-underground-chest.test.ts)
 ```
+
+C23's chain is the only one in this list that is a **comparison** rather than a
+count: it runs a buried line and a surface line of the same length side by side
+for a saturated minute and asserts they deliver the same number. An exact count
+would have pinned §9's fixed-point arithmetic; what must never change is that
+the two are equal.
 
 ### The four tests that must never be deleted
 

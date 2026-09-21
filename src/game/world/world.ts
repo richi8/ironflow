@@ -19,6 +19,7 @@ import {
   toLocalCoord,
   type WorldChunk,
 } from './chunk.js';
+import { ExploredChunks } from './explored.js';
 import { ResourceType, isResourceType } from './resource.js';
 import { TileType, isTileType } from './tile.js';
 
@@ -78,6 +79,17 @@ export class World {
    * coordinate range instead.
    */
   private readonly chunks = new Map<number, WorldChunk>();
+
+  /**
+   * Which world chunks the player has seen (C23 task 5).
+   *
+   * Authoritative and persisted (§10, §14), and owned here because it is a
+   * fact about the *world* rather than about any entity: a radar writes to it
+   * and so do the player's own legs, and neither of those is where it could
+   * live. It is deliberately not a flag on `WorldChunk` — see
+   * `explored.ts`, which is also why revealing ground generates nothing.
+   */
+  readonly explored = new ExploredChunks();
 
   private readonly generate: ChunkGenerator;
 

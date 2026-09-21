@@ -61,6 +61,10 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   already_queued: 'That is already in the research queue.',
   missing_prerequisites: 'Something that leads to that has not been researched yet.',
   research_queue_full: 'The research queue is full.',
+  // C23. The number is not in the sentence because the sentence is not where
+  // it belongs: the build menu names the span beside the building, where it
+  // can be read before the mistake rather than after it.
+  span_too_long: 'The other end of that underground belt is too far away.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {

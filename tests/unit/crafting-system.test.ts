@@ -329,6 +329,9 @@ describe('what §15 says can be made by hand', () => {
       'make_inserter',
       'make_furnace',
       'make_chest',
+      // C23 added no ninth, deliberately: the underground belt is behind a
+      // technology, and this list is about what keeps a *new game* from being
+      // soft-locked. See C23's decisions in the plan.
     ]);
   });
 

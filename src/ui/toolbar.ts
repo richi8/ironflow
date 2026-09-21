@@ -29,6 +29,8 @@ export interface ToolbarOptions {
   readonly onToggleInventory: () => void;
   /** Open or close the technology tree (C22). */
   readonly onToggleResearch: () => void;
+  /** Open or close the map (C23). */
+  readonly onToggleMap: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -40,6 +42,7 @@ export class Toolbar {
   private readonly menuButton = document.createElement('button');
   private readonly bagButton = document.createElement('button');
   private readonly techButton = document.createElement('button');
+  private readonly mapButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -74,6 +77,15 @@ export class Toolbar {
     this.techButton.title = 'Open the technology tree (T)';
     this.techButton.addEventListener('click', this.handleTech);
     this.root.append(this.techButton);
+
+    // The fourth, and the one a player reaches for most once the factory has
+    // outgrown the starting patch (C23).
+    this.mapButton.type = 'button';
+    this.mapButton.className = 'if-toolbar__menu';
+    this.mapButton.textContent = 'MAP';
+    this.mapButton.title = 'Open the map (M)';
+    this.mapButton.addEventListener('click', this.handleMap);
+    this.root.append(this.mapButton);
 
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
@@ -115,10 +127,16 @@ export class Toolbar {
     this.techButton.setAttribute('aria-pressed', String(open));
   }
 
+  setMapOpen(open: boolean): void {
+    this.mapButton.classList.toggle('is-active', open);
+    this.mapButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.menuButton.removeEventListener('click', this.handleMenu);
     this.bagButton.removeEventListener('click', this.handleBag);
     this.techButton.removeEventListener('click', this.handleTech);
+    this.mapButton.removeEventListener('click', this.handleMap);
     for (const slot of this.slots) slot.button.removeEventListener('click', this.handleSlot);
     this.root.remove();
     this.slots.length = 0;
@@ -130,6 +148,10 @@ export class Toolbar {
 
   private readonly handleTech = (): void => {
     this.options.onToggleResearch();
+  };
+
+  private readonly handleMap = (): void => {
+    this.options.onToggleMap();
   };
 
   private readonly handleBag = (): void => {

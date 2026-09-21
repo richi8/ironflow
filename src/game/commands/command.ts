@@ -177,7 +177,20 @@ export type CommandRejectionReason =
   /** Something it needs is neither researched nor queued ahead of it. */
   | 'missing_prerequisites'
   /** The research queue already holds `MAX_RESEARCH_QUEUE` technologies. */
-  | 'research_queue_full';
+  | 'research_queue_full'
+  /* Added in C23. */
+  /**
+   * The other end of this underground run is further away than the building
+   * can reach (C23 task 2).
+   *
+   * The one refusal in the game that is about a *pair*. Placing a lone mouth
+   * is always fine — it is an entrance waiting for its exit — so the only way
+   * an underground belt can be refused is by being laid in line with an
+   * unfinished run and too far from it to finish it, which is precisely the
+   * mistake a player makes when they pace out a tunnel by eye. Saying so
+   * beats leaving them two stubs that look connected and carry nothing.
+   */
+  | 'span_too_long';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {

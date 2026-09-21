@@ -25,6 +25,7 @@ import {
   playerSprite,
   resourceSprite,
   terrainSprite,
+  undergroundSprite,
 } from '../../src/renderer/sprite-atlas.js';
 
 /**
@@ -141,6 +142,28 @@ describe('sprite ids', () => {
     // because a counter ran past eight would be the worst kind of bug.
     expect(describeSprite('belt:1:11')).toEqual({ kind: 'belt', rotation: 1, phase: 3 });
     expect(describeSprite('belt:1:x')).toEqual({ kind: 'missing' });
+  });
+
+  it('resolves an underground mouth at each facing, and each end of a run', () => {
+    for (const rotation of [0, 1, 2, 3] as const) {
+      expect(describeSprite(undergroundSprite(rotation, true))).toEqual({
+        kind: 'underground',
+        rotation,
+        entrance: true,
+      });
+      expect(describeSprite(undergroundSprite(rotation, false))).toEqual({
+        kind: 'underground',
+        rotation,
+        entrance: false,
+      });
+    }
+    // The two ends must be **different pictures** — C22's argument against the
+    // fast belt, one building later: a player tracing a buried line has to see
+    // which way it goes without counting chevrons.
+    expect(undergroundSprite(1, true)).not.toBe(undergroundSprite(1, false));
+    expect(describeSprite('underground:1')).toEqual({ kind: 'missing' });
+    expect(describeSprite('underground:1:sideways')).toEqual({ kind: 'missing' });
+    expect(describeSprite('underground:4:in')).toEqual({ kind: 'missing' });
   });
 
   it('resolves an inserter arm at each facing, with and without an item in it', () => {

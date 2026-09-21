@@ -168,6 +168,19 @@ export function beltSprite(rotation: Rotation, phase = 0): SpriteId {
  * footprint is implied by the rotation — two tiles across the flow, one deep —
  * which is the same fact `data/buildings.ts` states and the registry enforces.
  */
+/**
+ * The sprite for one mouth of an underground run (C23).
+ *
+ * Two pictures rather than one, and it is the same argument C22 used to keep
+ * the fast belt out of the game: two buildings on the map the player cannot
+ * tell apart is worse than one building fewer. An entrance and an exit sit at
+ * either end of a tunnel doing opposite things, and a player tracing a line
+ * has to be able to see which way it goes without counting chevrons.
+ */
+export function undergroundSprite(rotation: Rotation, entrance: boolean): SpriteId {
+  return `underground:${rotation}:${entrance ? 'in' : 'out'}`;
+}
+
 export function splitterSprite(rotation: Rotation, phase = 0): SpriteId {
   return `splitter:${rotation}:${phase}`;
 }
@@ -265,6 +278,12 @@ export type SpriteDescriptor =
   | { readonly kind: 'belt'; readonly rotation: Rotation; readonly phase: number }
   | { readonly kind: 'splitter'; readonly rotation: Rotation; readonly phase: number }
   | {
+      readonly kind: 'underground';
+      readonly rotation: Rotation;
+      /** True for the mouth items go into, false for the one they come out of. */
+      readonly entrance: boolean;
+    }
+  | {
       readonly kind: 'inserter';
       readonly rotation: Rotation;
       readonly swing: number;
@@ -301,6 +320,10 @@ const CATEGORY_COLORS: Readonly<Record<string, ColorToken>> = Object.freeze({
   storage: 'text-muted',
   power: 'warn',
   research: 'ok',
+  // C23's radar. Cyan-ish blue rather than the structure blue the logistics
+  // buildings take, because what it produces is information: it is nearer the
+  // data core's colour than the belt's, which is the association worth making.
+  exploration: 'blue-high',
 });
 
 const DEFAULT_CATEGORY_COLOR: ColorToken = 'panel-high';
@@ -363,6 +386,20 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
       kind: namespace,
       rotation: Number(text) as Rotation,
       phase: Number(phaseText) % BELT_CHEVRON_PHASES,
+    });
+  }
+
+  if (namespace === 'underground' && parts.length === 3) {
+    // Matched as text for the belt rotation's reason: `Number('')` is 0, so
+    // `underground::in` would otherwise parse as a north-facing entrance.
+    const text = parts[1] ?? '';
+    if (!/^[0-3]$/.test(text)) return MISSING;
+    const end = parts[2] ?? '';
+    if (end !== 'in' && end !== 'out') return MISSING;
+    return Object.freeze({
+      kind: 'underground' as const,
+      rotation: Number(text) as Rotation,
+      entrance: end === 'in',
     });
   }
 
@@ -524,6 +561,9 @@ export class ProceduralAtlas implements SpriteAtlas {
         return;
       case 'splitter':
         drawSplitter(ctx, sx, sy, zoom, sprite.rotation, sprite.phase);
+        return;
+      case 'underground':
+        drawUnderground(ctx, sx, sy, zoom, sprite.rotation, sprite.entrance);
         return;
       case 'inserter':
         drawInserter(ctx, sx, sy, zoom, sprite.rotation, sprite.swing, sprite.holding);
@@ -742,6 +782,79 @@ function drawLane(
     ctx.lineTo(cx + fx * along + gx * CHEVRON_HALF_WIDTH, cy + fy * along + gy * CHEVRON_HALF_WIDTH);
     ctx.stroke();
   }
+}
+
+/** The mouth's opening, as a fraction of the tile, and how deep it is cut. */
+const MOUTH_LENGTH = 0.44;
+const MOUTH_HALF_WIDTH = 0.3;
+
+/**
+ * One mouth of an underground run: a belt plate with a hole cut in the end of
+ * it, and a single chevron falling into the hole or climbing out of it.
+ *
+ * Drawn as a plate rather than a prism because it lies in the ground — it is
+ * `RenderLayer.Belt`, like the belt and the splitter, so a line running past a
+ * building goes under it. What distinguishes it from a belt at a glance is the
+ * dark opening at one end; what distinguishes the two ends from each other is
+ * **which** end the opening is at. An entrance swallows items, so its hole is
+ * ahead of the chevron; an exit spits them out, so its hole is behind.
+ *
+ * There is deliberately no chevron *phase*. Three sliding chevrons say "things
+ * are moving along here", which is true of a belt tile and false of a mouth:
+ * what is moving is underground and is not drawn. One static arrow says
+ * "things go this way", which is all a mouth has to say.
+ */
+function drawUnderground(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  zoom: number,
+  rotation: Rotation,
+  entrance: boolean,
+): void {
+  const forward = DIRECTION_OFFSETS[rotation];
+  const sideways = DIRECTION_OFFSETS[(rotation + 1) % 4];
+  if (forward === undefined || sideways === undefined) return;
+
+  fillFace(ctx, sx, sy, 1, 1, zoom, color('panel-high'));
+  // Stroked in the structure colour, exactly as a splitter is, so the three
+  // flat buildings read as belt, junction and tunnel rather than as one plate
+  // drawn three ways.
+  groundFacePath(ctx, sx, sy, 1, 1, zoom);
+  ctx.strokeStyle = color('blue');
+  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.stroke();
+
+  const fx = (forward.x * EAST_STEP.x + forward.y * SOUTH_STEP.x) * zoom;
+  const fy = (forward.x * EAST_STEP.y + forward.y * SOUTH_STEP.y) * zoom;
+  const gx = (sideways.x * EAST_STEP.x + sideways.y * SOUTH_STEP.x) * zoom;
+  const gy = (sideways.x * EAST_STEP.y + sideways.y * SOUTH_STEP.y) * zoom;
+
+  // The hole is at the far end for an entrance and at the near end for an exit
+  // — which is the one line that makes the two sprites different pictures.
+  const mouthSign = entrance ? 1 : -1;
+  const near = 0.5 - MOUTH_LENGTH;
+  ctx.beginPath();
+  ctx.moveTo(sx + fx * mouthSign * near - gx * MOUTH_HALF_WIDTH, sy + fy * mouthSign * near - gy * MOUTH_HALF_WIDTH);
+  ctx.lineTo(sx + fx * mouthSign * near + gx * MOUTH_HALF_WIDTH, sy + fy * mouthSign * near + gy * MOUTH_HALF_WIDTH);
+  ctx.lineTo(sx + fx * mouthSign * 0.5 + gx * MOUTH_HALF_WIDTH, sy + fy * mouthSign * 0.5 + gy * MOUTH_HALF_WIDTH);
+  ctx.lineTo(sx + fx * mouthSign * 0.5 - gx * MOUTH_HALF_WIDTH, sy + fy * mouthSign * 0.5 - gy * MOUTH_HALF_WIDTH);
+  ctx.closePath();
+  ctx.fillStyle = color('bg-deep');
+  ctx.fill();
+
+  // One chevron, pointing the way items go, set back from the hole so it reads
+  // as approaching it rather than as part of it.
+  ctx.strokeStyle = color('accent');
+  ctx.lineWidth = Math.max(1, 1.5 * zoom);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const along = 0 - mouthSign * 0.24;
+  ctx.beginPath();
+  ctx.moveTo(sx + fx * along - gx * CHEVRON_HALF_WIDTH, sy + fy * along - gy * CHEVRON_HALF_WIDTH);
+  ctx.lineTo(sx + fx * (along + CHEVRON_HEAD), sy + fy * (along + CHEVRON_HEAD));
+  ctx.lineTo(sx + fx * along + gx * CHEVRON_HALF_WIDTH, sy + fy * along + gy * CHEVRON_HALF_WIDTH);
+  ctx.stroke();
 }
 
 /** How far each of a splitter's two lanes sits from the middle, in tiles. */

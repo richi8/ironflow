@@ -32,6 +32,12 @@ import type {
 } from '../game/registries/building-registry.js';
 import { NO_ITEM, type ItemRegistry } from '../game/registries/item-registry.js';
 import type { RecipeRegistry } from '../game/registries/recipe-registry.js';
+import {
+  asUnderground,
+  isUndergroundEntrance,
+  undergroundLaneUnits,
+  type UndergroundBeltEntity,
+} from '../game/entities/underground-belt-entity.js';
 import { asChest } from '../game/entities/chest-entity.js';
 import { asMachine } from '../game/entities/machine-entity.js';
 import { asMiner } from '../game/entities/miner-entity.js';
@@ -54,6 +60,7 @@ import {
   itemSprite,
   playerSprite,
   splitterSprite,
+  undergroundSprite,
   type SpriteId,
 } from './sprite-atlas.js';
 
@@ -70,7 +77,15 @@ function layerFor(definition: BuildingDefinition): RenderLayer {
   // A splitter lies as flat as the belt it sits in, and for the same reason:
   // a belt line running past a building must go under it, and the items on
   // that line over it (C17).
-  if (definition.belt !== undefined || definition.splitter !== undefined) return RenderLayer.Belt;
+  // C23's underground mouth joins them: a tunnel lies in the ground, and a
+  // building standing over the run has to draw in front of both ends of it.
+  if (
+    definition.belt !== undefined ||
+    definition.splitter !== undefined ||
+    definition.underground !== undefined
+  ) {
+    return RenderLayer.Belt;
+  }
   // An inserter's arm reaches over the tiles either side of it, so it draws
   // after everything else in its own depth row — including an item sitting on
   // the belt it is reaching into.
@@ -96,6 +111,11 @@ export function buildingSprite(definition: BuildingDefinition, rotation: Rotatio
   // see `inserterSpriteFor`, which this is deliberately not, because a ghost
   // has a rotation and no cycle to be partway through.
   if (definition.inserter !== undefined) return inserterSprite(rotation, 0, false);
+  // A ghost is always drawn as an entrance: it has a rotation and no partner,
+  // and a lone mouth *is* an entrance (see `underground-belt-entity.ts`). What
+  // it becomes on the click is decided by the build system, and the tick that
+  // decides it is the tick the placed sprite is first drawn from.
+  if (definition.underground !== undefined) return undergroundSprite(rotation, true);
   return definition.sprite as SpriteId;
 }
 
@@ -122,7 +142,9 @@ function inserterSpriteFor(inserter: InserterEntity, config: InserterConfig): Sp
  * animates correctly without this file hearing about it.
  */
 function carrierSpeed(definition: BuildingDefinition): number | null {
-  return definition.belt?.tilesPerSecond ?? definition.splitter?.tilesPerSecond ?? null;
+  return (
+    definition.belt?.tilesPerSecond ?? definition.splitter?.tilesPerSecond ?? definition.underground?.tilesPerSecond ?? null
+  );
 }
 
 /**
@@ -151,12 +173,25 @@ function spriteFor(
   entity: Entity,
   definition: BuildingDefinition,
   buildings: BuildingRegistry,
+  store: EntityStore,
   phase: number,
 ): SpriteId {
   const inserter = definition.inserter === undefined ? null : asInserter(entity);
   const config = inserter === null ? null : buildings.inserterFor(entity.type);
   if (inserter !== null && config !== null) return inserterSpriteFor(inserter, config);
+  // The second building whose appearance depends on what it is doing rather
+  // than only on how it is turned: which end of a run a mouth is depends on
+  // where its partner stands, which is a fact about the pair (C23).
+  const mouth = asUnderground(entity, buildings);
+  if (mouth !== null) {
+    return undergroundSprite(mouth.rotation, isUndergroundEntrance(mouth, partnerOf(mouth, store)));
+  }
   return buildingSprite(definition, entity.rotation, phase);
+}
+
+/** The other mouth of a run, or undefined for a lone one. See C23. */
+function partnerOf(mouth: { readonly link: number }, store: EntityStore): Entity | undefined {
+  return mouth.link === NO_ENTITY ? undefined : store.get(mouth.link);
 }
 
 /**
@@ -186,7 +221,7 @@ export function describeEntities(
       y: entity.y,
       width: extent.width,
       height: extent.height,
-      sprite: spriteFor(entity, definition, buildings, phase),
+      sprite: spriteFor(entity, definition, buildings, store, phase),
       layer: layerFor(definition),
     });
   });
@@ -232,6 +267,17 @@ export function describeBeltItems(
     describeLane(out, belt.items, belt.x, belt.y, belt.rotation, items);
   }
 
+  // An underground run's items are drawn along the whole of it, and the middle
+  // of the run is deliberately **not** drawn: a tunnel is underground, and the
+  // only reason a player sees anything at all is so that a mouth swallowing an
+  // item and the same item appearing at the far end read as one event rather
+  // than as a disappearance (C23). `describeRun` is where that cut is made.
+  for (const mouth of store.byType<UndergroundBeltEntity>(EntityType.UndergroundBelt)) {
+    const partner = partnerOf(mouth, store);
+    if (!isUndergroundEntrance(mouth, partner)) continue;
+    describeRun(out, mouth, partner, items);
+  }
+
   // A splitter's two lanes are drawn exactly as a belt's, each centred on its
   // own footprint tile — which is what makes the line read as continuous
   // across it (C17 task 4). The tile comes from the same content footprint the
@@ -247,6 +293,48 @@ export function describeBeltItems(
   }
 
   return out;
+}
+
+/**
+ * The items on one underground run, hiding the ones that are under the ground.
+ *
+ * The lane runs `(span + 1)` tiles from the entrance's entry edge to the
+ * exit's far edge, so an item's position along it is a position along a line
+ * of tiles rather than across one. Everything more than a tile inside either
+ * mouth is skipped: that is what makes the building look like a tunnel and not
+ * like a very long belt with no plate under it.
+ */
+function describeRun(
+  out: RenderEntity[],
+  mouth: UndergroundBeltEntity,
+  partner: Entity | undefined,
+  items: ItemRegistry,
+): void {
+  const step = DIRECTION_OFFSETS[mouth.rotation];
+  if (step === undefined) return;
+  const laneUnits = undergroundLaneUnits(mouth, partner);
+  const tiles = laneUnits / BELT_TILE_UNITS;
+  const depthAxis = step.x + step.y;
+
+  for (const item of mouth.items) {
+    if (!items.isItemId(item.itemId)) continue;
+    const tile = Math.floor(item.pos / BELT_TILE_UNITS);
+    // Visible only in the two mouths. A run of span 0 is one tile and both
+    // tests name it, which is correct: a lone mouth is an ordinary belt tile.
+    if (tile !== 0 && tile !== tiles - 1) continue;
+
+    const along = item.pos / BELT_TILE_UNITS - 0.5;
+    out.push({
+      id: NO_ENTITY,
+      x: mouth.x + step.x * along,
+      y: mouth.y + step.y * along,
+      width: 1,
+      height: 1,
+      sprite: itemSprite(items.byId(item.itemId).id),
+      layer: RenderLayer.ItemOnBelt,
+      depthRow: mouth.x + mouth.y + along * depthAxis + ITEM_DEPTH_NUDGE * depthAxis,
+    });
+  }
 }
 
 /** Every item in one lane, as drawables centred on the tile that carries it. */

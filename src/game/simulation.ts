@@ -21,6 +21,7 @@ import { CraftDurations } from './registries/craft-durations.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
 import { CraftingSystem } from './systems/crafting-system.js';
+import { ExplorationSystem } from './systems/exploration-system.js';
 import { HandSystem } from './systems/hand-system.js';
 import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
@@ -179,6 +180,13 @@ export class Simulation {
   private readonly inserterSystem: InserterSystem;
 
   private readonly playerSystem: PlayerSystem;
+
+  /**
+   * Exploration (C23), phase 9. The player's legs and every radar write to
+   * `world.explored`, and nothing in `game/` reads it back — the map panel is
+   * its only consumer, through a view model.
+   */
+  private readonly explorationSystem: ExplorationSystem;
 
   /**
    * Research (C22), phase 7. It owns the `startResearch` and `cancelResearch`
@@ -368,6 +376,14 @@ export class Simulation {
       player: this.player,
       items: this.items,
     });
+    this.explorationSystem = new ExplorationSystem({
+      world: this.world,
+      entities: this.entities,
+      buildings: this.buildings,
+      player: this.player,
+      power: this.power,
+      alerts: this.alerts,
+    });
   }
 
   /**
@@ -461,7 +477,9 @@ export class Simulation {
    * ratio. Mining precedes production so freshly-mined ore is consumable the
    * same tick. Belts precede inserters so an inserter reads a settled belt
    * position, which keeps throughput predictable instead of oscillating with
-   * array order. Cleanup runs last so no system observes a half-removed entity.
+   * array order. Exploration follows the player so the map never lags a tick
+   * behind the legs that made it. Cleanup runs last so no system observes a
+   * half-removed entity.
    */
   tick(): void {
     this.tickCount += 1;
@@ -521,7 +539,14 @@ export class Simulation {
     this.craftingSystem.tick();
     this.playerSystem.tick();
 
-    // Phase 9 — cleanup. Deferred removals are applied here and nowhere else,
+    // Phase 9 — exploration. The world chunks around the player, and one
+    // world chunk of each radar's coverage (C23). It is *appended* to §8's
+    // list rather than inserted, so no existing phase moved: it has to follow
+    // phase 8 because the player's reveal is about where they now stand, and
+    // it has to precede cleanup because everything does.
+    this.explorationSystem.tick();
+
+    // Phase 10 — cleanup. Deferred removals are applied here and nowhere else,
     // which is what makes "a system never sees a half-removed entity" a
     // property of the phase order rather than of every system's care.
     const removed = this.entities.cleanup();

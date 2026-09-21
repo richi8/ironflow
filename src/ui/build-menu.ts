@@ -34,6 +34,9 @@ const CATEGORY_ORDER: readonly BuildingCategory[] = Object.freeze([
   'storage',
   'power',
   'research',
+  // C23's radar, and last because it is what a factory builds once it has run
+  // out of room rather than out of parts.
+  'exploration',
 ]);
 
 const CATEGORY_ICON: Readonly<Record<BuildingCategory, IconName>> = Object.freeze({
@@ -43,6 +46,7 @@ const CATEGORY_ICON: Readonly<Record<BuildingCategory, IconName>> = Object.freez
   storage: 'inventory',
   power: 'power',
   research: 'research',
+  exploration: 'map',
 });
 
 const CATEGORY_LABEL: Readonly<Record<BuildingCategory, string>> = Object.freeze({
@@ -52,6 +56,7 @@ const CATEGORY_LABEL: Readonly<Record<BuildingCategory, string>> = Object.freeze
   storage: 'STORAGE',
   power: 'POWER',
   research: 'RESEARCH',
+  exploration: 'EXPLORATION',
 });
 
 interface Row {

@@ -105,6 +105,10 @@ export const PALETTE = Object.freeze({
   lab: '#b45fd0',
   miner_2: '#f5b65c',
   assembler_2: '#63d6b6',
+
+  /* expansion (C23) */
+  radar: '#7fd4c4',
+  underground_belt: '#35597a',
 });
 
 /** Every colour token the renderer may name. */

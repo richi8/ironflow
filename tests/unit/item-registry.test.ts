@@ -192,6 +192,9 @@ describe('the shipped item table', () => {
       'lab',
       'miner_2',
       'assembler_2',
+      // C23's two: the radar §15 owed, and the underground belt §9 named.
+      'radar',
+      'underground_belt',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);

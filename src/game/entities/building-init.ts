@@ -15,7 +15,9 @@
  * `definition.storage` a container and
  * `definition.production` a machine that runs recipes and
  * `definition.generator` one that burns fuel into a power network (C21) and
- * `definition.research` a lab (C22), so
+ * `definition.research` a lab (C22) and
+ * `definition.underground` a mouth of a tunnel and
+ * `definition.radar` a radar (C23), so
  * the day a second tier of any of them is added, nothing here changes. That is the same rule `build-system.ts`
  * states in its header, kept true by giving the type-specific part its own
  * place to live rather than by care.
@@ -32,7 +34,9 @@ import { newInserter } from './inserter-entity.js';
 import { newLab } from './lab-entity.js';
 import { newMachine } from './machine-entity.js';
 import { newMiner } from './miner-entity.js';
+import { newRadar } from './radar-entity.js';
 import { newSplitter } from './splitter-entity.js';
+import { newUndergroundBelt } from './underground-belt-entity.js';
 
 /**
  * The entity a placement should create, ready for `EntityStore.create`.
@@ -55,6 +59,8 @@ export function initialBuildingState(
   if (definition.production !== undefined) return newMachine(definition.entityType, x, y, rotation);
   if (definition.generator !== undefined) return newGenerator(definition.entityType, x, y, rotation);
   if (definition.research !== undefined) return newLab(definition.entityType, x, y, rotation);
+  if (definition.underground !== undefined) return newUndergroundBelt(definition.entityType, x, y, rotation);
+  if (definition.radar !== undefined) return newRadar(definition.entityType, x, y, rotation);
   // A power pole, and anything else whose whole state is where it stands: it
   // is a point on a network and nothing more, so it has no fields of its own
   // and falls through to the four every entity has (C21).
