@@ -250,6 +250,88 @@ export interface ProductionProperties {
   readonly fuelCapacity?: number;
 }
 
+/**
+ * What a building draws from a power network. See ironflow.md C21 task 2.
+ *
+ * Its presence is what makes a building a **consumer** — nothing branches on
+ * an id (§19 rule 17) — so C22's lab and C23's radar take power by adding this
+ * field and no code at all.
+ *
+ * Authored in kilowatts because that is the unit §15's building table is
+ * written in, and kept in kilowatts all the way down: the satisfaction ratio
+ * is a quotient of two sums of these, computed in integers (§6 R3), so there
+ * is no smaller unit to convert to and nothing to round.
+ */
+export interface PowerProperties {
+  /** Kilowatts drawn for as long as it is connected. §15's power column. */
+  readonly consumptionKw: number;
+}
+
+/**
+ * What a building burns to put power *into* a network. C21 task 2.
+ *
+ * Its presence is what makes a building a **generator**, and it is a separate
+ * field from `PowerProperties` rather than a negative consumption for the same
+ * reason `splitter` is separate from `belt`: the two are different shapes. A
+ * consumer is a rating and nothing else; a generator has a fuel buffer that
+ * belts, inserters and the player's hand can all reach into.
+ *
+ * ## Why there is no burn *rate* here
+ *
+ * §15 gives the generator two numbers that look independent — 900 kW and
+ * "burns 0.75 coal/s" — and one of them is derived. Coal burns for 8 s in a
+ * machine with a fuel buffer (§15's fuel note, which C15 built the furnace
+ * on), so 0.75 coal/s at 900 kW fixes what a coal is *worth*:
+ *
+ * ```text
+ *   900 kW / 0.75 coal per second = 1200 kJ per coal
+ *   1200 kJ / 8 s                 =  150 kW      <- FUEL_REFERENCE_KW
+ * ```
+ *
+ * So a fuel item's `fuelSeconds` is its burn time at 150 kW, and a burner that
+ * draws more than that gets through it proportionally faster. That is one
+ * number in `power-system.ts` rather than a burn rate per building, it keeps
+ * §15's two rows consistent instead of making the reader pick one, and it is
+ * what makes C21's electric furnace exactly coal-neutral against the burner
+ * furnace it replaces.
+ */
+export interface GeneratorProperties {
+  /** Kilowatts it contributes while it is burning. §15: 900 for the generator. */
+  readonly productionKw: number;
+  /** Ceiling on each fuel it holds, per item, as a machine's buffers are. */
+  readonly fuelCapacity: number;
+}
+
+/**
+ * What a pole connects. C21 tasks 2–3, and §15's "wire reach 8, supply area 5".
+ *
+ * Its presence is what makes a building a pole. Both numbers are in tiles and
+ * both are integers, because both are compared against tile coordinates and a
+ * fractional reach would put the edge of a network somewhere no player could
+ * point at.
+ */
+export interface PoleProperties {
+  /**
+   * How far this pole will link to another pole, in tiles, measured as a
+   * radius: two poles are wired together when the squared distance between
+   * their tiles is within the *smaller* of their two reaches, squared.
+   *
+   * A radius rather than a square, because a wire is a length and the player
+   * reads it as one — and squared so the comparison is whole-number
+   * arithmetic with no square root and no float (§6 R1, R7).
+   */
+  readonly wireReach: number;
+  /**
+   * The side of the square of tiles this pole powers, centred on itself.
+   * §15: 5, which is the pole's tile plus two in every direction.
+   *
+   * A square rather than a circle, because this is the one a player lays out
+   * *against* — machines are rectangles on a grid, and a square area is the
+   * only shape whose coverage can be judged by eye.
+   */
+  readonly supplyArea: number;
+}
+
 /** Who picks a machine's recipe. See `ProductionProperties.recipeSelection`. */
 export type RecipeSelection = 'auto' | 'player';
 
@@ -293,6 +375,12 @@ export interface BuildingDefinition {
   readonly storage?: StorageProperties;
   /** Present only on buildings that turn ingredients into products (C15). */
   readonly production?: ProductionProperties;
+  /** Present only on buildings that draw from a power network (C21). */
+  readonly power?: PowerProperties;
+  /** Present only on buildings that burn fuel into a power network (C21). */
+  readonly generator?: GeneratorProperties;
+  /** Present only on buildings that carry a network between machines (C21). */
+  readonly pole?: PoleProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -314,6 +402,9 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   if (definition.inserter !== undefined) Object.freeze(definition.inserter);
   if (definition.storage !== undefined) Object.freeze(definition.storage);
   if (definition.production !== undefined) Object.freeze(definition.production);
+  if (definition.power !== undefined) Object.freeze(definition.power);
+  if (definition.generator !== undefined) Object.freeze(definition.generator);
+  if (definition.pole !== undefined) Object.freeze(definition.pole);
   return Object.freeze(definition);
 }
 
@@ -415,6 +506,41 @@ function validate(definition: BuildingDefinition): void {
     checkCapacity(production.inputCapacity, `${where} input buffer`);
     checkCapacity(production.outputCapacity, `${where} output buffer`);
     if (production.fuelCapacity !== undefined) checkCapacity(production.fuelCapacity, `${where} fuel buffer`);
+  }
+
+  const power = definition.power;
+  if (power !== undefined) {
+    if (!Number.isFinite(power.consumptionKw) || power.consumptionKw <= 0) {
+      throw new Error(`BuildingRegistry: ${where} draws ${power.consumptionKw} kW, which is not a demand.`);
+    }
+  }
+
+  const generator = definition.generator;
+  if (generator !== undefined) {
+    if (power !== undefined) {
+      // A building that both drew and supplied would be on both sides of its
+      // own satisfaction ratio, and the sensible answer — net it off — is a
+      // different building with a smaller number. Refused here so nobody has
+      // to work out which side the network counts it on.
+      throw new Error(`BuildingRegistry: ${where} both draws and supplies power; it must do one.`);
+    }
+    if (!Number.isFinite(generator.productionKw) || generator.productionKw <= 0) {
+      throw new Error(`BuildingRegistry: ${where} supplies ${generator.productionKw} kW, which is not a supply.`);
+    }
+    checkCapacity(generator.fuelCapacity, `${where} fuel buffer`);
+  }
+
+  const pole = definition.pole;
+  if (pole !== undefined) {
+    if (!Number.isInteger(pole.wireReach) || pole.wireReach < 1) {
+      throw new Error(`BuildingRegistry: ${where} reaches ${pole.wireReach} tiles; it must be whole and above 0.`);
+    }
+    // Odd, so the square has a centre tile to sit on. An even side would have
+    // to be biased one way, and a supply area that is longer to the south than
+    // to the north is a layout rule no player could ever infer from looking.
+    if (!Number.isInteger(pole.supplyArea) || pole.supplyArea < 1 || pole.supplyArea % 2 === 0) {
+      throw new Error(`BuildingRegistry: ${where} supplies a ${pole.supplyArea}-tile square; it must be whole and odd.`);
+    }
   }
 
   if (definition.placement.onTerrain.length === 0) {
@@ -537,6 +663,13 @@ export class BuildingRegistry {
 
   private readonly productionByType = new Map<EntityType, ProductionProperties>();
 
+  /** Power content (C21). Kilowatts, unconverted: see `PowerProperties`. */
+  private readonly powerByType = new Map<EntityType, PowerProperties>();
+
+  private readonly generatorByType = new Map<EntityType, GeneratorProperties>();
+
+  private readonly poleByType = new Map<EntityType, PoleProperties>();
+
   /**
    * Entity types that run recipes, ascending. What `ProductionSystem` walks,
    * in a fixed order that does not depend on the content table's (§6 R4).
@@ -552,6 +685,21 @@ export class BuildingRegistry {
    * buffer, so both kinds of building are in it.
    */
   private readonly outputTypes: readonly EntityType[];
+
+  /**
+   * Entity types that draw power, that supply it, and that carry a network,
+   * each ascending by type number (C21).
+   *
+   * Three lists for the same reason `productionTypes` is one: `PowerSystem`
+   * walks all three every tick, and a walk over a `Map`'s keys would be a walk
+   * in insertion order, which differs between a live session and a reloaded
+   * one (§6 R4).
+   */
+  private readonly consumerTypeList: readonly EntityType[];
+
+  private readonly generatorTypeList: readonly EntityType[];
+
+  private readonly poleTypeList: readonly EntityType[];
 
   constructor(definitions: readonly BuildingDefinition[]) {
     const frozen: BuildingDefinition[] = [];
@@ -605,6 +753,15 @@ export class BuildingRegistry {
       if (value.production !== undefined) {
         this.productionByType.set(value.entityType, value.production);
       }
+      if (value.power !== undefined) {
+        this.powerByType.set(value.entityType, value.power);
+      }
+      if (value.generator !== undefined) {
+        this.generatorByType.set(value.entityType, value.generator);
+      }
+      if (value.pole !== undefined) {
+        this.poleByType.set(value.entityType, value.pole);
+      }
     }
 
     this.definitions = Object.freeze(frozen);
@@ -613,6 +770,9 @@ export class BuildingRegistry {
     const allTypes = Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => type as EntityType);
     this.outputTypes = Object.freeze(allTypes.filter((type) => this.miningByType.has(type)));
     this.productionTypeList = Object.freeze(allTypes.filter((type) => this.productionByType.has(type)));
+    this.consumerTypeList = Object.freeze(allTypes.filter((type) => this.powerByType.has(type)));
+    this.generatorTypeList = Object.freeze(allTypes.filter((type) => this.generatorByType.has(type)));
+    this.poleTypeList = Object.freeze(allTypes.filter((type) => this.poleByType.has(type)));
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */
@@ -721,6 +881,41 @@ export class BuildingRegistry {
    */
   outputBufferTypes(): readonly EntityType[] {
     return this.outputTypes;
+  }
+
+  /**
+   * What this kind of building draws from a network, or null if it draws
+   * nothing (C21). Null rather than a throw, for the reason `beltFor` gives:
+   * `PowerSystem` asks about whatever it is holding, and "that runs for free"
+   * is the ordinary answer for most of the table.
+   */
+  powerFor(type: EntityType): PowerProperties | null {
+    return this.powerByType.get(type) ?? null;
+  }
+
+  /** What this kind of building supplies, or null if it is not a generator (C21). */
+  generatorFor(type: EntityType): GeneratorProperties | null {
+    return this.generatorByType.get(type) ?? null;
+  }
+
+  /** What this kind of building connects, or null if it is not a pole (C21). */
+  poleFor(type: EntityType): PoleProperties | null {
+    return this.poleByType.get(type) ?? null;
+  }
+
+  /** Every entity type that draws power, ascending by type number (C21). */
+  consumerTypes(): readonly EntityType[] {
+    return this.consumerTypeList;
+  }
+
+  /** Every entity type that supplies power, ascending by type number (C21). */
+  generatorTypes(): readonly EntityType[] {
+    return this.generatorTypeList;
+  }
+
+  /** Every entity type that carries a network, ascending by type number (C21). */
+  poleTypes(): readonly EntityType[] {
+    return this.poleTypeList;
   }
 
   /**

@@ -90,8 +90,14 @@ describe('GameController views', () => {
     // Content order is hotbar order, and only the first nine get a key. Taken
     // from the content table rather than written out, so the building C15 adds
     // does not fail an assertion about hotkeys.
+    //
+    // C21 is the chunk that overflows it: the tenth building has no hotkey and
+    // is reached through the build menu. The entry is still there and still
+    // buildable — a null key is the view model saying "no shortcut", not "not
+    // available" — and which nine get one is `data/buildings.ts`'s order,
+    // which is why C21 appended rather than inserting.
     expect(entries.map((entry) => entry.hotkey)).toEqual(
-      BUILDINGS.slice(0, HOTBAR_SLOTS).map((_definition, index) => index + 1),
+      BUILDINGS.map((_definition, index) => (index < HOTBAR_SLOTS ? index + 1 : null)),
     );
   });
 

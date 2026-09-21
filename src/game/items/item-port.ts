@@ -30,6 +30,7 @@
 
 import type { Entity } from '../entities/entity.js';
 import { asChest } from '../entities/chest-entity.js';
+import { asGenerator } from '../entities/generator-entity.js';
 import { asInserter, inserterHolding } from '../entities/inserter-entity.js';
 import { asMachine, type MachineEntity } from '../entities/machine-entity.js';
 import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
@@ -86,6 +87,12 @@ export function outputPortOf(entity: Entity, ctx: PortContext): ItemSource | nul
   const machine = asMachine(entity, ctx.buildings);
   if (machine !== null) return machineBuffers(machine, production(entity, ctx)).output;
 
+  // A generator (C21) is deliberately absent. Its only buffer is fuel, and an
+  // inserter that could reach in would take the coal straight back out again
+  // — the shuffling this function's one-way rule was written to prevent. The
+  // *player* may still empty it: see `handSourceOf`.
+  if (ctx.buildings.generatorFor(entity.type) !== null) return null;
+
   const chest = chestPort(entity, ctx);
   if (chest !== null) return chest;
 
@@ -124,6 +131,11 @@ export function outputPortOf(entity: Entity, ctx: PortContext): ItemSource | nul
  * keeps the function total.
  */
 export function handSourceOf(entity: Entity, ctx: PortContext): ItemSource | null {
+  // A generator's fuel is the whole of what it holds, and C20's rule — the
+  // player may take back anything they put in — applies to it unchanged.
+  const generator = generatorPort(entity, ctx);
+  if (generator !== null) return generator;
+
   const machine = asMachine(entity, ctx.buildings);
   if (machine === null) return outputPortOf(entity, ctx);
 
@@ -181,6 +193,9 @@ export function inputPortOf(entity: Entity, ctx: PortContext): ItemSink | null {
   const machine = asMachine(entity, ctx.buildings);
   if (machine !== null) return new MachineInputPort(machine, production(entity, ctx), ctx);
 
+  const generator = generatorPort(entity, ctx);
+  if (generator !== null) return generator;
+
   return chestPort(entity, ctx);
 }
 
@@ -199,6 +214,44 @@ function chestPort(entity: Entity, ctx: PortContext): (ItemSource & ItemSink) | 
     new SlotInventory({ slots: storage.slots, stackSizeOf: ctx.items.stackSizeOf, contents: chest.contents }),
     null,
   );
+}
+
+/**
+ * A generator's fuel buffer, as both directions of port. Null if not one (C21).
+ *
+ * It **accepts only what burns**, which is C14 task 6's rule applied to a
+ * building with one buffer: an inserter pointed at a generator with iron ore
+ * on the belt beside it waits with empty hands rather than filling the one
+ * slot the generator has with something it can never light. The test is the
+ * item's own `fuelSeconds` (§15's fuel note), so nothing here knows what coal
+ * is.
+ */
+function generatorPort(entity: Entity, ctx: PortContext): (ItemSource & ItemSink) | null {
+  const config = ctx.buildings.generatorFor(entity.type);
+  if (config === null) return null;
+  const generator = asGenerator(entity, ctx.buildings);
+  if (generator === null) return null;
+
+  const buffer = bufferPort(generator.fuel, config.fuelCapacity);
+  // **The six keys are in `containerPort`'s order, and they have to stay that
+  // way.** Two object literals with the same key sequence share a hidden
+  // class; two that differ do not, and every call site that reads a port —
+  // `production-system.ts` reads three per machine per tick — becomes
+  // polymorphic the moment there are two shapes. Measured, on a thousand
+  // furnaces, at more than everything else C21 added to the tick put together.
+  //
+  // A filter parameter on `containerPort` was the other way to keep one shape.
+  // It was also measurably worse: it costs an extra closure variable on every
+  // container in the game to spare one branch on a building most factories
+  // have three of.
+  return {
+    peek: () => buffer.peek(),
+    count: (itemId) => buffer.count(itemId),
+    take: (itemId, amount) => buffer.take(itemId, amount),
+    spaceFor: (itemId) => (ctx.items.fuelTicksOf(itemId) > 0 ? buffer.spaceFor(itemId) : 0),
+    give: (itemId, amount) => (ctx.items.fuelTicksOf(itemId) > 0 ? buffer.give(itemId, amount) : 0),
+    stacks: () => buffer.stacks(),
+  };
 }
 
 /** A per-item-capped buffer over a machine's own slots, as both kinds of port. */
@@ -251,6 +304,11 @@ function production(entity: Entity, ctx: PortContext): ProductionProperties {
  * An inventory over an entity's own `ItemSlots` array, read and written in
  * place. `capacity` is what the inspector shows beside the count: a per-item
  * ceiling for a machine buffer, null for a chest, whose limit is slots.
+ *
+ * Three of these are read per machine per tick, which makes this one of the
+ * few genuinely hot constructors in the simulation. Anything else that builds
+ * a port must produce **the same six keys in the same order** so that the call
+ * sites stay monomorphic — see `generatorPort`, which is the only other one.
  */
 function containerPort(contents: ItemSlots, inventory: Inventory, capacity: number | null): ItemSource & ItemSink {
   return {

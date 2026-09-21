@@ -79,8 +79,12 @@ function isAscending(ids: readonly number[]): boolean {
 }
 
 describe('EntityType', () => {
-  it('covers §15s eleven buildings and rejects anything else', () => {
-    expect(ENTITY_TYPE_COUNT).toBe(11);
+  it('covers §15s eleven buildings, C21s twelfth, and rejects anything else', () => {
+    // Eleven from §15's building table plus `ElectricFurnace`, which C21
+    // appended: §15 has no row for it, and appending is what keeps every
+    // existing number — and therefore every save that carries one — valid.
+    expect(ENTITY_TYPE_COUNT).toBe(12);
+    expect(isEntityType(EntityType.ElectricFurnace)).toBe(true);
     expect(isEntityType(EntityType.Radar)).toBe(true);
     expect(isEntityType(ENTITY_TYPE_COUNT)).toBe(false);
     expect(isEntityType(-1)).toBe(false);

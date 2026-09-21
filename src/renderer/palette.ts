@@ -84,6 +84,14 @@ export const PALETTE = Object.freeze({
   chest: '#8a7250',
   furnace: '#c25a4a',
   assembler: '#46a88f',
+
+  /* power (C21). Brass for the thing that burns, olive for the pole, and a
+     lighter, hotter red for the furnace that runs on wire rather than coal —
+     far enough from `furnace` to be told apart on a mixed belt, which is the
+     one thing a placeholder palette still has to get right. */
+  generator: '#c9a227',
+  power_pole: '#8f9c5a',
+  electric_furnace: '#e07a62',
 });
 
 /** Every colour token the renderer may name. */

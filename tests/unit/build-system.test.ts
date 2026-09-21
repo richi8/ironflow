@@ -73,15 +73,16 @@ function testWorld(): World {
 /**
  * A 1×2 building, so the extent swap has something non-square to swap.
  *
- * It borrows a §15 entity type nothing has implemented yet, and moved from
- * `Splitter` to `PowerPole` when C17 made the splitter real: the point of the
- * fixture is a rotation-count of 2 and a non-square footprint, neither of
- * which any shipped building has.
+ * It borrows a §15 entity type nothing has implemented yet, and has moved
+ * twice — from `Splitter` when C17 made the splitter real, and from
+ * `PowerPole` to `Radar` when C21 did the same. The point of the fixture is a
+ * rotation-count of 2 and a non-square footprint, neither of which any shipped
+ * building has.
  */
 const PIPE: BuildingDefinition = {
   id: 'pipe',
   name: 'Pipe',
-  entityType: EntityType.PowerPole,
+  entityType: EntityType.Radar,
   category: 'logistics',
   size: { width: 1, height: 2 },
   rotationCount: 2,
@@ -148,6 +149,9 @@ describe('BuildingRegistry', () => {
       'furnace',
       'assembler',
       'chest',
+      'generator',
+      'power_pole',
+      'electric_furnace',
     ]);
   });
 

@@ -100,6 +100,10 @@ describe('RecipeRegistry', () => {
       'make_furnace',
       'make_assembler',
       'make_chest',
+      // C21's, in the same order: two bills §15 gives and one it does not.
+      'make_generator',
+      'make_power_pole',
+      'make_electric_furnace',
     ]);
   });
 
@@ -177,6 +181,27 @@ describe('the shipped recipe table', () => {
         ticks: 120,
       },
       { id: 'make_chest', inputs: ['4 iron_plate'], outputs: ['1 chest'], ticks: 15 },
+      // C21's power buildings. The generator's and the pole's bills are §15's;
+      // the electric furnace has no row in §15 at all, and its three times are
+      // C21's — see its deviations.
+      {
+        id: 'make_generator',
+        inputs: ['8 gear', '10 iron_plate', '6 brick'],
+        outputs: ['1 generator'],
+        ticks: 90,
+      },
+      {
+        id: 'make_power_pole',
+        inputs: ['1 copper_wire', '2 iron_plate'],
+        outputs: ['1 power_pole'],
+        ticks: 15,
+      },
+      {
+        id: 'make_electric_furnace',
+        inputs: ['12 brick', '5 circuit', '3 steel'],
+        outputs: ['1 electric_furnace'],
+        ticks: 90,
+      },
     ]);
   });
 

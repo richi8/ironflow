@@ -84,14 +84,17 @@ describe('every item has somewhere to come from and somewhere to go', () => {
   /**
    * The v1 dead ends, named rather than asserted away.
    *
-   * `steel` is §15's: no building in its table is made of it, and the recipe
-   * that spends it — `make_frame` — is C22's lab's. A player can smelt it and
-   * has nothing to do with it, which is a real gap in the v1 content and one
-   * C20 cannot close without adding a system. It is listed here so that the
-   * day C22 lands, this test fails and tells whoever is reading to delete the
-   * exception rather than leaving it to rot.
+   * **Empty since C21**, and that is the mechanism working. C20 listed `steel`
+   * here — smeltable, wanted by nothing, with `make_frame` waiting on C22's
+   * lab — and said "the day C22 lands, this test fails and tells whoever is
+   * reading to delete the exception rather than leaving it to rot". C21's
+   * electric furnace wanted three steel a chunk early, the test failed exactly
+   * as advertised, and the exception is gone.
+   *
+   * The list stays because the next chunk to add a smeltable with no consumer
+   * should have to write its name down here and say why.
    */
-  const KNOWN_DEAD_ENDS: readonly string[] = ['steel'];
+  const KNOWN_DEAD_ENDS: readonly string[] = [];
 
   it.each(ITEMS.map((item) => [item.id] as const))('%s is consumed by something, or is a known dead end', (itemId) => {
     const consumed = RECIPES.some((recipe) => recipe.inputs.some((stack) => stack.itemId === itemId));
@@ -148,24 +151,25 @@ describe('the building recipes run in a machine that exists', () => {
 
 describe('the v1 target, and how far off it is', () => {
   /**
-   * §15's v1 target is 11 buildings, 13 materials and 20 recipes. C20 ships
-   * what can exist without a new system, which is C20's own prohibition:
+   * §15's v1 target is 11 buildings, 13 materials and 20 recipes, and C21
+   * moves it: the electric furnace is a twelfth building §15 never listed, so
+   * the target is now 12 buildings and 21 recipes (see C21's deviations).
    *
    * ```text
-   *            §15 v1   C20 ships   waiting on
-   * buildings      11           7   generator, power_pole (C21), lab (C22), radar (C23)
-   * materials      13          11   frame, data_core (C22's lab consumes them)
-   * recipes        20          14   4 building recipes + make_frame + make_data_core
+   *            v1 target   C21 ships   waiting on
+   * buildings         12          10   lab (C22), radar (C23)
+   * materials         13          11   frame, data_core (C22's lab consumes them)
+   * recipes           21          17   make_lab, make_radar, make_frame, make_data_core
    * ```
    *
-   * The numbers are asserted so that the day C21 adds a generator, this test
-   * fails and the reader is pointed at the table rather than at a comment.
+   * The numbers are asserted so that the day C22 adds a lab, this test fails
+   * and the reader is pointed at the table rather than at a comment.
    */
-  it('ships exactly what C20 can ship, and the rest is accounted for', () => {
-    expect(BUILDINGS).toHaveLength(7);
+  it('ships exactly what C21 can ship, and the rest is accounted for', () => {
+    expect(BUILDINGS).toHaveLength(10);
     expect(ITEMS.filter((item) => item.category !== 'building')).toHaveLength(11);
-    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(7);
-    expect(RECIPES).toHaveLength(14);
+    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(10);
+    expect(RECIPES).toHaveLength(17);
     // 7 processing recipes + one per building.
     expect(RECIPES.filter((recipe) => !buildings.has(recipe.outputs[0]?.itemId ?? ''))).toHaveLength(7);
   });

@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C20 complete — the factory builds itself.** ⛔ Gate passed: one weak acceptance answer (the opening is given, not earned), four strong. Next: C21 — power. |
+| **Status** | **C21 complete — the factory has a grid.** Generator, power pole and electric furnace ship; the electric miner does not, and §15's power column is charged only from `power_1` onward. See C21's deviations. Next: C22 — research. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C21 — Power** |
+| **First action** | Chunk **C22 — Research & progression** |
 
 ---
 
@@ -678,6 +678,15 @@ accumulator.
 Also handle `visibilitychange` by resetting `last` on resume, and pause the loop
 outright when a modal save/load dialog is open.
 
+**Implementation note (C21).** Phase 2 exists. It resolves the pole graph, sums
+each network's demand and supply, and divides — in that order, and before any
+consumer is visited, which is what makes "every machine in the tick sees one
+satisfaction ratio" a property of the phase order rather than of each system's
+care. Phases 3 onward ask `PowerSystem.gate(entity)` and get one of five
+answers; a building the content table gave no power rating always gets `Free`,
+so a system consults it unconditionally rather than testing first whether the
+thing it is holding is electric.
+
 **Implementation note (C07).** "Pause the loop" is now a real control, and it is
 not `stop()`. `GameLoop.setPaused` keeps drawing and stops ticking: a stopped
 loop draws nothing, so the canvas freezes and the camera dies with it, whereas a
@@ -1047,12 +1056,22 @@ stopped while paused. Two consequences worth writing down:
   that pause has stopped. `pauseChanged` is that event, and it is why the word
   appears on a frame where both lanes are idle.
 
-**A view model carries only what exists.** `HudView` has no power ratio and no
-research progress, because there is no power system until C21 and no research
-until C22; a field that is always `null` is a promise the view cannot keep. The
-HUD still draws both tiles from §11's icon set, dimmed, so the bar does not gain
-two tiles in the middle later — the placeholder is one string in the panel, and
-C21 deletes it by giving the tile something to read.
+**A view model carries only what exists.** `HudView` has no research progress,
+because there is no research until C22; a field that is always `null` is a
+promise the view cannot keep. The HUD still draws the tile from §11's icon set,
+dimmed, so the bar does not gain one in the middle later — the placeholder is
+one string in the panel.
+
+**C21 is what that looked like coming true.** `HudView.power` is nullable and
+is *not* always null: it is null until the player's first pole, which is a real
+state — there is no grid — rather than a system that does not exist. The tile
+then reads the **worst** network's satisfaction, with supply, demand and the
+network count in its tooltip, and takes the warning tone below 100%. The worst
+rather than the total, because a factory-wide aggregate can read full while a
+network on the far side of the map sits dark, and the one the player has to act
+on is the short one. `MachineView.power` is the same rule one level down: null
+for a building with no power role, and for one with a role it is what turns
+`no_power` from a verdict into an explanation.
 
 **Implementation note (C12).** The `MachineView` sketch above is not quite
 what shipped, and the difference is this section's own rule about `HudView`
@@ -2558,8 +2577,9 @@ buffer-full stall and resume; depletion transition.
   gained an optional `mining: { itemsPerSecond, bufferCapacity }`, and its
   *presence* is the only test anything performs: `building-init.ts` branches on
   it, `MiningSystem` asks the registry for it, and there is still no
-  `if (id === 'miner')` anywhere (§19 rule 17). C21's electric miner and C22's
-  tier 2 are a table entry each. The rate is authored in items per second —
+  `if (id === 'miner')` anywhere (§19 rule 17). C22's tier 2 is a table entry,
+  and so would an electric miner be — C21 did not ship one, for a reason about
+  content rather than code; see §15. The rate is authored in items per second —
   the unit §15's whole balance table is written in — and converted to
   `ticksPerItem` **once, at registry-build time**, exactly as §6 R3 requires.
 - **`entities/building-init.ts` is a third job.** C05's store takes whatever
@@ -3266,9 +3286,12 @@ and no DOM**.
   furnace still uses it exactly as described here.)*
 
 - **Fuel is a property of the item, not of the furnace.** `fuelSeconds: 8` sits
-  on coal in `data/items.ts`, so C21's generator burns the same coal for the
-  same eight seconds without either building carrying a table of what it
-  accepts. It converts to ticks once, at registry build (§6 R3).
+  on coal in `data/items.ts`, so C21's generator burns the same coal without
+  either building carrying a table of what it accepts. It converts to ticks
+  once, at registry build (§6 R3). *(C21: "eight seconds" turned out to mean
+  "eight seconds at 150 kW" — the furnace is unchanged, because it has no power
+  rating and therefore burns at exactly that reference rate. See §15's fuel
+  note.)*
 
 - **A belt still does not load a machine, and a machine does not unload onto a
   belt.** Two comments written in C13 predicted the opposite — that the furnace
@@ -4469,6 +4492,115 @@ of partial satisfaction.
 **Out of scope.** Accumulators, brownout priority, transformers, realistic
 electrical simulation.
 
+### What C21 shipped, and where it departs from the tasks above
+
+Five departures. Three are refinements of a task; two are scope, and both are
+recorded in §15 as well because they move the content table.
+
+**1. The satisfaction ratio has no stored numerator (task 4).** The task asks
+for "a fixed-point progress numerator rather than a float", and the shipped
+answer is the same arithmetic with nothing to store. A machine at 60% must
+advance 0.6 ticks of progress per tick; since progress is integer (§6 R3), that
+means working on 60% of the ticks, and *which* ticks is a Bresenham step over
+the tick counter:
+
+```text
+works this tick  <=>  floor(t * sat / SCALE) > floor((t-1) * sat / SCALE)
+```
+
+The long-run rate is exact, every machine on a network skips the same ticks —
+which is the second acceptance criterion taken literally rather than
+approximately — and because the tick counter *is* saved, a world reloaded
+mid-brownout resumes on the same schedule (§6 R8). An accumulator per machine
+would have been a new field on three entity shapes and a new way for a save to
+be subtly wrong. `SCALE` is 1000; the whole of power's contact with fractions
+is that constant.
+
+**2. "Incrementally" means the poles, not the machines (task 3).** The task
+forbids a full rebuild per tick and the shipped system is stronger than that:
+the pole graph is rebuilt only when the **set of poles** changes, and
+consumers and generators are not indexed at all — they look their network up
+from the coverage map on the same pass that has to sum them anyway. So adding
+a belt, a machine or a generator costs nothing, and the cost of any change is
+proportional to the poles rather than to the entities. The once-per-tick work
+is a comparison of the live pole ids against the ones the graph was built from:
+a few hundred integer comparisons, chosen over a change feed because a
+bookkeeping hook missed on one code path would leave a network quietly wrong
+for the rest of a session. `PowerSystem.rebuild()` is the full path, it is what
+a load will call, and a test asserts the two agree after a session of building
+and demolishing.
+
+**3. Fuel follows the load.** Not in the task list, and it is the difference
+between a generator being a tool and a tax. Supply is the capacity of every
+generator that *could* run; fuel is then spent at `demand / supply`, by the
+same Bresenham step. A 900 kW generator over a network asking for 150 kW burns
+a sixth of its 0.75 coal/s — which is what makes an electric furnace cost
+exactly the coal a burner furnace would at **any** load, not only at a full
+one. Without it the smallest worthwhile power plant would be six furnaces
+wide. It is not an accumulator: an item already alight is never put out, and
+nothing is banked.
+
+**4. The power column is charged only from `power_1` onward (task 2).** §15's
+table gives the miner 90 kW, the inserter 13 kW and the assembler 150 kW, and
+the tech tree in the same section unlocks the assembler two tiers before the
+generator. Charging them would make the first four technologies unplayable.
+C21 charges the electric furnace and leaves the other three free; reconciling
+the column with the tree is C22's, because C22 owns the tree. §15 carries the
+full argument.
+
+**5. No electric miner (task 6).** The tier-1 miner burns nothing, so an
+electric variant of it is not "fuel logistics vs. power infrastructure" — it is
+the same miner with a bill, or a faster one, and either way a number rather
+than a decision. The electric *furnace* is the whole of task 6's choice and it
+is exact: 150 kW is `FUEL_REFERENCE_KW`, so what the player buys with the poles
+and the generator is one coal line instead of six, at identical coal. §15 says
+which chunk the miner belongs to.
+
+**Also worth knowing.**
+
+- A pole's **wire reach is a radius and its supply area is a square**, and the
+  gap between eight and five is the layout puzzle: a line of poles laid at the
+  edge of its reach leaves unpowered gaps. Distances are compared squared, so
+  there is no float anywhere in the graph.
+- Everything joins the network of the **lowest-id pole** covering any tile of
+  its footprint (§6 R6). With the shipped numbers two poles whose squares
+  overlap are always already wired together, so the tie-break is unreachable
+  from content — it is tested against a one-tile-reach pole, because the rule
+  has to hold whatever the content says.
+- **Demand is what is built, not what is running.** A machine draws its rating
+  even while starved. The alternative is circular — whether a machine runs is
+  decided in phases 3 and 4 out of a ratio phase 2 has already had to produce
+  — and it is also the wrong game: a power budget the player can read off what
+  they have built is something to plan against.
+- A generator with fuel and no pole reports **`no_power`**, the same word its
+  machines use, and raises the same `no_power_network` alert. `low_power` gets
+  no toast: it is a working factory that has outgrown its generators, and the
+  HUD's power tile carries it continuously instead.
+- The acceptance criterion about a 20,000-entity save is measured as what a
+  load actually costs this system — one full rebuild — since C24 is what will
+  load one. It runs in single-digit milliseconds with a thousand poles.
+
+**What it cost, measured.** C21 is the first chunk to put work in front of
+*every machine in the factory*, so the benchmarks were run before and after and
+the difference chased down. The first honest number was **+40% on a
+thousand-furnace tick**, and none of it was the power phase — which costs
+0.2 µs a tick with no poles in the world. It was two things, both now fixed and
+both worth knowing about:
+
+- `generatorPort` was a second object shape implementing the same interface as
+  `containerPort`, and `production-system.ts` reads three ports per machine per
+  tick. §16 now carries the rule.
+- Reading `PowerGate` at all on the path of a machine that burns fuel. The
+  whole gate now lives inside `if (electric)`, so a furnace never touches the
+  power system or its enum.
+
+What is left is **~3%**, measured A/B on one machine in one sitting, which is
+what a phase and a per-machine branch ought to cost. The committed baselines in
+`tests/bench/baseline/` were recorded on a different day and are not a
+like-for-like comparison — three of the six read *faster* than them now — so
+they were left alone rather than rewritten to match; C28 owns the profiler and
+the re-baselining.
+
 ---
 
 ## C22 — Research & progression
@@ -4973,12 +5105,23 @@ order, with `category: 'building'`:
 | `furnace` | 50 |
 | `assembler` | 50 |
 | `chest` | 50 |
+| `generator` | 50 |
+| `power_pole` | 50 |
+| `electric_furnace` | 50 |
 
 A hundred belts and fifty of everything else: belts are spent a dozen at a time
 and a stack that runs out mid-drag reads as a bug (C13); fifty of anything else
 is past what a player carries before they run out of somewhere to put it. Both
-are **balance numbers**. The four buildings still owed — generator, power pole,
-lab, radar — bring their items with them in C21–C23.
+are **balance numbers**. C21 added the last three; the two buildings still owed
+— lab and radar — bring their items with them in C22 and C23.
+
+**Ten buildings is one more than the hotbar.** C21 is the chunk that overflows
+`HOTBAR_SLOTS`, and the tenth entry is reached through the build menu with no
+number beside it. That is why C21 *appended* its three rather than slotting the
+generator and the pole into §15's table order beside the assembler: content
+order is hotkey order, and inserting a row renumbers a hotbar the player has
+already learned. The chest is the earlier departure from table order, for the
+same reason.
 
 Adding a building is therefore now **two** content rows and not one: an entry in
 `data/buildings.ts`, an entry in `data/items.ts`, a recipe, and a palette token
@@ -4994,8 +5137,25 @@ crafting recipe, and an assembler fed one must still wait to be told (C16).
 
 **Fuel.** `coal` burns for **8 s** in any machine with a fuel buffer. It is a
 property of the item (`fuelSeconds` in `data/items.ts`), not of the furnace, so
-C21's generator burns it for the same eight seconds without a table of its own
-(C15). Nothing else in v1 burns.
+C21's generator burns it without a table of its own (C15). Nothing else in v1
+burns.
+
+**What "8 s" means, settled in C21.** The sentence above and the generator row
+below disagreed: eight seconds a coal is 0.125 coal/s, and the building table
+says a generator burns 0.75. Only one number can be free, and the one that is
+free is the *reference power* the eight seconds are measured at:
+
+```text
+900 kW / 0.75 coal per second  =  1200 kJ per coal
+1200 kJ / 8 s                  =   150 kW      <- FUEL_REFERENCE_KW
+```
+
+So `fuelSeconds` is a burn time **at 150 kW**, and a burner that draws more
+gets through an item proportionally faster. Both §15 rows survive, C15's
+furnace is unchanged — it has no power rating, so it burns at the reference
+rate, which is the eight seconds it always had — and C21's electric furnace
+lands on 150 kW by derivation rather than by choice. The constant lives in
+`systems/power-system.ts` with this arithmetic beside it.
 
 ### Recipes
 
@@ -5015,6 +5175,9 @@ C21's generator burns it for the same eight seconds without a table of its own
 | `make_belt` | 1 `gear` + 1 `iron_plate` | 2 `belt` | 0.5 s | assembler |
 | `make_inserter` | 1 `gear` + 1 `circuit` + 1 `iron_plate` | 1 `inserter` | 0.5 s | assembler |
 | `make_miner` | 4 `gear` + 2 `circuit` + 4 `iron_plate` | 1 `miner` | 2.0 s | assembler |
+| `make_generator` | 8 `gear` + 10 `iron_plate` + 6 `brick` | 1 `generator` | 3.0 s | assembler |
+| `make_power_pole` | 1 `copper_wire` + 2 `iron_plate` | 1 `power_pole` | 0.5 s | assembler |
+| `make_electric_furnace` | 12 `brick` + 5 `circuit` + 3 `steel` | 1 `electric_furnace` | 3.0 s | assembler |
 
 A time in this table is the **recipe's own**. What a machine takes is that
 divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
@@ -5022,7 +5185,8 @@ divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
 
 The last three are examples of the **building recipes**: every building in the
 table below has one, taking exactly the ingredients in its "crafted from" column.
-Total v1 recipe count: **9 processing + 11 building = 20**.
+Total v1 recipe count: **9 processing + 12 building = 21**, the twelfth
+building being C21's electric furnace.
 
 C20 shipped seven of the eleven — one per building that exists — and authored
 the four times this table did not give. They are **balance numbers**, chosen so
@@ -5036,8 +5200,18 @@ a building's craft time tracks the size of its bill rather than being flat:
 | `make_chest` | 0.5 s | four plates, the cheapest thing in the table |
 
 `make_furnace` is the only consumer `brick` has, and therefore the only reason
-to bake one — which is the only reason to mine `stone`. `steel` still has none:
-`make_frame` is its consumer and belongs to C22's lab. See C20's noted gaps.
+to bake one — which is the only reason to mine `stone`.
+
+**`steel` has one from C21.** C20 listed it as a dead end and predicted C22's
+`make_frame` would close it; `make_electric_furnace` got there first, which is
+why `tests/balance/content.test.ts` now carries an empty exception list. Its
+three ingredients are C21's and they are **balance numbers**: the twelve brick
+echo the furnace it replaces, the five circuits are what make it electric, and
+the three steel — 15 plates and 48 s of smelting — are what stop a player
+converting their whole smelting column the afternoon they unlock it.
+`make_generator` and `make_electric_furnace` take 3.0 s apiece on C20's rule
+that a craft time tracks the size of its bill; `make_power_pole` takes the
+chest's 0.5 s, because it is three items and poles are laid by the dozen.
 
 Building items being craftable is what lets the factory eventually build itself —
 a strong pillar-1 moment, and the reason `make_miner` is worth its cost.
@@ -5082,15 +5256,16 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 
 | id | size | crafted from | power | notes |
 |---|---|---|---|---|
-| `miner` | 2×2 | 4 gear, 2 circuit, 4 iron_plate | 90 kW *(C21)* | needs ≥1 resource tile under footprint |
+| `miner` | 2×2 | 4 gear, 2 circuit, 4 iron_plate | — *(see below)* | needs ≥1 resource tile under footprint |
 | `belt` | 1×1 | 1 gear + 1 iron_plate → **2 belts** | — | 4 rotations, 8 items/s |
 | `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | 4 rotations, deterministic round-robin, 8 items/s per lane (C17) |
-| `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | 13 kW | 4 rotations, 1 item/s |
+| `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | — *(see below)* | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
 | `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
-| `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | 150 kW | recipe selectable, speed 0.5; buffers 50 in / 50 out, 4 rotations (C16) |
-| `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s |
-| `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8, supply area 5 |
+| `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | — *(see below)* | recipe selectable, speed 0.5; buffers 50 in / 50 out, 4 rotations (C16) |
+| `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s **at full load**, pro rata below it (C21) |
+| `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8 (a radius), supply area 5 (a square) |
+| `electric_furnace` | 2×2 | 12 brick, 5 circuit, 3 steel | 150 kW | smelting, speed 1.0, **no fuel buffer**; buffers 50 in / 50 out, 4 rotations (C21) |
 | `lab` | 3×3 | 10 gear, 10 circuit, 4 frame | 180 kW | consumes data cores |
 | `radar` | 2×2 | 5 gear, 5 circuit, 10 iron_plate | 300 kW | reveals map world chunks |
 
@@ -5107,8 +5282,69 @@ raw resources through the recipe graph. It belongs to whichever chunk wants the
 *opening* to be a hand-crafted bootstrap rather than a given kit — see C20's
 report on why that matters more than it sounds.
 
-11 buildings — above the "5–8" of the previous revision, but each one is a
-distinct verb, not a variant.
+12 buildings — above the "5–8" of the previous revision, but each one is a
+distinct verb, not a variant. The twelfth is C21's `electric_furnace`; see
+below for why it exists and why the `electric_miner` C21 task 6 also names
+does not.
+
+### The power column, as C21 charges it
+
+Three rows above used to carry a kilowatt figure and now read "see below": the
+miner's 90 kW, the inserter's 13 kW and the assembler's 150 kW. **Nothing in
+v1 charges them**, and the reason is two paragraphs of this same section
+contradicting each other.
+
+The tech tree unlocks the assembler at `automation_1` and the generator at
+`power_1`, two tiers later, and it starts the player with a miner and an
+inserter. A power column taken literally therefore makes the first four
+technologies unplayable: every machine the player can build needs a grid they
+cannot build for another two tiers. Whichever of the two is wrong — the column
+or the tree — **is C22's decision**, because C22 owns the tree and the unlock
+machinery, and C21 is forbidden from implementing either (§19 rule 4).
+
+So C21 charges power to the buildings §15 unlocks *at or after* `power_1`, and
+leaves the rest free:
+
+```text
+draws power    electric_furnace 150 kW      (C21)
+               lab              180 kW      (C22)
+               radar            300 kW      (C23)
+
+free in v1     miner, inserter, assembler   §15's figures stand as intent;
+                                            C22 either charges them and moves
+                                            power_1 to the front of the tree,
+                                            or strikes them
+```
+
+This is a real reduction in what power *touches* in v1, and it is worth being
+honest about: with only the electric furnace drawing on it, C21's grid is
+optional. What makes it worth building anyway is the logistics trade below,
+and what will make it mandatory is C22's lab.
+
+### The electric furnace, and the electric miner that is not here
+
+C21 task 6 asks for "electric miner and electric furnace variants … giving a
+real choice: fuel logistics vs. power infrastructure". The furnace delivers
+exactly that and the miner cannot, for a reason that is about what the two
+base buildings are:
+
+- A **burner furnace** needs a coal belt and two inserters. Its electric twin
+  needs one inserter and no coal at the machine, and — because 150 kW *is*
+  `FUEL_REFERENCE_KW` — six of them cost a generator precisely the coal six
+  burner furnaces would have burned. The trade is purely logistical: **one
+  coal line to one generator instead of one to every furnace.** Nothing is
+  cheaper and nothing is faster; what changes is the shape of the factory,
+  which is pillar 4.
+- A **tier-1 miner burns nothing**. It runs for free today, so an "electric"
+  variant of it is not a choice between two supply chains — it is the same
+  miner with a bill attached, or a faster one, and either way it is a number
+  rather than a decision. C21 does not ship it.
+
+It belongs to whichever chunk makes tier-1 mining cost fuel — at which point
+the furnace's trade is available to the miner unchanged — or to C22's
+`mining_2`, which already owes a tier-2 miner and could make that tier the
+electric one. Turning the base miner into a burner is a content change the
+size of C20's pass and is not C21's to make.
 
 ### Technology tree v1
 
@@ -5146,6 +5382,14 @@ Nine technologies. Note that only `mining_2` and `logistics_2` are numerical
 upgrades, and even those change the ratios enough to force a rebuild — which is
 the point. Everything else unlocks a **new verb**.
 
+**Two things C22 inherits from C21.** First, `power_1`'s "electric miner" is
+not implemented and the reason is above — either give the base miner a fuel
+buffer first, or make `mining_2`'s tier-2 miner the electric one. Second, the
+tree's *order* has to be reconciled with the power column: as written it hands
+the player an assembler two tiers before a generator, which is why C21 charges
+nothing to it. Moving `power_1` ahead of `automation_1` and charging §15's
+figures is the alternative, and it is a decision, not a tidy-up.
+
 ---
 
 ## §16 Performance strategy & optimisation paths
@@ -5170,6 +5414,15 @@ Being unmeasured is not a licence to be careless in the tick loop. In
 - Avoid `try/catch` in the innermost loops.
 - Avoid megamorphic property access — keep entity shapes monomorphic per type
   (always initialise every field, never `delete` a property).
+- **The same rule applies to object *literals* that implement an interface.**
+  Two literals with different key sequences are two hidden classes, and every
+  call site that reads one turns polymorphic. C21 learned this the expensive
+  way: a six-key wrapper around `containerPort` written in a different key
+  order cost **~15% of a thousand-furnace tick**, because
+  `production-system.ts` reads three ports per machine per tick. The fix was
+  to reorder six lines. If a second constructor for a hot interface is
+  unavoidable, give it the same keys in the same order and say so in a comment
+  beside both.
 - Prefer `for (let i = 0; i < n; i++)` over `for...of` on hot arrays.
 
 Outside the tick loop — UI, worldgen, serialization, setup — write whatever is
@@ -5229,7 +5482,8 @@ miner -> belt -> inserter -> furnace -> inserter -> chest      (C15)
 ore -> smelt -> assemble -> chest                 (C16, tests/integration/ore-to-gears.test.ts)
 belt -> splitter -> 2 belts -> 2 chests           (C17, tests/integration/belt-splitter-chests.test.ts)
 ore -> smelt -> assemble -> a placed building     (C20, tests/integration/factory-builds-itself.test.ts)
-full chain with power browning out                (C21)
+coal -> belt -> generator -> poles -> electric furnace          (C21, tests/integration/coal-to-power.test.ts)
+full chain with power browning out                (C21, tests/unit/power-system.test.ts)
 full chain producing data cores -> lab -> research complete    (C22)
 ```
 

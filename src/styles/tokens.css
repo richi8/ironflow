@@ -60,6 +60,12 @@
   --if-chest: #8a7250;
   --if-furnace: #c25a4a;
   --if-assembler: #46a88f;
+  /* power (C21). Brass for the thing that burns, olive for the pole, and a
+     lighter, hotter red for the furnace that runs on wire rather than coal —
+     far enough from --if-furnace to be told apart on a mixed belt. */
+  --if-generator: #c9a227;
+  --if-power_pole: #8f9c5a;
+  --if-electric_furnace: #e07a62;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

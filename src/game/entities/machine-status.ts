@@ -63,6 +63,24 @@ export enum MachineStatus {
    * was going to clear itself, and it never did.
    */
   NoDestination = 8,
+  /**
+   * C21: it is on a power network that cannot meet its demand, so it is
+   * running slowly rather than not at all.
+   *
+   * The ninth, appended for the reason the eighth was: no existing number
+   * moves. It is deliberately **distinct from `NoPower`** (C21 task 5),
+   * because the two ask the player for opposite things — `no_power` wants a
+   * pole or a generator where there is none, and `low_power` wants *more*
+   * generation on a network that already exists. A single "power problem"
+   * status would send a player looking for a disconnected wire that is not
+   * there.
+   *
+   * A machine on an under-supplied network reports this on every tick it
+   * works and keeps it on the ticks it does not, so the panel reads steadily
+   * rather than flickering between `running` and this at the satisfaction
+   * ratio — see `power-system.ts`.
+   */
+  LowPower = 9,
 }
 
 /**
@@ -79,6 +97,7 @@ const MACHINE_STATUS_NAMES = Object.freeze([
   'no_recipe',
   'no_fuel',
   'no_destination',
+  'low_power',
 ] as const);
 
 /** The name of a status, as a view model spells it. */

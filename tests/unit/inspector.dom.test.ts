@@ -257,6 +257,37 @@ describe('status', () => {
     expect(panel().querySelector('.if-inspector__status')?.getAttribute('data-tone')).toBe('danger');
   });
 
+  it('shows nothing about power for a building that has none', () => {
+    const chest = harness.simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
+    select(chest.id);
+    expect(query<HTMLElement>('.if-inspector__power').hidden).toBe(true);
+  });
+
+  it('says what a machine draws and how its network is doing (C21)', () => {
+    const furnace = harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.ElectricFurnace, 0, 0, NORTH),
+    );
+    select(furnace.id);
+    runTicks(1);
+    settle();
+
+    // No pole anywhere: the status says it is not running and this row says
+    // why, which is the difference between a verdict and an explanation.
+    expect(text('.if-inspector__status')).toContain('Not connected');
+    expect(query<HTMLElement>('.if-inspector__power').hidden).toBe(false);
+    expect(text('.if-inspector__power')).toContain('150 kW drawn');
+    expect(text('.if-inspector__power')).toContain('no network');
+
+    // A pole beside it, placed the way a player would (§7). The row changes
+    // its mind rather than its shape.
+    harness.simulation.inventory.add('power_pole', 1);
+    harness.controller.dispatch({ type: 'build', buildingId: 'power_pole', x: 2, y: 0, rotation: NORTH });
+    runTicks(1);
+    settle();
+
+    expect(text('.if-inspector__power')).toContain('network at 0%');
+  });
+
   it('gives a chest no progress bar and no rate, rather than two zeroes', () => {
     const chest = harness.simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     select(chest.id);
@@ -429,6 +460,10 @@ describe('the recipe picker (C16)', () => {
       'make_furnace',
       'make_assembler',
       'make_chest',
+      // C21's three power buildings.
+      'make_generator',
+      'make_power_pole',
+      'make_electric_furnace',
     ]);
     // The ingredients and the rate, which is what task 3 asks the grid to show.
     expect(buttons()[0]?.textContent).toContain('2 Iron Plate');

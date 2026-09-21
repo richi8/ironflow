@@ -249,7 +249,7 @@ describe('shade', () => {
 describe('the palette mirrors tokens.css', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/tokens.css'), 'utf8');
   const declared = new Map<string, string>();
-  for (const match of css.matchAll(/--if-([a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+  for (const match of css.matchAll(/--if-([a-z0-9_-]+)\s*:\s*([^;]+);/g)) {
     declared.set(match[1] ?? '', (match[2] ?? '').trim());
   }
 

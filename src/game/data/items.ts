@@ -40,9 +40,9 @@
  * One row per building in `data/buildings.ts`, in the same order, and a test
  * asserts that correspondence in both directions: a building whose item does
  * not exist cannot be paid for, and an unplaceable building item is a stack a
- * player can never spend. The four buildings §15 still owes — generator, power
- * pole, lab, radar — arrive with the systems that make them do something
- * (C21–C23), and their items arrive with them.
+ * player can never spend. C21 brings the generator and the power pole, which
+ * §15 owed, and the electric furnace, which it did not — see C21's deviations.
+ * The lab and the radar arrive with C22 and C23.
  *
  * Stack sizes are **balance numbers**. A hundred belts and fifty of everything
  * else: belts are spent a dozen at a time and a stack that ran out mid-drag is
@@ -74,4 +74,16 @@ export const ITEMS: readonly ItemDefinition[] = Object.freeze([
   { id: 'furnace', name: 'Furnace', stackSize: 50, sprite: 'item:furnace', category: 'building' },
   { id: 'assembler', name: 'Assembler', stackSize: 50, sprite: 'item:assembler', category: 'building' },
   { id: 'chest', name: 'Chest', stackSize: 50, sprite: 'item:chest', category: 'building' },
+  // C21's three. Fifty apiece, for the reason every other non-belt building
+  // has fifty: it is past what a player carries before they run out of
+  // somewhere to put it.
+  { id: 'generator', name: 'Generator', stackSize: 50, sprite: 'item:generator', category: 'building' },
+  { id: 'power_pole', name: 'Power Pole', stackSize: 50, sprite: 'item:power_pole', category: 'building' },
+  {
+    id: 'electric_furnace',
+    name: 'Electric Furnace',
+    stackSize: 50,
+    sprite: 'item:electric_furnace',
+    category: 'building',
+  },
 ] satisfies readonly ItemDefinition[]);

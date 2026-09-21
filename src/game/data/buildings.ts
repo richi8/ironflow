@@ -210,4 +210,81 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     storage: { slots: 24 },
     sprite: 'building:storage:CH:1x1:1',
   },
+
+  /* ---------------------------------------------------------------------- *
+   * Power (C21). Appended rather than slotted into §15's table order, which
+   * the chest already departs from: the order here is *hotkey* order, and
+   * inserting a building in the middle would silently renumber the hotbar a
+   * player has already learned.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'generator',
+    name: 'Generator',
+    entityType: EntityType.Generator,
+    category: 'power',
+    size: { width: 3, height: 3 },
+    // One. A generator has no output side — what it makes leaves through the
+    // poles around it, not through a tile — so a rotation would be three
+    // states the player cannot tell apart, which is the chest's argument.
+    rotationCount: 1,
+    buildCost: [{ itemId: 'generator', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §15: −900 kW, burning 0.75 coal/s. The second of those is *derived* from
+    // the first and from coal's eight seconds — see `FUEL_REFERENCE_KW` in
+    // `systems/power-system.ts` — so it is not a number here. The fifty is the
+    // furnace's fuel buffer, and a **balance number**: at 0.75 coal/s it is a
+    // little over a minute of burn, which is long enough that a coal belt can
+    // stutter and short enough that a generator with no belt runs out while
+    // the player is still standing next to it.
+    generator: { productionKw: 900, fuelCapacity: 50 },
+    sprite: 'building:power:GE:3x3:3',
+  },
+  {
+    id: 'power_pole',
+    name: 'Power Pole',
+    entityType: EntityType.PowerPole,
+    category: 'power',
+    size: { width: 1, height: 1 },
+    // A pole is a point. Nothing about it faces anywhere.
+    rotationCount: 1,
+    buildCost: [{ itemId: 'power_pole', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // §15: wire reach 8, supply area 5. Both are **balance numbers**, and the
+    // gap between them is the whole of C21's layout puzzle: a pole powers a
+    // 5x5 square and reaches 8 tiles to the next one, so a line of poles
+    // leaves unpowered gaps unless it is laid closer than it needs to be to
+    // stay connected. Closing that gap is what makes a pole run a decision.
+    pole: { wireReach: 8, supplyArea: 5 },
+    sprite: 'building:power:PP:1x1:2',
+  },
+  {
+    id: 'electric_furnace',
+    name: 'Electric Furnace',
+    entityType: EntityType.ElectricFurnace,
+    category: 'production',
+    size: { width: 2, height: 2 },
+    rotationCount: 4,
+    buildCost: [{ itemId: 'electric_furnace', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // The furnace above with two fields changed, which is the point: it
+    // smelts the same recipes at the same speed with the same buffers, it has
+    // **no `fuelCapacity`**, and it draws 150 kW instead.
+    //
+    // 150 is not a free parameter. It is `FUEL_REFERENCE_KW`, the rate a fuel
+    // buffer burns at, so six electric furnaces on one 900 kW generator eat
+    // exactly the coal six burner furnaces would have. The trade C21 task 6
+    // asks for is therefore purely logistical: one coal line to one generator
+    // instead of six coal lines to six furnaces, and one inserter per furnace
+    // instead of two. That is worth the poles and the steel, and it is worth
+    // them for a reason a player can see on the screen rather than in a table.
+    production: {
+      category: 'smelting',
+      recipeSelection: 'auto',
+      craftingSpeed: 1.0,
+      inputCapacity: 50,
+      outputCapacity: 50,
+    },
+    power: { consumptionKw: 150 },
+    sprite: 'building:production:EF:2x2:2',
+  },
 ]);

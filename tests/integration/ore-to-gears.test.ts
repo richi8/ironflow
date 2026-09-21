@@ -281,6 +281,10 @@ describe('ore -> smelt -> assemble -> chest', () => {
       'make_furnace',
       'make_assembler',
       'make_chest',
+      // C21's three power buildings.
+      'make_generator',
+      'make_power_pole',
+      'make_electric_furnace',
     ]);
     expect(view?.recipes?.filter((choice) => choice.selected).map((choice) => choice.id)).toEqual(['make_gear']);
     // 60 ticks a gear is 30 a minute — the machine's nominal rate, beside the

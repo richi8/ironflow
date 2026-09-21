@@ -21,6 +21,7 @@ import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
 import { ProductionSystem } from './systems/production-system.js';
 import { PlayerSystem } from './systems/player-system.js';
+import { PowerSystem } from './systems/power-system.js';
 import type { Rotation } from './world/coordinates.js';
 import type { World } from './world/world.js';
 
@@ -119,6 +120,14 @@ export class Simulation {
   readonly inventory: BuildMaterials;
 
   private readonly builder: BuildSystem;
+
+  /**
+   * The grid (C21), phase 2. Exposed rather than private because the
+   * controller asks it two read-only questions the HUD and the inspector need
+   * — how the whole grid is doing, and how one building is doing on it — and
+   * §10 calls the networks derived state, so there is nowhere else to ask.
+   */
+  readonly power: PowerSystem;
 
   private readonly miningSystem: MiningSystem;
 
@@ -222,6 +231,12 @@ export class Simulation {
       buildings: this.buildings,
       inventory: this.inventory,
     });
+    this.power = new PowerSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      items: this.items,
+      alerts: this.alerts,
+    });
     this.miningSystem = new MiningSystem({
       world: this.world,
       entities: this.entities,
@@ -238,6 +253,7 @@ export class Simulation {
       crafts: this.crafts,
       alerts: this.alerts,
       production: this.production,
+      power: this.power,
     });
     this.beltSystem = new BeltSystem({
       entities: this.entities,
@@ -371,6 +387,13 @@ export class Simulation {
       if (reason !== null) this.commands.reject(command, reason);
     }
 
+    // Phase 2 — power. Networks are resolved and every machine's share of the
+    // supply is settled *before* anything can spend it, which is the whole
+    // reason this phase is second (§8). It runs after the commands so a
+    // generator placed this frame supplies on the tick it was built, which is
+    // C21's third acceptance criterion.
+    this.power.tick(this.tickCount);
+
     // Phase 3 — mining. Miners extract into their own buffers (C11). It runs
     // before production so ore mined this tick is smeltable this tick, and
     // after the command phase so a miner placed this frame starts on the tick
@@ -393,7 +416,7 @@ export class Simulation {
     // throughput is a property of the layout rather than of array order.
     this.inserterSystem.tick();
 
-    // Phases 2 and 7 arrive with the chunks listed above.
+    // Phase 7 arrives with C22.
 
     // Phase 8 — player. Movement and manual mining (C10). It runs after every
     // machine so that the world a step of walking is judged against is the one

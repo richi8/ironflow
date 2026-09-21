@@ -27,6 +27,15 @@ export enum EntityType {
   PowerPole = 8,
   Lab = 9,
   Radar = 10,
+  /**
+   * C21. The eleven above are §15's building table, written out on day one so
+   * that no save migration ever has to learn a new number. This is the twelfth,
+   * and it is appended rather than inserted for exactly that reason: §15's
+   * table is the *materials* of the game and C21 adds a machine it did not
+   * list — the furnace's powered twin, which is the whole of task 6's "fuel
+   * logistics vs. power infrastructure" choice. See C21's deviations.
+   */
+  ElectricFurnace = 11,
 }
 
 /**
@@ -47,6 +56,7 @@ const ENTITY_TYPE_NAMES: readonly string[] = Object.freeze([
   'power_pole',
   'lab',
   'radar',
+  'electric_furnace',
 ]);
 
 /** How many entity types exist. Kept in step with the table, not hand-written. */

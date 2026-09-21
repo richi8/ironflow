@@ -48,10 +48,10 @@
  * eight seconds and the longest single craft in the game. They are **balance
  * numbers**, and §15's table now carries them.
  *
- * Four buildings of §15's eleven are still missing, and so are their recipes:
- * the generator, the power pole, the lab and the radar belong to C21–C23, and
- * a recipe for a building that cannot be placed is content no test can judge.
- * That is the same rule `make_frame` and `make_data_core` wait under.
+ * C21 adds three more — the generator, the power pole and the electric
+ * furnace — under that same rule: each is a building that can now be placed
+ * and does something. The lab and the radar, and with them `make_frame` and
+ * `make_data_core`, still wait for C22 and C23.
  */
 
 import type { RecipeDefinition } from '../registries/recipe-registry.js';
@@ -184,6 +184,55 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     inputs: [{ itemId: 'iron_plate', count: 4 }],
     outputs: [{ itemId: 'chest', count: 1 }],
     seconds: 0.5,
+    category: 'crafting',
+  },
+
+  /* ---------------------------------------------------------------------- *
+   * Power (C21). Two bills are §15's, transcribed; the third and all three
+   * times are C21's, chosen on the same rule C20 used — a building's craft
+   * time tracks the size of its bill rather than being flat.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'make_generator',
+    inputs: [
+      { itemId: 'gear', count: 8 },
+      { itemId: 'iron_plate', count: 10 },
+      { itemId: 'brick', count: 6 },
+    ],
+    outputs: [{ itemId: 'generator', count: 1 }],
+    // Three seconds: a bill the size of the assembler's without its circuits.
+    seconds: 3.0,
+    category: 'crafting',
+  },
+  {
+    id: 'make_power_pole',
+    inputs: [
+      { itemId: 'copper_wire', count: 1 },
+      { itemId: 'iron_plate', count: 2 },
+    ],
+    outputs: [{ itemId: 'power_pole', count: 1 }],
+    // The chest's half-second, and for the chest's reason: it is three items,
+    // and poles are laid by the dozen.
+    seconds: 0.5,
+    category: 'crafting',
+  },
+  {
+    // §15 gives this no row, because §15 has no electric furnace. The bill is
+    // "a furnace, wired": the same twelve brick, plus the circuits that make
+    // it electric and the steel that makes it worth the detour.
+    //
+    // **It is the first consumer `steel` has ever had.** C20 listed steel as a
+    // known dead end — smeltable, and wanted by nothing until C22's lab wants
+    // a frame — and this closes it a chunk early, which is why
+    // `tests/balance/content.test.ts` no longer carries the exception.
+    id: 'make_electric_furnace',
+    inputs: [
+      { itemId: 'brick', count: 12 },
+      { itemId: 'circuit', count: 5 },
+      { itemId: 'steel', count: 3 },
+    ],
+    outputs: [{ itemId: 'electric_furnace', count: 1 }],
+    seconds: 3.0,
     category: 'crafting',
   },
 ] satisfies readonly RecipeDefinition[]);

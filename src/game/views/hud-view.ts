@@ -6,11 +6,15 @@
  * the player's iron, and every field here is a number or a string for the same
  * reason: there is nothing in a `HudView` to mutate.
  *
- * **What is not here is as deliberate as what is.** There is no power ratio and
- * no research progress, because there is no power system until C21 and no
- * research until C22, and a field that is always `null` is a promise the view
- * model cannot keep. The HUD draws those two tiles from §11's icon set and
- * shows them as offline; when C21 lands it adds the field and the tile reads it.
+ * **What is not here is as deliberate as what is.** There is no research
+ * progress, because there is no research until C22, and a field that is always
+ * `null` is a promise the view model cannot keep. The HUD draws that tile from
+ * §11's icon set and shows it as offline; C22 adds the field and the tile
+ * reads it.
+ *
+ * `power` is what that sentence looked like when it came true. It is nullable,
+ * but not always null: it is null until the player builds their first pole,
+ * which is a real state — there is no grid — rather than a missing system.
  */
 
 /** One kind of item the player is holding. */
@@ -19,6 +23,21 @@ export interface HudItemCount {
   /** The player-facing name, which is content (C06) and one day translated. */
   readonly name: string;
   readonly count: number;
+}
+
+/**
+ * The whole grid, for the HUD's power tile (C21 task 5).
+ *
+ * A flattened copy of `PowerSummary` rather than the thing itself, for the
+ * reason every view model is a copy: §4 lets the UI hold a view and nothing
+ * from a system, and the two shapes agreeing is the controller's job.
+ */
+export interface HudPowerView {
+  readonly supplyKw: number;
+  readonly demandKw: number;
+  /** The worst network's, 0..100 — the one the player has to do something about. */
+  readonly satisfactionPercent: number;
+  readonly networks: number;
 }
 
 export interface HudView {
@@ -44,4 +63,13 @@ export interface HudView {
    * has always been for.
    */
   readonly alerts: number;
+  /**
+   * Supply, demand and the worst network's satisfaction, or `null` when no
+   * network exists yet (C21).
+   *
+   * Null is not "no data": it is "there is no grid", which is true of every
+   * factory until its first pole goes up, and it is what keeps the tile
+   * reading a dash rather than a confident 100%.
+   */
+  readonly power: HudPowerView | null;
 }

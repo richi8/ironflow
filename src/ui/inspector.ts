@@ -51,7 +51,12 @@
  * measured rate is the number that says so.
  */
 
-import type { MachineStack, MachineStatus, MachineView } from '../game/views/building-view.js';
+import type {
+  MachinePowerView,
+  MachineStack,
+  MachineStatus,
+  MachineView,
+} from '../game/views/building-view.js';
 import type { RecipeView } from '../game/views/recipe-view.js';
 
 import { createIcon } from './icons.js';
@@ -77,11 +82,12 @@ const STATUS_TEXT: Readonly<Record<MachineStatus, string>> = Object.freeze({
   running: 'Running',
   output_full: 'Output full — nothing is taking from it',
   no_resource: 'No ore left under it',
-  no_power: 'No power',
+  no_power: 'Not connected to a power network',
   no_input: 'Missing ingredients',
   no_recipe: 'No recipe set',
   no_fuel: 'Out of fuel — progress is paused, not lost',
   no_destination: 'Nowhere to put anything — it is not pointed at a belt, a chest or a machine',
+  low_power: 'Low power — the network cannot keep up',
 });
 
 /** Which of §11's status tokens each one is painted in. */
@@ -97,6 +103,9 @@ const STATUS_TONE: Readonly<Record<MachineStatus, StatusTone>> = Object.freeze({
   no_recipe: 'warn',
   // Stopped for a reason that will not fix itself without moving something.
   no_fuel: 'warn',
+  // C21: the factory works, it is just stretched. Amber for the same reason
+  // `output_full` is — it is a number to grow, not a thing that is broken.
+  low_power: 'warn',
   no_resource: 'danger',
   no_power: 'danger',
   // Misconfigured rather than stalled: nothing will ever come of it, and it
@@ -156,6 +165,17 @@ export class Inspector {
    */
   private readonly nextRow = document.createElement('div');
   private readonly nextValue = document.createElement('span');
+
+  /**
+   * "POWER — 150 kW, network at 62%", for anything on the grid (C21 task 5).
+   *
+   * Its own row for the splitter row's reason: what it reports is neither a
+   * buffer nor a progress bar. It is also the row that makes `no_power` and
+   * `low_power` actionable — the status says a machine is not running, and
+   * this says whether nothing reaches it or what does cannot keep up.
+   */
+  private readonly powerRow = document.createElement('div');
+  private readonly powerValue = document.createElement('span');
 
   /** The picker, for a machine the player chooses for (C16 task 3). */
   private readonly recipeSection = document.createElement('div');
@@ -231,6 +251,14 @@ export class Inspector {
     this.nextValue.className = 'if-inspector__value';
     this.nextRow.append(nextLabel, this.nextValue);
 
+    this.powerRow.className = 'if-inspector__rate if-inspector__power';
+    this.powerRow.hidden = true;
+    const powerLabel = document.createElement('span');
+    powerLabel.className = 'if-inspector__label';
+    powerLabel.textContent = 'POWER';
+    this.powerValue.className = 'if-inspector__value';
+    this.powerRow.append(powerLabel, this.powerValue);
+
     this.recipeSection.className = 'if-inspector__recipes';
     this.recipeSection.hidden = true;
     const recipeLabel = document.createElement('div');
@@ -265,6 +293,7 @@ export class Inspector {
       this.rateRow,
       this.makingRow,
       this.nextRow,
+      this.powerRow,
       this.recipeSection,
       this.inputs.root,
       this.outputs.root,
@@ -309,6 +338,9 @@ export class Inspector {
     const rate = view.ratePerMinute;
     this.rateRow.hidden = rate === null;
     if (rate !== null) setText(this.rateValue, `${rate.toFixed(1)} /min`);
+
+    this.powerRow.hidden = view.power === null;
+    if (view.power !== null) setText(this.powerValue, describePower(view.power));
 
     // A splitter's whole panel was empty before C20: it has no ports, so
     // there was nothing to list. This is the one thing it does have.
@@ -513,6 +545,21 @@ const NO_RECIPES: readonly RecipeView[] = Object.freeze([]);
 /** "2 Iron Plate", and "Gear" for a single one — the count is the news. */
 function amountOf(count: number, name: string): string {
   return count === 1 ? name : `${count} ${name}`;
+}
+
+/**
+ * The POWER line: what this building does to the grid, then how the grid is
+ * doing (C21).
+ *
+ * A generator reads "900 kW supplied", a machine "150 kW drawn", and both then
+ * carry the network's own state — because the useful sentence is not "this
+ * machine wants 150 kW", it is "it wants 150 kW and its network is at 62%".
+ */
+function describePower(power: MachinePowerView): string {
+  const role =
+    power.productionKw > 0 ? `${power.productionKw} kW supplied` : `${power.consumptionKw} kW drawn`;
+  if (!power.connected) return `${role} — no network`;
+  return `${role}, network at ${power.satisfactionPercent}%`;
 }
 
 function setText(element: HTMLElement, text: string): void {

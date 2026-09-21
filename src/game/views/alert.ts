@@ -31,8 +31,11 @@
  *                no_fuel          feed it; it will not restart by itself
  *                no_destination   it is pointed at nothing; turn it round
  *                no_recipe        it has never been told what to make
+ *                no_power         it is not on a network (C21)
  *
- *   no alert     output_full      the consumer will catch up, or it will not,
+ *   no alert     low_power        the network is stretched, not broken; the
+ *                                 HUD's power tile says so continuously
+ *                output_full      the consumer will catch up, or it will not,
  *                                 and either way the panel says so
  *                no_input         the same fact one machine upstream
  *                idle / running   nothing happened
@@ -48,7 +51,19 @@ export type AlertType =
   /** C20: an inserter with nowhere to put what it is holding. */
   | 'inserter_no_destination'
   /** C20: a machine the player has placed and never told what to make. */
-  | 'machine_no_recipe';
+  | 'machine_no_recipe'
+  /**
+   * C21: a building that needs a power network and is not on one — a machine
+   * with no pole in reach, or a generator with nowhere to send what it burns.
+   *
+   * It passes the test above on both counts: the player has to run a pole,
+   * and nothing about a building standing in open ground will change on its
+   * own. It is deliberately **not** raised for `low_power`, which is a
+   * *working* factory that has outgrown its generators — that is the
+   * `output_full` of power, it clears itself the moment demand drops, and the
+   * HUD's power tile carries it instead (C21 task 5).
+   */
+  | 'no_power_network';
 
 /**
  * It carries the tile as well as the entity id because the id alone is not

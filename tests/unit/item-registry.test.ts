@@ -179,6 +179,10 @@ describe('the shipped item table', () => {
       'furnace',
       'assembler',
       'chest',
+      // C21's three.
+      'generator',
+      'power_pole',
+      'electric_furnace',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);

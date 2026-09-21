@@ -15,6 +15,8 @@
  * ## A tick of one machine
  *
  * ```text
+ *   check power         nothing to draw on -> no_power; a tick this machine's
+ *                       share does not buy -> nothing happens at all  (C21)
  *   resolve recipe      the one it was told, or one its input buffer names
  *   craft length        the recipe's duration at this machine's speed
  *   deliver a held item a finished craft that had nowhere to go, retried
@@ -45,6 +47,12 @@
  * furnace takes, which is what C15's ±2% acceptance criterion is measured
  * against (§6 R3 — integer ticks, never accumulated seconds).
  *
+ * Partial power does not slow a *craft*; it removes ticks from it. A machine
+ * on a 60% network advances `progressTicks` on 60% of ticks, so a 96-tick
+ * smelt takes 160, and the arithmetic stays the integer counting §6 R3 asks
+ * for. Which ticks it gets is `power-system.ts`'s, and it is the same answer
+ * for every machine on the network.
+ *
  * `craftTicks` is the recipe's duration divided by the machine's
  * `craftingSpeed`, so C16's tier-1 assembler takes 60 ticks over a 1.0 s
  * recipe. The division is done once at startup and looked up here (C16 task
@@ -62,6 +70,7 @@ import type { BuildingRegistry, ProductionProperties } from '../registries/build
 import { CANNOT_CRAFT, type CraftDurations } from '../registries/craft-durations.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import { NO_RECIPE, type Recipe, type RecipeRegistry } from '../registries/recipe-registry.js';
+import { PowerGate, type PowerSystem } from './power-system.js';
 
 export interface ProductionSystemOptions {
   readonly entities: EntityStore;
@@ -72,6 +81,8 @@ export interface ProductionSystemOptions {
   readonly crafts: CraftDurations;
   readonly alerts: AlertLog;
   readonly production: ProductionCounters;
+  /** Phase 2's answer about every machine's share of the grid (C21). */
+  readonly power: PowerSystem;
 }
 
 export class ProductionSystem {
@@ -82,6 +93,7 @@ export class ProductionSystem {
   private readonly crafts: CraftDurations;
   private readonly alerts: AlertLog;
   private readonly counters: ProductionCounters;
+  private readonly power: PowerSystem;
 
   constructor(options: ProductionSystemOptions) {
     this.entities = options.entities;
@@ -91,6 +103,7 @@ export class ProductionSystem {
     this.crafts = options.crafts;
     this.alerts = options.alerts;
     this.counters = options.production;
+    this.power = options.power;
   }
 
   tick(): void {
@@ -99,15 +112,42 @@ export class ProductionSystem {
     for (const type of this.buildings.productionTypes()) {
       const config = this.buildings.productionFor(type);
       if (config === null) continue;
+      // Whether this *kind* of machine is electric is content, so it is asked
+      // once here rather than once per machine: a furnace hall is tens of
+      // thousands of machine-ticks a second and none of them is a new answer.
+      const electric = this.power.consumes(type);
       const machines = this.entities.byType<MachineEntity>(type);
       for (let i = 0; i < machines.length; i++) {
         const machine = machines[i];
-        if (machine !== undefined) this.advance(machine, config);
+        if (machine !== undefined) this.advance(machine, config, electric);
       }
     }
   }
 
-  private advance(machine: MachineEntity, config: ProductionProperties): void {
+  private advance(machine: MachineEntity, config: ProductionProperties, electric: boolean): void {
+    // Power first, because a machine with none does nothing at all and every
+    // other answer below would be a guess about a machine that is not running
+    // (C21). Phase 2 has already settled the ratio for the whole tick (§8), so
+    // this is a lookup rather than a decision.
+    //
+    // The whole of it is inside `if (electric)`, and that is not only tidiness:
+    // a machine that burns fuel is most of the machines in most factories, and
+    // this way it never touches the power system or its enum at all.
+    let working = MachineStatus.Running;
+    if (electric) {
+      const power = this.power.gate(machine);
+      if (power === PowerGate.Unpowered) {
+        this.setStatus(machine, MachineStatus.NoPower);
+        return;
+      }
+      // A tick this machine's share of the supply does not buy it. The status
+      // is deliberately left alone: it was set on the last tick that *did*
+      // count, so the panel reads `low_power` steadily instead of flickering
+      // between that and whatever the machine would otherwise have said.
+      if (power === PowerGate.Starved) return;
+      if (power === PowerGate.Throttled) working = MachineStatus.LowPower;
+    }
+
     const buffers = machineBuffers(machine, config);
     const recipe = this.resolveRecipe(machine, config, buffers);
     if (recipe === null) {
@@ -165,7 +205,7 @@ export class ProductionSystem {
       }
       machine.progressTicks = 0;
     }
-    this.setStatus(machine, MachineStatus.Running);
+    this.setStatus(machine, working);
   }
 
   /* ---------------------------------------------------------------- *
@@ -305,6 +345,12 @@ export class ProductionSystem {
     // quiet until the player answers.
     if (status === MachineStatus.NoRecipe) {
       this.alerts.push({ type: 'machine_no_recipe', entityId: machine.id, x: machine.x, y: machine.y });
+    }
+    // C21. The same test the two above pass: the player has to run a pole, and
+    // a machine standing in open ground will not connect itself. `low_power`
+    // gets no toast — see `views/alert.ts`.
+    if (status === MachineStatus.NoPower) {
+      this.alerts.push({ type: 'no_power_network', entityId: machine.id, x: machine.x, y: machine.y });
     }
   }
 }

@@ -56,9 +56,9 @@ import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
 import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
-import type { MachineStack, MachineView } from './views/building-view.js';
+import type { MachinePowerView, MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
-import type { HudItemCount, HudView } from './views/hud-view.js';
+import type { HudItemCount, HudPowerView, HudView } from './views/hud-view.js';
 import type { PlacementView } from './views/placement-view.js';
 import type { RecipePartView, RecipeView } from './views/recipe-view.js';
 import type { SelectionView } from './views/selection-view.js';
@@ -296,6 +296,26 @@ export class GameController {
       items: freeze(items),
       itemTotal,
       alerts: this.alerts,
+      power: this.powerView(),
+    });
+  }
+
+  /**
+   * The grid, flattened for the HUD, or null when there is no grid (C21).
+   *
+   * Copied field by field rather than handed over, because `PowerSummary` is a
+   * system's answer and a view model is the UI's: §4 lets a panel hold the
+   * second and never the first, and they are free to diverge the moment the
+   * HUD wants something the system does not phrase that way.
+   */
+  private powerView(): HudPowerView | null {
+    const summary = this.simulation.power.summary();
+    if (summary === null) return null;
+    return freeze({
+      supplyKw: summary.supplyKw,
+      demandKw: summary.demandKw,
+      satisfactionPercent: summary.satisfactionPercent,
+      networks: summary.networks,
     });
   }
 
@@ -417,6 +437,10 @@ export class GameController {
       // it has no ports and therefore no contents to list. What it has is a
       // decision, and this is it.
       nextOutput: this.nextOutputOf(entity),
+      // C21. Derived on the spot from phase 2's networks, which are derived
+      // state themselves (§10) — so this is a photograph of a photograph, and
+      // the panel can no more reach a network through it than it can a machine.
+      power: this.powerReadingOf(entity),
       x: entity.x,
       y: entity.y,
       rotation: entity.rotation,
@@ -436,6 +460,17 @@ export class GameController {
    * one output belt is a splitter that will send everything one way, and
    * pointing at a bare tile would say the opposite.
    */
+  private powerReadingOf(entity: Entity): MachinePowerView | null {
+    const reading = this.simulation.power.readingFor(entity);
+    if (reading === null) return null;
+    return freeze({
+      consumptionKw: reading.consumptionKw,
+      productionKw: reading.productionKw,
+      connected: reading.connected,
+      satisfactionPercent: reading.satisfactionPercent,
+    });
+  }
+
   private nextOutputOf(entity: Entity): { readonly x: number; readonly y: number } | null {
     const splitter = asSplitter(entity);
     if (splitter === null) return null;

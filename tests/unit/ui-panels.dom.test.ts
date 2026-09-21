@@ -310,6 +310,48 @@ describe('the update budget', () => {
   });
 });
 
+describe('the power tile (C21)', () => {
+  /** The tile's own element, for its warning class and its tooltip. */
+  function powerTile(root: ParentNode): HTMLElement {
+    for (const tile of root.querySelectorAll<HTMLElement>('.if-hud__tile')) {
+      if (tile.querySelector('.if-hud__label')?.textContent === 'POWER') return tile;
+    }
+    throw new Error('missing HUD tile: POWER');
+  }
+
+  it('reads a dash until there is a grid, and a percentage after', () => {
+    const { root, ui, controller, simulation } = harness;
+
+    runFrames(ui, 60);
+    expect(tileValue(root, 'POWER')).toBe('—');
+    expect(powerTile(root).title).toContain('no network');
+
+    // A pole with nothing on it: a network that exists and is asked for
+    // nothing, which is fully satisfied rather than unknown.
+    controller.dispatch({ type: 'build', buildingId: 'power_pole', x: 3, y: 3, rotation: NORTH });
+    simulation.tick();
+    runFrames(ui, 60);
+
+    expect(tileValue(root, 'POWER')).toBe('100%');
+    expect(powerTile(root).classList.contains('is-warning')).toBe(false);
+    expect(powerTile(root).title).toContain('1 network');
+  });
+
+  it('warns, and says how short it is, when demand outruns supply', () => {
+    const { root, ui, controller, simulation } = harness;
+
+    controller.dispatch({ type: 'build', buildingId: 'power_pole', x: 3, y: 3, rotation: NORTH });
+    // Inside the pole's 5x5 square, so it joins the network and draws on it.
+    controller.dispatch({ type: 'build', buildingId: 'electric_furnace', x: 4, y: 4, rotation: NORTH });
+    simulation.tick();
+    runFrames(ui, 60);
+
+    expect(tileValue(root, 'POWER')).toBe('0%');
+    expect(powerTile(root).classList.contains('is-warning')).toBe(true);
+    expect(powerTile(root).title).toContain('0 kW supplied of 150 kW demanded');
+  });
+});
+
 describe('notifications', () => {
   it('shows exactly one toast per rejected command, with a readable reason', () => {
     const { root, controller, simulation } = harness;

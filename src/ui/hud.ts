@@ -6,15 +6,19 @@
  * research progress, tick rate, alerts"; §11 supplies the icon set and §13's
  * budget table says this panel updates at 5 Hz.
  *
- * ## Two tiles that read "offline"
+ * ## One tile that reads "offline", and one that stopped
  *
- * Power and research have tiles and no data: there is no power network until
- * C21 and no research until C22. They are drawn dimmed rather than left out,
- * because §11's icon set is decided and a HUD that grows two tiles in the
- * middle later is a HUD the player has to re-learn. They carry no view-model
- * field — a `HudView.power` that is always `null` would be a promise the view
- * cannot keep — so the string below is the whole of the placeholder, and C21
- * deletes it by giving the tile something to read.
+ * Research has a tile and no data: there is no research until C22. It is drawn
+ * dimmed rather than left out, because §11's icon set is decided and a HUD that
+ * grows a tile in the middle later is a HUD the player has to re-learn.
+ *
+ * **Power was the other one until C21.** It now reads the worst network's
+ * satisfaction, with supply and demand in the tooltip, and it still shows the
+ * dash before the first pole goes up — because then there genuinely is no
+ * grid, which is a different thing from a system that does not exist yet.
+ * `is-warning` goes on below full satisfaction, which is C21 task 5's "visible
+ * HUD indicator": a factory that has outgrown its generators says so in the
+ * corner of the screen continuously, where a toast per machine would not.
  *
  * ## Ticks per second is measured here, not in the simulation
  *
@@ -79,8 +83,7 @@ export class Hud {
     this.pauseButton.addEventListener('click', this.onTogglePause);
     this.root.append(this.pauseButton);
 
-    // Nothing on screen has data yet; these two never change again.
-    this.setValue('power', OFFLINE);
+    // Research has no data yet, and this never changes again until C22.
     this.setValue('research', OFFLINE);
 
     parent.append(this.root);
@@ -100,6 +103,7 @@ export class Hud {
     this.setValue('buildings', formatCount(view.entityCount));
     this.setValue('map', formatCount(view.exploredChunks));
     this.setValue('alerts', formatCount(view.alerts));
+    this.updatePower(view);
     this.setValue('rate', this.ticksPerSecond.toFixed(1));
     this.setValue('time', formatClock(view.playtimeSeconds));
 
@@ -115,6 +119,31 @@ export class Hud {
     this.pauseButton.removeEventListener('click', this.onTogglePause);
     this.root.remove();
     this.tiles.clear();
+  }
+
+  /**
+   * The power tile: a percentage, a tooltip and a warning state (C21 task 5).
+   *
+   * The percentage is the *worst* network's, because the one the player has to
+   * act on is the one that is short — an aggregate across the factory would
+   * read 100% while a network on the far side of it sat dark.
+   */
+  private updatePower(view: HudView): void {
+    const tile = this.tiles.get('power');
+    if (tile === undefined) return;
+    const power = view.power;
+
+    if (power === null) {
+      this.setValue('power', OFFLINE);
+      tile.root.title = 'POWER — no network yet';
+      tile.root.classList.remove('is-warning');
+      return;
+    }
+
+    this.setValue('power', `${power.satisfactionPercent}%`);
+    const networks = power.networks === 1 ? '1 network' : `${power.networks} networks`;
+    tile.root.title = `POWER — ${formatKw(power.supplyKw)} supplied of ${formatKw(power.demandKw)} demanded, ${networks}`;
+    tile.root.classList.toggle('is-warning', power.satisfactionPercent < 100);
   }
 
   private addTile(key: string, icon: IconName | null, label: string): void {
@@ -160,6 +189,11 @@ export class Hud {
     this.lastTick = tick;
     this.msSinceSample = 0;
   }
+}
+
+/** Kilowatts, or megawatts once there are enough of them to read badly. */
+function formatKw(value: number): string {
+  return value < 1000 ? `${value} kW` : `${(value / 1000).toFixed(1)} MW`;
 }
 
 function formatCount(value: number): string {

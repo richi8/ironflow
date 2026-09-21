@@ -57,6 +57,25 @@ export interface MachineStack {
   readonly capacity: number | null;
 }
 
+/**
+ * A building's place on the grid, for the inspector (C21 task 5).
+ *
+ * Null on the panel for anything that neither draws nor supplies power, which
+ * is most of the table — the same rule `progress` and `recipe` follow, and for
+ * the same reason: a view model carries only what exists, and a belt is not a
+ * machine that is 0% powered.
+ */
+export interface MachinePowerView {
+  /** Kilowatts it draws, or 0 for a generator and for anything that is free. */
+  readonly consumptionKw: number;
+  /** Kilowatts it supplies while burning, or 0 for anything that is not one. */
+  readonly productionKw: number;
+  /** Is it inside some pole's supply area? */
+  readonly connected: boolean;
+  /** Its network's satisfaction, 0..100. Zero when it is on none. */
+  readonly satisfactionPercent: number;
+}
+
 export interface MachineView {
   readonly id: EntityId;
   /** The content id, for looking up a sprite or a description. */
@@ -108,6 +127,15 @@ export interface MachineView {
    * is something they can look at, and it is what the panel prints.
    */
   readonly nextOutput: { readonly x: number; readonly y: number } | null;
+  /**
+   * What it draws or supplies and how its network is doing, or null for a
+   * building with no power role at all (C21).
+   *
+   * It is what turns `no_power` from a verdict into an explanation: the status
+   * says the machine is not running, and this says whether that is because no
+   * pole reaches it or because the network it *is* on cannot keep up.
+   */
+  readonly power: MachinePowerView | null;
   /** The footprint's north-west tile. */
   readonly x: number;
   readonly y: number;
