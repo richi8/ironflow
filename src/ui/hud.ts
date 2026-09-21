@@ -44,6 +44,15 @@ interface Tile {
 export interface HudOptions {
   /** Called when the pause button is pressed. The controller owns the decision. */
   readonly onTogglePause: () => void;
+  /**
+   * Called when the ITEMS tile is pressed (C21A).
+   *
+   * The tile has carried a bare total since C07 with nothing behind it. It is
+   * the obvious place to look for what that total is made of, so it is the
+   * way in — a panel whose only door is a keybinding is a panel most players
+   * never find.
+   */
+  readonly onOpenInventory: () => void;
 }
 
 export class Hud {
@@ -53,6 +62,7 @@ export class Hud {
   private readonly pauseIcon = createIcon('pause');
   private readonly pauseLabel = document.createElement('span');
   private readonly onTogglePause: () => void;
+  private readonly onOpenInventory: () => void;
 
   /** The previous sample, for the measured tick rate. `null` until the second one. */
   private lastTick: number | null = null;
@@ -61,12 +71,14 @@ export class Hud {
 
   constructor(options: HudOptions) {
     this.onTogglePause = options.onTogglePause;
+    this.onOpenInventory = options.onOpenInventory;
   }
 
   mount(parent: HTMLElement): void {
     this.root.className = 'if-hud';
 
     this.addTile('items', 'inventory', 'ITEMS');
+    this.makeButton('items', 'ITEMS — open your inventory (I)', this.onOpenInventory);
     this.addTile('buildings', 'building', 'BUILT');
     this.addTile('power', 'power', 'POWER');
     this.addTile('research', 'research', 'RESEARCH');
@@ -117,8 +129,29 @@ export class Hud {
 
   destroy(): void {
     this.pauseButton.removeEventListener('click', this.onTogglePause);
+    const items = this.tiles.get('items');
+    if (items !== undefined) items.root.removeEventListener('click', this.onOpenInventory);
     this.root.remove();
     this.tiles.clear();
+  }
+
+  /**
+   * Turn a read-out into something clickable.
+   *
+   * A `div` with a role rather than a `<button>`, because the tile is laid
+   * out by `.if-hud__tile` and its `+` sibling border, and swapping the
+   * element would put a second set of button defaults through that rule for
+   * one tile out of eight. The role and the tab stop are what a screen reader
+   * and a keyboard actually need.
+   */
+  private makeButton(key: string, title: string, onActivate: () => void): void {
+    const tile = this.tiles.get(key);
+    if (tile === undefined) return;
+    tile.root.classList.add('is-button');
+    tile.root.title = title;
+    tile.root.setAttribute('role', 'button');
+    tile.root.tabIndex = 0;
+    tile.root.addEventListener('click', onActivate);
   }
 
   /**

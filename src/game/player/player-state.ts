@@ -104,6 +104,28 @@ export const MINE_TICKS_PER_ITEM = TPS / 0.5;
 /** Slots in the player's bag. A **balance number** (C20). */
 export const PLAYER_INVENTORY_SLOTS = 30;
 
+/**
+ * How many separate orders the hand-craft queue holds. A **balance number**
+ * (C21A).
+ *
+ * A bound rather than a design: the queue is authoritative state and it is
+ * fed by a button, so a player leaning on that button must not be able to
+ * grow a save file without limit. Twelve is more distinct things than the
+ * game has hand-craftable recipes, so the cap can only be reached by queueing
+ * the same thing in separate orders, which merging already prevents.
+ */
+export const MAX_CRAFT_ORDERS = 12;
+
+/**
+ * How many of one thing a single `craftItem` command may ask for. A **balance
+ * number** (C21A).
+ *
+ * The ingredients of the whole order are taken at once (see
+ * `systems/crafting-system.ts`), so this is also the bound on how much of the
+ * player's bag one click can move.
+ */
+export const MAX_CRAFT_BATCH = 100;
+
 /* -------------------------------------------------------------------------- *
  * Conversions
  * -------------------------------------------------------------------------- */
@@ -140,6 +162,26 @@ export interface MoveIntent {
 
 const STILL: MoveIntent = Object.freeze({ dx: 0, dy: 0 });
 
+/**
+ * One order in the hand-craft queue: make `remaining` of `recipe`. C21A.
+ *
+ * Plain data, because it is authoritative state and §10 wants it in a save
+ * — and a numeric `recipe` rather than a string one, for the reason every
+ * other persisted reference is numeric: the string ids are content and the
+ * save carries a mapping (§14).
+ *
+ * The ingredients of **all** `remaining` crafts have already left the bag by
+ * the time an order exists. See `systems/crafting-system.ts` for why, and for
+ * what cancelling one gives back.
+ */
+export interface CraftOrder {
+  readonly recipe: number;
+  /** How many are still to be made, including the one in progress. Above 0. */
+  remaining: number;
+  /** Integer ticks into the one being made now (§6 R3). */
+  progressTicks: number;
+}
+
 /** The player, as a save file sees it. Plain data, sorted where it can be. */
 export interface SerializedPlayer {
   readonly subX: number;
@@ -151,6 +193,11 @@ export interface SerializedPlayer {
   readonly miningY: number | null;
   readonly miningTicks: number;
   readonly inventory: SerializedInventory;
+  /**
+   * The hand-craft queue, head first (C21A). Order is the *decision*, not an
+   * accident of a container, so it is serialized as written and never sorted.
+   */
+  readonly crafts: readonly CraftOrder[];
 }
 
 export interface PlayerStateOptions {
@@ -196,6 +243,19 @@ export class PlayerState {
 
   /** Integer ticks of progress toward the next item (§6 R3). */
   miningTicks = 0;
+
+  /**
+   * What the player is making by hand, head first. Authoritative (§10), C21A.
+   *
+   * A plain array because that is what it is: an ordered list the player put
+   * in an order on purpose. §6 R4 is about containers whose *iteration order
+   * is incidental*; this one's order is the state.
+   *
+   * Only `CraftingSystem` writes here, and the ingredients for every order in
+   * it are already out of `inventory` — so this array and the bag are two
+   * halves of one fact, and nothing may edit either without the other.
+   */
+  readonly crafts: CraftOrder[] = [];
 
   /**
    * Everything the player is carrying: ore, plates, gears and buildings.
@@ -315,6 +375,13 @@ export class PlayerState {
       miningY: this.miningY,
       miningTicks: this.miningTicks,
       inventory: this.inventory.toJSON(),
+      // Copied, not handed over: `toJSON` is read by the determinism harness
+      // and by C24's save, and neither may hold a live order it could edit.
+      crafts: this.crafts.map((order) => ({
+        recipe: order.recipe,
+        remaining: order.remaining,
+        progressTicks: order.progressTicks,
+      })),
     };
   }
 }

@@ -54,16 +54,29 @@ import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-regis
 import type { Simulation } from './simulation.js';
 import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
+import type { Inventory } from './items/inventory.js';
 import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
 import type { MachinePowerView, MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudPowerView, HudView } from './views/hud-view.js';
+import type {
+  CraftOptionView,
+  CraftPartView,
+  CraftQueueView,
+  InventorySlotView,
+  InventoryView,
+} from './views/inventory-view.js';
 import type { PlacementView } from './views/placement-view.js';
 import type { RecipePartView, RecipeView } from './views/recipe-view.js';
 import type { SelectionView } from './views/selection-view.js';
 import type { PlayerActivity, PlayerView } from './views/player-view.js';
-import { BUILD_RANGE_TILES, MINE_RANGE_TILES } from './player/player-state.js';
+import {
+  BUILD_RANGE_TILES,
+  MAX_CRAFT_BATCH,
+  MINE_RANGE_TILES,
+  type CraftOrder,
+} from './player/player-state.js';
 import { NORTH, type Rotation, type TileCoord } from './world/coordinates.js';
 
 /** Hotbar slots the number row reaches. §13's toolbar, C07 task 3. */
@@ -382,6 +395,95 @@ export class GameController {
   }
 
   /**
+   * The bag, the craft grid and the queue, as one snapshot (C21A).
+   *
+   * §13's `InventoryPanel`, finally given something to read. Everything is
+   * derived here for the reason every view model is: the stack sizes, the item
+   * names and the hand-craft durations are registries, and §4 lets the UI hold
+   * a frozen answer and never the thing that answered.
+   *
+   * It is built from scratch on each call, which is a dozen small objects at
+   * 5 Hz while the panel is open and nothing at all while it is shut — see
+   * `ui/ui.ts`, which does not ask when the panel is hidden.
+   */
+  getInventoryView(): InventoryView {
+    const bag = this.simulation.player.inventory;
+
+    const items: InventorySlotView[] = [];
+    for (const definition of this.simulation.items.all()) {
+      const itemId = this.simulation.items.idOf(definition.id);
+      const count = bag.count(itemId);
+      items.push(
+        freeze({
+          itemId: definition.id,
+          name: definition.name,
+          count,
+          // The same ceiling the container itself uses, so "27/30 slots" and
+          // the rows beneath it can never disagree about what a bag is full of.
+          slots: Math.ceil(count / definition.stackSize),
+          stackSize: definition.stackSize,
+        }),
+      );
+    }
+
+    const crafts = this.simulation.recipes
+      .handCraftable()
+      .map((recipe) => this.craftOptionView(recipe, bag));
+
+    const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
+
+    return freeze({
+      items: freeze(items),
+      slots: bag.slots,
+      usedSlots: bag.usedSlots,
+      crafts: freeze(crafts),
+      queue: queue.length === 0 ? EMPTY_QUEUE : freeze(queue),
+    });
+  }
+
+  /** One row of the craft grid: a recipe, its bill, and how many are payable. */
+  private craftOptionView(recipe: Recipe, bag: Inventory): CraftOptionView {
+    let craftable = MAX_CRAFT_BATCH;
+    const inputs: CraftPartView[] = recipe.inputs.map((stack) => {
+      const held = bag.count(stack.itemId);
+      craftable = Math.min(craftable, Math.floor(held / stack.count));
+      const part = this.partView(stack.itemId, stack.count);
+      return freeze({ itemId: part.itemId, name: part.name, count: part.count, held });
+    });
+
+    const first = recipe.outputs[0];
+    return freeze({
+      id: recipe.id,
+      name: first === undefined ? recipe.id : this.partView(first.itemId, first.count).name,
+      yield: first?.count ?? 1,
+      inputs: freeze(inputs),
+      craftTicks: this.simulation.crafts.handTicksFor(recipe.recipeId),
+      craftable,
+    });
+  }
+
+  /** One order in the hand-craft queue. Only the head has a progress bar. */
+  private craftQueueView(order: CraftOrder, index: number): CraftQueueView {
+    const recipe = this.simulation.recipes.byId(order.recipe);
+    const duration = this.simulation.crafts.handTicksFor(order.recipe);
+    const first = recipe.outputs[0];
+    // Guarded for the reason `recipeView` guards its rate (§6 R7): a recipe
+    // that has stopped being hand-craftable must not divide by zero here.
+    const progress = index === 0 && duration > CANNOT_CRAFT ? order.progressTicks / duration : null;
+    return freeze({
+      index,
+      recipeId: recipe.id,
+      name: first === undefined ? recipe.id : this.partView(first.itemId, first.count).name,
+      remaining: order.remaining,
+      progress,
+      // Full progress and still at the head is exactly the state the system
+      // parks a craft in when the bag has no room for it. The panel says so;
+      // the toast said it once, a while ago.
+      blocked: progress !== null && order.progressTicks >= duration,
+    });
+  }
+
+  /**
    * One building, as the inspector draws it. `null` for an id nothing answers to.
    *
    * Everything here is derived on the spot from authoritative state (§10) and
@@ -649,6 +751,23 @@ export class GameController {
     return this.dispatch({ type: 'setRecipe', entityId, recipeId });
   }
 
+  /**
+   * Queue `count` hand-crafts of a recipe (C21A).
+   *
+   * The ingredients leave the bag on the tick this is applied, not when each
+   * item comes up — see `systems/crafting-system.ts` for why. The panel
+   * pre-checks affordability to grey the button out, which §7 permits; the
+   * simulation is still the authority.
+   */
+  craftItem(recipeId: string, count = 1): CommandResult {
+    return this.dispatch({ type: 'craftItem', recipeId, count });
+  }
+
+  /** Drop the order at `index` and take its ingredients back (C21A). */
+  cancelCraft(index: number): CommandResult {
+    return this.dispatch({ type: 'cancelCraft', index });
+  }
+
   /* ---------------------------------------------------------------- *
    * Pause
    * ---------------------------------------------------------------- */
@@ -847,6 +966,9 @@ const EMPTY_STACKS: readonly MachineStack[] = Object.freeze([]);
 
 /** A machine whose category has no recipes at all. Shared and frozen. */
 const EMPTY_RECIPES: readonly RecipeView[] = Object.freeze([]);
+
+/** Nothing being made by hand, which is most of the time. Shared and frozen. */
+const EMPTY_QUEUE: readonly CraftQueueView[] = Object.freeze([]);
 
 /**
  * Freeze a view before it leaves the controller (§13).

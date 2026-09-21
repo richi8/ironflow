@@ -80,6 +80,14 @@ export type InputAction =
   /** Open and close the build menu (C07). */
   | 'ui.toggleBuildMenu'
   /**
+   * Open and close the inventory, which is also the hand-craft bench (C21A).
+   *
+   * Two keys, and neither of them is a compromise. `I` is what the word
+   * starts with and what the HUD's tooltip names; `E` is where this genre has
+   * put it for a decade, and the hand that reaches for it is already on WASD.
+   */
+  | 'ui.toggleInventory'
+  /**
    * Show what every machine is making, over the world (C20 task 5).
    *
    * A **toggle**, not a hold, which is the one decision in it. The genre's
@@ -109,7 +117,7 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
  * game in this genre has trained the player's left hand to expect. `B` opens
  * the build menu and `P` pauses, both of which are free: neither is reachable
  * by the left hand while it is on the number row, so neither can be hit by
- * accident mid-drag.
+ * accident mid-drag. `I` and `E` both open the bag (C21A) — see the action.
  */
 export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ArrowUp: 'camera.panUp',
@@ -130,6 +138,8 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ShiftLeft: 'machine.copyModifier',
   ShiftRight: 'machine.copyModifier',
   KeyB: 'ui.toggleBuildMenu',
+  KeyI: 'ui.toggleInventory',
+  KeyE: 'ui.toggleInventory',
   // Both alts, because which one is under the player's thumb depends on the
   // keyboard, and `KeyV` beside it for the platforms that swallow alt entirely.
   AltLeft: 'ui.toggleAltMode',

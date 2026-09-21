@@ -25,6 +25,8 @@ export interface ToolbarOptions {
   /** Slot number, 1-based. The controller decides what that means. */
   readonly onSelectSlot: (slot: number) => void;
   readonly onToggleBuildMenu: () => void;
+  /** Open or close the inventory panel (C21A). */
+  readonly onToggleInventory: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -34,6 +36,7 @@ export class Toolbar {
   private readonly root = document.createElement('div');
   private readonly slots: Slot[] = [];
   private readonly menuButton = document.createElement('button');
+  private readonly bagButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -50,6 +53,16 @@ export class Toolbar {
     this.menuButton.title = 'Open the build menu (B)';
     this.menuButton.addEventListener('click', this.handleMenu);
     this.root.append(this.menuButton);
+
+    // Beside BUILD rather than in the HUD's row of read-outs, because it is
+    // the same kind of thing: a panel the player opens with their left hand
+    // while the right one is on the map.
+    this.bagButton.type = 'button';
+    this.bagButton.className = 'if-toolbar__menu';
+    this.bagButton.textContent = 'BAG';
+    this.bagButton.title = 'Open your inventory and craft by hand (I)';
+    this.bagButton.addEventListener('click', this.handleBag);
+    this.root.append(this.bagButton);
 
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
@@ -81,8 +94,14 @@ export class Toolbar {
     this.menuButton.setAttribute('aria-pressed', String(open));
   }
 
+  setInventoryOpen(open: boolean): void {
+    this.bagButton.classList.toggle('is-active', open);
+    this.bagButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.menuButton.removeEventListener('click', this.handleMenu);
+    this.bagButton.removeEventListener('click', this.handleBag);
     for (const slot of this.slots) slot.button.removeEventListener('click', this.handleSlot);
     this.root.remove();
     this.slots.length = 0;
@@ -90,6 +109,10 @@ export class Toolbar {
 
   private readonly handleMenu = (): void => {
     this.options.onToggleBuildMenu();
+  };
+
+  private readonly handleBag = (): void => {
+    this.options.onToggleInventory();
   };
 
   /**

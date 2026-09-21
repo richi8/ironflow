@@ -63,7 +63,17 @@ export type AlertType =
    * `output_full` of power, it clears itself the moment demand drops, and the
    * HUD's power tile carries it instead (C21 task 5).
    */
-  | 'no_power_network';
+  | 'no_power_network'
+  /**
+   * C21A: a hand-craft that has finished and has nowhere to go.
+   *
+   * It passes the test above on both counts. The player has to do something —
+   * empty the bag into a chest — and nothing will change on its own: the
+   * craft is *finished*, so the queue is not going to move until a slot
+   * frees. It is raised once per blocked order, not once per tick, for the
+   * reason the miner's is.
+   */
+  | 'craft_blocked';
 
 /**
  * It carries the tile as well as the entity id because the id alone is not

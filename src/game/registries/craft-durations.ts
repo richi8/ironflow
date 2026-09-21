@@ -31,6 +31,14 @@
  *
  * Both readings satisfy the part of task 5 that is load-bearing: the division
  * happens once, at startup, and a tick only ever compares two integers.
+ *
+ * ## The player is in the table too (C21A)
+ *
+ * Hand-crafting runs the same recipes at a speed of its own, so it is one
+ * more row — `handTicksFor(recipe)` — rather than a second piece of
+ * arithmetic somewhere else. It is not indexed by `EntityType` because the
+ * player is not an entity: they have no type number, and inventing one so
+ * they could share a row would put a fake building in the content table.
  */
 
 import { ENTITY_TYPE_COUNT, type EntityType } from '../entities/entity-types.js';
@@ -39,6 +47,22 @@ import { FIRST_RECIPE_ID, type RecipeId, type RecipeRegistry } from './recipe-re
 
 /** A recipe this machine cannot run at all. Never a real duration. */
 export const CANNOT_CRAFT = 0;
+
+/**
+ * How fast the player crafts with their bare hands. A **balance number** (C21A).
+ *
+ * The same 0.5 as a tier-1 assembler, which is a decision and not a
+ * coincidence: it makes the assembler's whole value **automation** rather
+ * than speed. A player who builds one is not buying a faster gear, they are
+ * buying a gear made while they are somewhere else, and that is pillar 1
+ * stated as a number.
+ *
+ * The genre's usual answer is the opposite — hand-crafting faster than the
+ * first machine, so early automation is a sacrifice — and it is rejected here
+ * for the reason C20's report names: the opening is the weak part of this
+ * game, and it is weak because nothing in it costs time.
+ */
+export const HAND_CRAFTING_SPEED = 0.5;
 
 export class CraftDurations {
   /**
@@ -50,6 +74,9 @@ export class CraftDurations {
    * recipes is a table small enough that a lookup beats any cleverness.
    */
   private readonly ticks: readonly (readonly number[])[];
+
+  /** `[recipeId]` -> ticks by hand, or `CANNOT_CRAFT`. See `handTicksFor`. */
+  private readonly handTicks: readonly number[];
 
   constructor(buildings: BuildingRegistry, recipes: RecipeRegistry) {
     const rows: number[][] = [];
@@ -70,6 +97,25 @@ export class CraftDurations {
       rows.push(row);
     }
     this.ticks = Object.freeze(rows.map((row) => Object.freeze(fill(row))));
+
+    const hand: number[] = [];
+    for (const recipe of recipes.all()) {
+      if (!recipe.handCraftable) continue;
+      hand[recipe.recipeId] = Math.max(1, Math.round(recipe.durationTicks / HAND_CRAFTING_SPEED));
+    }
+    this.handTicks = Object.freeze(fill(hand));
+  }
+
+  /**
+   * Ticks one craft of `recipeId` takes in the player's hands, or
+   * `CANNOT_CRAFT` for a recipe §15 says needs a machine (C21A).
+   *
+   * The *same* answer the crafting system counts against and the inventory
+   * panel prints, so a craft that says four seconds takes four seconds.
+   */
+  handTicksFor(recipeId: RecipeId): number {
+    if (recipeId < FIRST_RECIPE_ID) return CANNOT_CRAFT;
+    return this.handTicks[recipeId] ?? CANNOT_CRAFT;
   }
 
   /**

@@ -48,6 +48,9 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   nothing_to_take: 'There is none of that in there.',
   not_accepted: 'That machine does not take items.',
   nothing_to_give: 'You are not carrying any of that.',
+  not_craftable: 'That needs a machine — your hands cannot make it.',
+  craft_queue_full: 'You are already making as many different things as you can.',
+  nothing_queued: 'There is nothing there to cancel.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {
@@ -71,6 +74,7 @@ const ALERT_TEXT: Readonly<Record<AlertType, (alert: Alert) => string>> = Object
     `The building at ${alert.x}, ${alert.y} is not on a power network — run a pole out to it.`,
   machine_no_recipe: (alert) =>
     `The machine at ${alert.x}, ${alert.y} has not been told what to make — open it and pick a recipe.`,
+  craft_blocked: () => 'What you are making has nowhere to go — your bag is full.',
 });
 
 export function alertMessage(alert: Alert): string {

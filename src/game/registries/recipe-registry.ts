@@ -58,6 +58,19 @@ export interface RecipeDefinition {
   readonly outputs: readonly ItemStack[];
   readonly seconds: number;
   readonly category: RecipeCategory;
+  /**
+   * May the player make this with their bare hands? See ironflow.md C21A.
+   *
+   * §15 names five buildings "hand-craftable without a machine (so a new game
+   * is never soft-locked)" and says everything else requires an assembler.
+   * That is a property of the *recipe*, so it is a column of the content
+   * table rather than a list kept in a system (§19 rule 17).
+   *
+   * Absent means **no**, which is the right default twice over: every
+   * smelting recipe needs a furnace by definition, and a recipe added in a
+   * later chunk has to make the decision out loud rather than inherit one.
+   */
+  readonly handCraftable?: boolean;
 }
 
 /** An ingredient or a product, in the ids the simulation counts in. */
@@ -74,6 +87,8 @@ export interface Recipe {
   readonly outputs: readonly RecipeStack[];
   readonly durationTicks: number;
   readonly category: RecipeCategory;
+  /** Can the player make this by hand (C21A)? Never optional at runtime. */
+  readonly handCraftable: boolean;
 }
 
 function durationTicks(definition: RecipeDefinition): number {
@@ -93,6 +108,13 @@ function validate(definition: RecipeDefinition, items: ItemRegistry): void {
   }
   if (durationTicks(definition) < 1) {
     throw new Error(`RecipeRegistry: ${where} takes ${definition.seconds} seconds, which rounds to under one tick.`);
+  }
+  // C21A. Smelting is what a furnace is *for*: a hand-craftable smelting
+  // recipe would make the first building in the game pointless, and §15's
+  // hand-craft list is five assembled things and no plates. Refused at
+  // registry build, so it is a content error on the first frame.
+  if (definition.handCraftable === true && definition.category === 'smelting') {
+    throw new Error(`RecipeRegistry: ${where} is smelting and cannot be hand-craftable; smelting needs a furnace.`);
   }
   checkStacks(definition.inputs, `${where} inputs`, items);
   checkStacks(definition.outputs, `${where} outputs`, items);
@@ -139,6 +161,8 @@ export class RecipeRegistry {
   private readonly byCategoryMap = new Map<RecipeCategory, readonly Recipe[]>();
   /** category -> item -> the one recipe that item selects, or AMBIGUOUS. */
   private readonly inputIndex = new Map<RecipeCategory, Map<ItemId, Recipe | null>>();
+  /** The `handCraftable` rows, in content order. See `handCraftable()`. */
+  private readonly byHand: readonly Recipe[];
 
   constructor(definitions: readonly RecipeDefinition[], items: ItemRegistry) {
     const built: Recipe[] = [];
@@ -156,6 +180,7 @@ export class RecipeRegistry {
         outputs: resolve(definition.outputs, items),
         durationTicks: durationTicks(definition),
         category: definition.category,
+        handCraftable: definition.handCraftable === true,
       });
       built.push(recipe);
       dense.push(recipe);
@@ -167,6 +192,7 @@ export class RecipeRegistry {
     }
     this.recipes = Object.freeze(built);
     this.byRecipeId = Object.freeze(dense);
+    this.byHand = Object.freeze(built.filter((recipe) => recipe.handCraftable));
     for (const [category, bucket] of categories) this.byCategoryMap.set(category, Object.freeze(bucket));
   }
 
@@ -226,6 +252,17 @@ export class RecipeRegistry {
   forInput(category: RecipeCategory, itemId: ItemId): Recipe | null {
     if (itemId < FIRST_ITEM_ID) return null;
     return this.inputIndex.get(category)?.get(itemId) ?? null;
+  }
+
+  /**
+   * Every recipe the player's own hands can run, in content order (C21A).
+   *
+   * Content order because that is what keeps the craft grid from reshuffling
+   * itself between two frames, and because adding a recipe puts it where the
+   * content author put it — the same rule the inspector's picker follows.
+   */
+  handCraftable(): readonly Recipe[] {
+    return this.byHand;
   }
 
   /** True when some recipe in the category takes this item, ambiguous or not. */

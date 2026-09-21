@@ -16,6 +16,7 @@ import { RecipeRegistry } from './registries/recipe-registry.js';
 import { CraftDurations } from './registries/craft-durations.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
+import { CraftingSystem } from './systems/crafting-system.js';
 import { HandSystem } from './systems/hand-system.js';
 import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
@@ -153,6 +154,12 @@ export class Simulation {
   private readonly playerSystem: PlayerSystem;
 
   /**
+   * Hand-crafting (C21A), phase 8. It owns the `craftItem` and `cancelCraft`
+   * commands and the queue on `PlayerState` that they write to.
+   */
+  private readonly craftingSystem: CraftingSystem;
+
+  /**
    * The player's hands: the `takeItems`, `insertItems` (C12) and `setRecipe`
    * (C16) commands.
    *
@@ -274,6 +281,12 @@ export class Simulation {
       items: this.items,
       recipes: this.recipes,
       player: this.player,
+    });
+    this.craftingSystem = new CraftingSystem({
+      player: this.player,
+      recipes: this.recipes,
+      crafts: this.crafts,
+      alerts: this.alerts,
     });
     this.playerSystem = new PlayerSystem({
       world: this.world,
@@ -418,9 +431,15 @@ export class Simulation {
 
     // Phase 7 arrives with C22.
 
-    // Phase 8 — player. Movement and manual mining (C10). It runs after every
-    // machine so that the world a step of walking is judged against is the one
-    // the tick settled on, not a half-updated one.
+    // Phase 8 — player. Movement, manual mining (C10) and hand-crafting
+    // (C21A). It runs after every machine so that the world a step of walking
+    // is judged against is the one the tick settled on, not a half-updated one.
+    //
+    // Crafting goes first within the phase, and the order is visible: a craft
+    // that completes this tick is in the bag before `mineTile` looks for room
+    // in it, so a player mining beside a finishing craft sees the two in the
+    // order they happened rather than in the order the systems were written.
+    this.craftingSystem.tick();
     this.playerSystem.tick();
 
     // Phase 9 — cleanup. Deferred removals are applied here and nowhere else,
@@ -443,7 +462,7 @@ export class Simulation {
    *
    * Each later chunk replaces one arm of this with a call into its system —
    * C10 `movePlayer` and `mineTile`, C12 `takeItems` and `insertItems`, C16
-   * `setRecipe`, C22 `startResearch`.
+   * `setRecipe`, C21A `craftItem` and `cancelCraft`, C22 `startResearch`.
    * There is deliberately no handler registry: a switch is smaller, it is
    * exhaustively checked by the compiler, and a registry would be an
    * abstraction for a plugin system nobody wants (§19 rule 10).
@@ -474,6 +493,10 @@ export class Simulation {
         return this.hands.insert(command.entityId, command.itemId, command.amount);
       case 'setRecipe':
         return this.hands.setRecipe(command.entityId, command.recipeId);
+      case 'craftItem':
+        return this.craftingSystem.craft(command.recipeId, command.count);
+      case 'cancelCraft':
+        return this.craftingSystem.cancel(command.index);
       case 'stopMining':
         // A no-op when nothing is being mined. Releasing the button over empty
         // ground is not a mistake, and telling the player it was would put a

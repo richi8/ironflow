@@ -43,6 +43,16 @@ export type Command =
   | { readonly type: 'insertItems'; readonly entityId: EntityId; readonly itemId: string; readonly amount: number }
   | { readonly type: 'takeItems'; readonly entityId: EntityId; readonly itemId: string; readonly amount: number }
   | { readonly type: 'startResearch'; readonly technologyId: string }
+  /**
+   * Queue `count` hand-crafts of `recipeId`. Added in C21A; see the note below.
+   *
+   * The ingredients leave the bag when the order is queued, not when each
+   * item's craft begins — so this command is the moment the player spends
+   * what they are carrying, and `cancelCraft` is the only way to get it back.
+   */
+  | { readonly type: 'craftItem'; readonly recipeId: string; readonly count: number }
+  /** Drop the order at `index` in the hand-craft queue and refund it (C21A). */
+  | { readonly type: 'cancelCraft'; readonly index: number }
   | { readonly type: 'movePlayer'; readonly dx: number; readonly dy: number }
   | { readonly type: 'mineTile'; readonly x: number; readonly y: number }
   /**
@@ -121,7 +131,20 @@ export type CommandRejectionReason =
   /** The machine has no input buffer, or none that accepts that item. */
   | 'not_accepted'
   /** The player's bag holds none of the item they tried to insert (C15). */
-  | 'nothing_to_give';
+  | 'nothing_to_give'
+  /* Added in C21A. */
+  /**
+   * §15 says that recipe needs a machine.
+   *
+   * Separate from `unknown_recipe`, which is about an id nothing answers to:
+   * "there is no such thing" and "you cannot make that with your hands" send
+   * the player to two different places.
+   */
+  | 'not_craftable'
+  /** The hand-craft queue already holds `MAX_CRAFT_ORDERS` orders. */
+  | 'craft_queue_full'
+  /** There is no order at that index to cancel. */
+  | 'nothing_queued';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {
@@ -179,6 +202,13 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
       return isCount(command.amount) ? null : 'malformed';
     case 'startResearch':
       return isName(command.technologyId) ? null : 'malformed';
+    case 'craftItem':
+      if (!isName(command.recipeId)) return 'malformed';
+      return isCount(command.count) ? null : 'malformed';
+    case 'cancelCraft':
+      // Zero is the order being made right now, so this is the one index in
+      // the game that is allowed to be it.
+      return Number.isInteger(command.index) && command.index >= 0 ? null : 'malformed';
     case 'movePlayer':
       // Deliberately only "is a number", which C10 kept: only the *sign* of
       // each component is read, because the command carries a direction and

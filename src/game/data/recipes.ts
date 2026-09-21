@@ -52,6 +52,29 @@
  * furnace — under that same rule: each is a building that can now be placed
  * and does something. The lab and the radar, and with them `make_frame` and
  * `make_data_core`, still wait for C22 and C23.
+ *
+ * ## `handCraftable` (C21A)
+ *
+ * §15: "Hand-craftable without a machine (so a new game is never soft-locked):
+ * `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they
+ * need. Everything else requires an assembler."
+ *
+ * Eight rows carry the flag: §15's five, plus `make_gear` — which is the
+ * "gears they need" said out loud — plus `make_wire` and `make_circuit`,
+ * because the inserter and the miner each want a circuit and a list that
+ * stops one ingredient short of its own entries is not a list. **The plates
+ * are not among them**, and cannot be: a plate is smelted, smelting is what a
+ * furnace is for, and `RecipeRegistry` refuses a hand-craftable smelting
+ * recipe outright.
+ *
+ * The consequence, written down because it is the one thing §15's sentence
+ * does not survive contact with: **hand-crafting alone does not bootstrap a
+ * factory from nothing.** `make_furnace` takes brick, brick is baked in a
+ * furnace, and the loop closes only because the player is *given* two. The
+ * soft-lock guarantee therefore rests on the starting kit and on demolition
+ * refunding in full, exactly as C20 said it already did — hand-crafting makes
+ * the opening playable without the kit's *assembler*, which is the gate §15
+ * actually cares about, and not without its furnace.
  */
 
 import type { RecipeDefinition } from '../registries/recipe-registry.js';
@@ -91,6 +114,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'gear', count: 1 }],
     seconds: 1.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_wire',
@@ -98,6 +122,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'copper_wire', count: 2 }],
     seconds: 0.5,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_circuit',
@@ -108,6 +133,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'circuit', count: 1 }],
     seconds: 1.0,
     category: 'crafting',
+    handCraftable: true,
   },
 
   /* ---------------------------------------------------------------------- *
@@ -123,6 +149,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'miner', count: 1 }],
     seconds: 2.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // Two belts per craft, the one recipe in the game that makes more of its
@@ -136,6 +163,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'belt', count: 2 }],
     seconds: 0.5,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_splitter',
@@ -158,6 +186,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'inserter', count: 1 }],
     seconds: 0.5,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // The only building made of brick, and therefore the only consumer stone
@@ -167,6 +196,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'furnace', count: 1 }],
     seconds: 2.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_assembler',
@@ -185,6 +215,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'chest', count: 1 }],
     seconds: 0.5,
     category: 'crafting',
+    handCraftable: true,
   },
 
   /* ---------------------------------------------------------------------- *

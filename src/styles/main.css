@@ -147,6 +147,23 @@ body {
   color: var(--if-warn);
 }
 
+/* A read-out that is also a door (C21A). It keeps the tile's layout — see
+   `Hud.makeButton` — and gains only the affordance. */
+.if-hud__tile.is-button {
+  cursor: pointer;
+}
+
+.if-hud__tile.is-button:hover,
+.if-hud__tile.is-button:focus-visible {
+  color: var(--if-text);
+  outline: none;
+}
+
+.if-hud__tile.is-button:hover .if-hud__label,
+.if-hud__tile.is-button:focus-visible .if-hud__label {
+  color: var(--if-accent);
+}
+
 .if-hud__label {
   color: var(--if-text-dim);
   letter-spacing: 0.08em;
@@ -628,6 +645,275 @@ body {
 .if-stack__take:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* --- Inventory & hand-crafting (C21A) ------------------------------------- *
+ *
+ * The one panel that takes the middle of the screen, and it is allowed to
+ * because it is the one panel the player stops to read: the bag on the left,
+ * what those items can become on the right, and the queue under it. It clears
+ * the HUD above and the toolbar below, and opening it puts the build menu
+ * away — they want the same space and answer the same question from opposite
+ * ends.
+ * -------------------------------------------------------------------------- */
+
+.if-inventory {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.if-inventory__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--if-stroke);
+}
+
+.if-inventory__title {
+  margin: 0;
+  color: var(--if-accent);
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: 0.12em;
+}
+
+.if-inventory__slots {
+  flex: 1;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-align: right;
+}
+
+.if-inventory__slots.is-warning {
+  color: var(--if-warn);
+}
+
+.if-inventory__body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 0;
+}
+
+.if-inventory__column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The label rows are fixed; only the lists between them scroll, so the
+   headings stay put however much ore the player is carrying. */
+.if-inventory__column > .if-inspector__label {
+  flex: none;
+  margin-bottom: 4px;
+}
+
+.if-inventory__column > .if-inspector__label + * {
+  margin-bottom: 8px;
+}
+
+.if-inventory__empty {
+  flex: none;
+  padding: 6px 2px;
+  color: var(--if-text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.if-bag {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.if-bag-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+}
+
+.if-bag-cell + .if-bag-cell {
+  margin-top: 3px;
+}
+
+.if-bag-cell__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-bag-cell__count {
+  color: var(--if-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-bag-cell__slots {
+  min-width: 6ch;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  text-align: right;
+}
+
+.if-crafts {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.if-craft {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-craft:hover:not(:disabled) {
+  border-color: var(--if-accent);
+  color: var(--if-text);
+}
+
+.if-craft:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The bill is what is short, so that is the line that goes red — not the
+   whole button, which would hide which ingredient is missing. */
+.if-craft.is-unaffordable .if-craft__parts {
+  color: var(--if-danger);
+}
+
+.if-craft__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-craft__time {
+  color: var(--if-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.if-craft__parts {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--if-text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-queue {
+  flex: none;
+  max-height: 34%;
+  overflow-y: auto;
+}
+
+.if-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+}
+
+.if-queue-row + .if-queue-row {
+  margin-top: 3px;
+}
+
+.if-queue-row__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-queue-row__remaining {
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-queue-row__track {
+  display: block;
+  overflow: hidden;
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--if-bg-deep);
+}
+
+.if-queue-row__bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--if-accent);
+}
+
+/* An order that is queued but not started has a track and no bar; one that
+   has finished with nowhere to go turns the whole row amber, because that is
+   the state the player has to act on (§13: a stall must explain itself). */
+.if-queue-row[data-state='waiting'] .if-queue-row__track {
+  opacity: 0.4;
+}
+
+.if-queue-row[data-state='blocked'] {
+  color: var(--if-warn);
+}
+
+.if-queue-row[data-state='blocked'] .if-queue-row__bar {
+  background: var(--if-warn);
+}
+
+.if-queue-row__cancel {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.if-queue-row__cancel:hover {
+  border-color: var(--if-danger);
+  color: var(--if-text);
 }
 
 /* --- Notifications -------------------------------------------------------- */

@@ -5,7 +5,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C21 complete — the factory has a grid.** Generator, power pole and electric furnace ship; the electric miner does not, and §15's power column is charged only from `power_1` onward. See C21's deviations. Next: C22 — research. |
+| **Status** | **C21A complete — the bag has a door, and the player has hands.** §13's inventory panel exists at last, and hand-crafting is in: eight of §15's recipes, a queue, and a craft that costs real time. The *opening* is still given rather than earned — that is a content change and it is named in C21A's "Noticed, not fixed". Next: C22 — research. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | Chunk **C22 — Research & progression** |
@@ -576,10 +576,24 @@ export type Command =
   | { type: 'insertItems'; entityId: EntityId; itemId: string; amount: number }
   | { type: 'takeItems';  entityId: EntityId; itemId: string; amount: number }
   | { type: 'startResearch'; technologyId: string }
+  | { type: 'craftItem';  recipeId: string; count: number }   // added in C21A
+  | { type: 'cancelCraft'; index: number }                    // added in C21A
   | { type: 'movePlayer'; dx: number; dy: number }
   | { type: 'mineTile';   x: number; y: number }
   | { type: 'stopMining' };                      // added in C10, see below
 ```
+
+**Implementation note (C21A).** `craftItem` and `cancelCraft` are the two
+members hand-crafting needed, and they are owned by
+`game/systems/crafting-system.ts`. The thing worth writing down is **when the
+ingredients move**: `craftItem` takes the whole order's bill out of the bag on
+the tick it is applied, not as each item comes up. That is what makes an order
+in the queue an order that will finish — no stalled state to explain (pillar
+3) — and it is why `cancelCraft` exists at all, since a refund is then the
+only way back. The refusals are `unknown_recipe`, `not_craftable` (§15 says
+that one needs a machine), `unaffordable` and `craft_queue_full`; `cancelCraft`
+answers `nothing_queued`, or `inventory_full` when the refund will not fit,
+because a cancel that voided four gears would be worse than the queue.
 
 **Implementation note (C16).** `setRecipe` joined them there. It is the player
 reaching into a machine — it hands the ingredients of the old recipe back
@@ -678,6 +692,13 @@ accumulator.
 Also handle `visibilitychange` by resetting `last` on resume, and pause the loop
 outright when a modal save/load dialog is open.
 
+**Implementation note (C21A).** Phase 8 has a second system in it. Hand-crafting
+(`crafting-system.ts`) runs **before** movement and manual mining, and the
+order is visible to the player: a craft that completes this tick is in the bag
+before a step of walking or a swing of the pick is judged against it, so a
+player mining beside a finishing craft sees the two in the order they happened
+rather than in the order the systems were written.
+
 **Implementation note (C21).** Phase 2 exists. It resolves the pole graph, sums
 each network's demand and supply, and divides — in that order, and before any
 consumer is visited, which is what makes "every machine in the tick sees one
@@ -723,7 +744,7 @@ changing it is a deliberate act with a changelog entry.
 5.  belts             move items along belts, hand off between belts
 6.  inserters         transfer items between belts / machines / chests
 7.  research          consume science, advance progress, apply unlocks
-8.  player            movement, manual mining progress
+8.  player            movement, manual mining, hand-crafting
 9.  cleanup           process removals, compact stores, emit events
 ```
 
@@ -1055,6 +1076,27 @@ stopped while paused. Two consequences worth writing down:
   only one: "paused" is what it has to say, and it cannot say it from a lane
   that pause has stopped. `pauseChanged` is that event, and it is why the word
   appears on a frame where both lanes are idle.
+
+**Implementation note (C21A).** `InventoryPanel` is real, and it is the last
+panel in the structure diagram above that had been listed and never built. It
+follows this section's two rules the way `BuildMenu` does rather than the way
+`Inspector` does: its grids are **fixed pools sized by the content table** — a
+cell per registered item, a button per hand-craftable recipe — handed to
+`mount()` in the first view. A cell whose count is zero is hidden, and the ore
+that arrives a second later un-hides it; nothing is created or destroyed while
+the game runs, which a `MutationObserver` in the tests asserts.
+
+It rides the **5 Hz lane**, not the 10 Hz one, because what it shows is counts
+and a queue — those change at the speed of a pick swing, not of a machine.
+It also repaints **on the way open**, which is the same event-driven escape
+the inspector uses for `selectionChanged`: a player who pauses to plan is
+exactly the player who opens their bag, and both lanes are stopped then.
+
+One thing it does that no other panel does: `InventoryView` carries the bag,
+the craft options and the queue **in one snapshot**. They are one question
+asked three ways and they have to agree — a craft button greyed out because
+the bag is short, beside a bag row saying otherwise, would be two photographs
+taken a frame apart.
 
 **A view model carries only what exists.** `HudView` has no research progress,
 because there is no research until C22; a field that is always `null` is a
@@ -2538,7 +2580,10 @@ rate in ticks; build-range validation; frame-rate independence of movement.
 - **No inventory panel.** §13 lists one and C10 does not schedule it; the HUD's
   ITEMS tile counts what the player carries, both containers, and the debug
   overlay prints position, facing, bag usage and mining progress. C12's
-  inspector is where this becomes a real panel.
+  inspector is where this becomes a real panel. **It was not**: C12 built the
+  panel for *machines* and the player's own bag kept its single total for
+  another nine chunks. **C21A is the chunk that built it**, and the HUD tile
+  this note describes is now the way in.
 
 ---
 
@@ -4417,6 +4462,10 @@ assert a lying `output_full`.
   §15 already specifies exactly which five buildings it covers. Whichever chunk
   takes it should re-run `tests/balance/first-factory.test.ts`, whose floor
   assertion exists to make that change visible.
+  **C21A built the system and stopped there.** The queue, the command and the
+  panel exist; the starting kit is untouched, so `first-factory.test.ts` still
+  passes unchanged and this answer is still weak. What is left is a content
+  change and two re-derived numbers — see C21A's "Noticed, not fixed".
 - **`rotate` is in §7's command union and has no implementation.** Declared in
   C04, never built, and nothing produces it — so a belt, an inserter or a
   miner placed facing the wrong way can only be demolished and rebuilt. It is
@@ -4600,6 +4649,183 @@ what a phase and a per-machine branch ought to cost. The committed baselines in
 like-for-like comparison — three of the six read *faster* than them now — so
 they were left alone rather than rewritten to match; C28 owns the profiler and
 the re-baselining.
+
+---
+
+## C21A — Inventory panel & hand-crafting
+
+**Goal.** The player can see what they are carrying, and turn it into something.
+
+**Depends on.** C12, C20, C21.
+
+**Why it exists, and why it is not numbered C22.** It is not in the original
+chunk list. It is two pieces of work the plan had already committed to and
+never scheduled, and they arrived together because a player asked for them in
+the same sentence:
+
+- §13's structure diagram has listed an **`InventoryPanel`** since revision 1.
+  C10 noted its absence in as many words — "**No inventory panel.** §13 lists
+  one and C10 does not schedule it" — and deferred it to C12's inspector,
+  which then built a panel for *machines* and left the player's own bag with a
+  single total in the corner of the HUD. Twelve chunks later, mining something
+  by hand still put it somewhere the player could not look at.
+- **Hand-crafting** is C20's single weak acceptance answer and the first item
+  in its "Noticed, not fixed": *"The opening is given, not earned… The whole of
+  the fix is one system — a craft queue and a `craftItem` command — and §15
+  already specifies exactly which five buildings it covers."*
+
+It is lettered rather than numbered because C22–C30 are a planned sequence with
+dependencies on each other, and renumbering nine chunks to insert one would
+make every existing cross-reference in this document wrong.
+
+**Tasks.**
+1. `handCraftable` on `RecipeDefinition`: §15's hand-craft list as a column of
+   the content table, not a list in a system. `RecipeRegistry.handCraftable()`
+   indexes it; a hand-craftable **smelting** recipe is refused at registry
+   build, because smelting is what a furnace is for.
+2. `CraftDurations.handTicksFor(recipe)`: the recipe's duration at
+   `HAND_CRAFTING_SPEED`, rounded once at startup (§6 R3) exactly as the
+   per-machine table is.
+3. `craftItem` and `cancelCraft` on §7's command union; `PlayerState.crafts`,
+   an ordered queue of `CraftOrder`, serialized with the player.
+4. `systems/crafting-system.ts`, phase 8. Ingredients leave the bag when the
+   order is **queued**; one order is worked at a time; a finished craft with
+   nowhere to go parks at its finish line and raises one alert.
+5. `views/inventory-view.ts` and `GameController.getInventoryView()`: the bag,
+   the craft options with what the bag holds against each bill, and the queue.
+6. `ui/inventory.ts` — §13's `InventoryPanel`. Built once from content, three
+   ways in: `I`/`E`, the toolbar's BAG button, and the HUD's ITEMS tile.
+
+**Acceptance.**
+- Mining an ore puts a row on screen that names it and counts it. *(Met.)*
+- A hand-craft takes exactly `durationTicks / HAND_CRAFTING_SPEED` ticks,
+  rounded once, and is identical at 10 fps and 144 fps. *(Met — it is a phase-8
+  system counting integers, and the test asserts the exact tick.)*
+- Cancelling returns every ingredient, including the craft in progress.
+  *(Met, and it is refused rather than partial when the bag has no room.)*
+- Nothing the panel does reaches the simulation except through a command.
+  *(Met — `tests/unit/ui-boundary.test.ts` covers the file like every other.)*
+- No panel rebuilds its subtree on update. *(Met — checked with a real
+  `MutationObserver`, the same bar C07 set.)*
+
+**Decisions.**
+
+- **`HAND_CRAFTING_SPEED` is 0.5 — the same as a tier-1 assembler.** The
+  genre's usual answer is the opposite: hand-crafting *faster* than the first
+  machine, so early automation is a sacrifice. It is rejected here for the
+  reason C20's report names. The opening is the weak part of this game and it
+  is weak because nothing in it costs time; making the hand exactly as fast as
+  the machine means the assembler's whole value is **automation**, which is
+  pillar 1 stated as a number.
+- **Ingredients are spent when the order is queued, not per item.** The
+  alternative has a stalled state in it — an order whose ingredients were
+  spent elsewhere sits in the queue doing nothing — and a silent stall is what
+  pillar 3 forbids. Spending up front means an order in the queue is an order
+  that *will* complete, and it puts `unaffordable` on the click rather than
+  forty seconds into a batch. The cost is that cancelling must refund, and
+  that refund is refused outright rather than made partial: nothing in this
+  game is deleted to make an interaction convenient (C16's rule for
+  `setRecipe`, one interaction over).
+- **A finished craft with a full bag waits rather than vanishing.** Progress
+  parks at the duration, the order stays at the head, one `craft_blocked`
+  alert fires, and the item lands the tick a slot frees. It is C11's
+  `output_full` one level down, and the queue row turns amber so the panel
+  explains the bar that stopped (§13).
+- **Repeated clicks merge into the tail order.** Ten presses make one order of
+  ten, not ten of one — so `MAX_CRAFT_ORDERS` counts *kinds* of work rather
+  than clicks, and the cap is unreachable by leaning on a button.
+- **The panel takes the middle of the screen and closes the build menu.** It
+  is the one panel the player stops to read, the two want the same space, and
+  they answer the same question from opposite ends — "what can I build" and
+  "what am I made of".
+
+**Deviations.**
+
+- **§15's hand-craft list does not survive contact, and the shipped set is
+  eight rows rather than five.** §15 says `belt`, `chest`, `inserter`, `miner`,
+  `furnace` "and the plates/gears they need". Taken literally that is a list
+  that stops one ingredient short of its own entries: the inserter and the
+  miner each want a **circuit**, so `make_wire` and `make_circuit` are in too,
+  and `make_gear` is "the gears they need" said out loud. The **plates are
+  not**, and cannot be — a plate is smelted, and `RecipeRegistry` now refuses
+  a hand-craftable smelting recipe as a content error.
+- **Hand-crafting therefore does not bootstrap a factory from nothing, and
+  §15's soft-lock sentence is still carried by the starting kit.**
+  `make_furnace` takes brick, brick is baked *in a furnace*, and the loop
+  closes only because the player is given two. What hand-crafting removes is
+  the dependence on the kit's **assembler**, which is the gate §15 actually
+  cares about. This is written into `data/recipes.ts` beside the flag.
+- **The opening was not re-tuned, and `first-factory.test.ts` still passes
+  unchanged.** C20 asks whichever chunk takes hand-crafting to re-run it,
+  "whose floor assertion exists to make that change visible". It was re-run and
+  it is green — because the starting kit is untouched. The system is here; the
+  *balance* decision to make the opening earn its first miner is a separate,
+  deliberate change to `STARTING_MATERIALS`, and it belongs to whoever is
+  willing to re-derive the milestone numbers with it. See "Noticed, not fixed".
+- **Three new rejection reasons and one new alert.** `not_craftable`,
+  `craft_queue_full` and `nothing_queued`; `craft_blocked`. The first is
+  separate from `unknown_recipe` because "there is no such thing" and "your
+  hands cannot make that" send the player to different places.
+- **Phase 8 gained a second system and the phase table now names it.** §8's
+  phase 8 read "movement, manual mining progress"; it is now "movement, manual
+  mining and hand-crafting". Crafting runs **first** within the phase, so a
+  craft that completes this tick is in the bag before a step of walking or a
+  swing of the pick is judged against it.
+- **The HUD's ITEMS tile became a button.** A `div` with `role="button"` and a
+  tab stop rather than a `<button>`, because the tile is laid out by
+  `.if-hud__tile` and its sibling-border rule, and swapping the element would
+  put a second set of button defaults through that rule for one tile in eight.
+- **The panel keeps its own copy of `TPS`.** §4 lets `ui/**` import the
+  controller, the view models and plain command data — `simulation-clock.ts`
+  is none of those. The view carries ticks, because ticks are what the
+  simulation is exact in; the one division into seconds happens on the
+  presentation side, and a test asserts the copy still agrees.
+
+**Tests.**
+
+- `tests/unit/crafting-system.test.ts` — the bargain the system makes with the
+  bag: ingredients taken whole at queue time and nothing taken on a refusal;
+  exact tick counts for one craft, for a batch and for the one recipe that
+  makes two; orders worked one at a time in queue order; the merge; the cap;
+  cancel refunding everything including the craft in progress, and refusing
+  rather than voiding; the blocked craft that waits, warns once and lands when
+  room appears; the queue in `toJSON` and the copy that stops a snapshot
+  editing it; and the hand-craftable set asserted against §15's list, against
+  the category rule and against the duration table.
+- `tests/unit/inventory-panel.dom.test.ts` — the panel through the real
+  `GameUI`: what the bag shows, the slot arithmetic, the full-bag warning, all
+  three ways in, the build menu stepping aside, the repaint-on-open that works
+  while paused, the craft grid's contents and greyed rows, click and
+  shift-click going out as commands, the queue's bar on the head order only,
+  the blocked row saying why, cancel refunding, and a `MutationObserver`
+  proving no subtree is rebuilt.
+
+**Noticed, not fixed.**
+
+- **The opening is still given rather than earned.** The system that C20 said
+  would fix it now exists; the *content* change that would use it does not.
+  The kit still contains two miners, an assembler and six inserters, so the
+  first thirty seconds of a run are unchanged. Whoever takes it should cut the
+  kit to roughly "a furnace, some plates and a pick" and re-derive both
+  milestones in `tests/balance/first-factory.test.ts`, whose floor assertion
+  is there precisely to make the change visible. It is one content table and
+  two numbers, and it is the last thing standing between C20's weak answer and
+  a strong one.
+- **`rotate` is still in §7's command union with no implementation.** C20
+  named it as the most-felt missing interaction and it stayed that way here:
+  this chunk touched the command union and deliberately did not widen its
+  scope to a second unrelated system.
+- **The craft queue has no save migration.** `SerializedPlayer.crafts` is new,
+  so a save written before this chunk has no such field. Nothing loads a save
+  yet — C24 owns that — but the field is the first piece of authoritative
+  state added *after* a shipped shape existed, and C24's first migration is
+  now a known one rather than a hypothetical.
+- **A recipe that stops being hand-craftable strands its orders.** The system
+  parks an order whose duration is `CANNOT_CRAFT` rather than deleting it, and
+  `cancelCraft` still refunds it — so the player is never robbed, but the
+  queue can hold something that will not move. It is unreachable without a
+  content change between two versions, which is a save-migration problem and
+  is C24's.
 
 ---
 
@@ -5273,14 +5499,29 @@ Hand-craftable without a machine (so a new game is never soft-locked):
 `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they need.
 Everything else requires an assembler.
 
-**Not implemented, and deliberately so (C20).** Hand-crafting is a *system* —
-a craft queue, a command and a progress readout — and C20 forbids adding one.
-The soft-lock it guards against cannot be reached without it either: the
-starting kit contains an assembler, demolition refunds in full, and
-`tests/balance/content.test.ts` proves every item in the game is reachable from
-raw resources through the recipe graph. It belongs to whichever chunk wants the
-*opening* to be a hand-crafted bootstrap rather than a given kit — see C20's
-report on why that matters more than it sounds.
+**Implemented in C21A, and the list above is eight rows rather than five.**
+Taken literally, "the plates/gears they need" stops one ingredient short of its
+own entries: the inserter and the miner each want a **circuit**, so `make_wire`
+and `make_circuit` are hand-craftable too, and `make_gear` is the "gears" said
+out loud. The shipped set is therefore `make_gear`, `make_wire`, `make_circuit`,
+`make_miner`, `make_belt`, `make_inserter`, `make_furnace`, `make_chest`, and it
+is a column of `data/recipes.ts` rather than a list in a system.
+
+**The plates are not among them, and cannot be.** A plate is smelted, smelting
+is what a furnace is *for*, and `RecipeRegistry` now refuses a hand-craftable
+smelting recipe outright as a content error. The consequence is worth stating
+plainly, because this paragraph used to imply otherwise: **hand-crafting alone
+does not bootstrap a factory from nothing.** `make_furnace` takes brick, brick
+is baked in a furnace, and the loop closes only because the player is given
+two. The soft-lock guarantee still rests on the starting kit and on demolition
+refunding in full, exactly as C20 said it already did. What hand-crafting
+removes is the dependence on the kit's **assembler**, which is the gate this
+section actually cares about.
+
+**Hand-craft speed is `HAND_CRAFTING_SPEED` = 0.5** — the same as a tier-1
+assembler, so the assembler's whole value is automation rather than speed. See
+C21A's decisions for why that is the opposite of the genre's usual answer and
+why it is the right one here.
 
 12 buildings — above the "5–8" of the previous revision, but each one is a
 distinct verb, not a variant. The twelfth is C21's `electric_furnace`; see

@@ -257,6 +257,10 @@ function bootstrap(): void {
       ui.toggleBuildMenu();
       return;
     }
+    if (action === 'ui.toggleInventory') {
+      ui.toggleInventory();
+      return;
+    }
     if (action === 'ui.toggleAltMode') {
       altMode = !altMode;
       return;

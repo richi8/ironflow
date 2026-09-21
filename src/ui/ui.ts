@@ -41,6 +41,7 @@ import type { GameController } from '../game/game-controller.js';
 import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
+import { InventoryPanel } from './inventory.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
 import { Toolbar } from './toolbar.js';
 
@@ -65,6 +66,7 @@ export class GameUI {
   private readonly toolbar: Toolbar;
   private readonly buildMenu: BuildMenu;
   private readonly inspector: Inspector;
+  private readonly inventory: InventoryPanel;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -78,10 +80,17 @@ export class GameUI {
     this.root = options.root;
     this.controller = options.controller;
 
-    this.hud = new Hud({ onTogglePause: () => this.controller.togglePause() });
+    this.hud = new Hud({
+      onTogglePause: () => this.controller.togglePause(),
+      // C21A. The ITEMS tile is where the player has been reading a number
+      // with no way to see what it was made of since C07; making it the way
+      // in is why the panel is findable without reading a keybinding list.
+      onOpenInventory: () => this.toggleInventory(),
+    });
     this.toolbar = new Toolbar({
       onSelectSlot: (slot) => this.controller.selectSlot(slot),
       onToggleBuildMenu: () => this.toggleBuildMenu(),
+      onToggleInventory: () => this.toggleInventory(),
     });
     this.buildMenu = new BuildMenu({
       onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
@@ -103,6 +112,15 @@ export class GameUI {
       },
       onClose: () => this.controller.clearSelection(),
     });
+    this.inventory = new InventoryPanel({
+      // The same arrangement every other panel uses: the panel names a recipe
+      // and a count, the controller builds the command, the simulation
+      // decides. A panel that could spend the player's iron is a panel §13
+      // does not allow.
+      onCraft: (recipeId, count) => this.controller.craftItem(recipeId, count),
+      onCancel: (index) => this.controller.cancelCraft(index),
+      onClose: () => this.toggleInventory(),
+    });
   }
 
   mount(): void {
@@ -114,6 +132,7 @@ export class GameUI {
     this.hud.mount(this.root);
     this.buildMenu.mount(this.root, menuView);
     this.inspector.mount(this.root);
+    this.inventory.mount(this.root, this.controller.getInventoryView());
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
@@ -172,6 +191,12 @@ export class GameUI {
       // instead of drifting down to whatever the frame rate rounds to.
       this.hudAccumulatorMs %= HUD_INTERVAL_MS;
       this.refreshHud();
+      // The inventory rides the HUD's lane rather than the live one: it shows
+      // counts and a queue, which change at the speed of a pick swing, not a
+      // progress bar at the speed of a machine. The one bar it does have is
+      // a hand-craft, and five updates a second is smooth for a craft that
+      // takes at least fifteen ticks.
+      this.refreshInventory();
     }
 
     this.liveAccumulatorMs += frameMs;
@@ -187,18 +212,56 @@ export class GameUI {
   toggleBuildMenu(): boolean {
     const open = this.buildMenu.toggle();
     this.toolbar.setBuildMenuOpen(open);
+    // The two panels want the same half of the screen and answer the same
+    // question from opposite ends — "what can I build" and "what am I made
+    // of" — so opening one puts the other away rather than stacking them.
+    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     return open;
+  }
+
+  /** Open or close the inventory. Returns the new state (C21A). */
+  toggleInventory(): boolean {
+    const open = this.setInventoryOpen(!this.inventory.isOpen());
+    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
+    return open;
+  }
+
+  /** Is the inventory on screen? For the composition root and the tests. */
+  isInventoryOpen(): boolean {
+    return this.inventory.isOpen();
   }
 
   destroy(): void {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.inventory.destroy();
     this.inspector.destroy();
     this.toolbar.destroy();
     this.buildMenu.destroy();
     this.hud.destroy();
     this.mounted = false;
+  }
+
+  /**
+   * Show or hide the panel, repainting on the way in.
+   *
+   * The repaint is what lets it open on the frame of the keypress and *while
+   * paused*, which is the same reason the inspector listens for
+   * `selectionChanged`: a player who stops to plan is exactly the player who
+   * opens their bag.
+   */
+  private setInventoryOpen(open: boolean): boolean {
+    this.inventory.setOpen(open);
+    this.toolbar.setInventoryOpen(open);
+    if (open) this.refreshInventory();
+    return open;
+  }
+
+  /** Repaint the inventory, but only when there is something to look at. */
+  private refreshInventory(): void {
+    if (!this.inventory.isOpen()) return;
+    this.inventory.update(this.controller.getInventoryView());
   }
 
   /** Read a fresh snapshot of the selected machine, or close the panel. */
