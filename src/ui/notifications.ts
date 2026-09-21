@@ -51,6 +51,16 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   not_craftable: 'That needs a machine — your hands cannot make it.',
   craft_queue_full: 'You are already making as many different things as you can.',
   nothing_queued: 'There is nothing there to cancel.',
+  // C22. One sentence for a locked building and a locked recipe alike: the
+  // player does the same thing about either, and *which* technology it needs
+  // is printed beside the thing itself in the build menu and the research
+  // panel, where it can be read without a toast going past.
+  locked: 'You have not researched that yet.',
+  unknown_technology: 'No such technology.',
+  already_researched: 'You have already researched that.',
+  already_queued: 'That is already in the research queue.',
+  missing_prerequisites: 'Something that leads to that has not been researched yet.',
+  research_queue_full: 'The research queue is full.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {
@@ -75,6 +85,9 @@ const ALERT_TEXT: Readonly<Record<AlertType, (alert: Alert) => string>> = Object
   machine_no_recipe: (alert) =>
     `The machine at ${alert.x}, ${alert.y} has not been told what to make — open it and pick a recipe.`,
   craft_blocked: () => 'What you are making has nowhere to go — your bag is full.',
+  // The one alert that is good news, so it names the thing rather than a tile:
+  // research happens to the player, not somewhere on the map (C22).
+  research_complete: (alert) => `Research complete: ${alert.subject ?? 'a technology'}.`,
 });
 
 export function alertMessage(alert: Alert): string {

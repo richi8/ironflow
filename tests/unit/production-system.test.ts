@@ -129,6 +129,10 @@ describe('a furnace with everything it needs', () => {
 
   it('makes a multi-ingredient recipe, taking all five plates at once', () => {
     const harness = buildFurnace();
+    // C22: `smelt_steel` is what `smelting_2` unlocks, so a furnace will not
+    // pick it until the technology is done — see the test below, which is the
+    // other half of this one.
+    harness.simulation.researchSystem.grant('smelting_2');
     harness.furnace.input.push([harness.plate, 7]);
     feed(harness, 0, 20);
 
@@ -141,6 +145,32 @@ describe('a furnace with everything it needs', () => {
     harness.simulation.tick();
     expect(harness.furnace.status).toBe(MachineStatus.NoInput);
     expect(held(harness.furnace.input, harness.plate)).toBe(2);
+  });
+
+  /**
+   * C22. A machine that picks its own recipe must not pick a locked one.
+   *
+   * Without this the technology would be a suggestion: iron plates reach a
+   * furnace in every factory that smelts and assembles side by side, and a
+   * furnace that quietly started making steel would hand the player the
+   * reward for `smelting_2` before they had researched it. The plates are
+   * refused at the *port* as well, so an inserter waits with empty hands
+   * rather than silting the furnace up (C14 task 6).
+   */
+  it('will not pick a recipe research has not unlocked', () => {
+    const harness = buildFurnace();
+    harness.furnace.input.push([harness.plate, 7]);
+    feed(harness, 0, 20);
+
+    run(harness.simulation, 5 * SMELT_TICKS);
+    expect(held(harness.furnace.output, harness.simulation.items.idOf('steel'))).toBe(0);
+    expect(harness.furnace.status).toBe(MachineStatus.NoInput);
+    expect(held(harness.furnace.input, harness.plate)).toBe(7);
+
+    // And the moment the technology lands, the same furnace gets on with it.
+    harness.simulation.researchSystem.grant('smelting_2');
+    run(harness.simulation, 5 * SMELT_TICKS);
+    expect(held(harness.furnace.output, harness.simulation.items.idOf('steel'))).toBe(1);
   });
 });
 

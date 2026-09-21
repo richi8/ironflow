@@ -340,6 +340,9 @@ describe('the power tile (C21)', () => {
   it('warns, and says how short it is, when demand outruns supply', () => {
     const { root, ui, controller, simulation } = harness;
 
+    // C22: the electric furnace is what `power_1` unlocks, and this test is
+    // about the HUD's power tile rather than about the tree.
+    simulation.researchSystem.grantAll();
     controller.dispatch({ type: 'build', buildingId: 'power_pole', x: 3, y: 3, rotation: NORTH });
     // Inside the pole's 5x5 square, so it joins the network and draws on it.
     controller.dispatch({ type: 'build', buildingId: 'electric_furnace', x: 4, y: 4, rotation: NORTH });

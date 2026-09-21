@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ALL_UNLOCKED } from '../../src/game/research/unlocks.js';
+
 import { ITEMS } from '../../src/game/data/items.js';
 import { RECIPES } from '../../src/game/data/recipes.js';
 import { ItemRegistry } from '../../src/game/registries/item-registry.js';
@@ -59,12 +61,12 @@ describe('RecipeRegistry', () => {
 
   it('answers what an ingredient selects, for a machine choosing its own recipe', () => {
     const built = registry(SMELT_IRON);
-    expect(built.forInput('smelting', items.idOf('iron_ore'))?.id).toBe('smelt_iron');
-    expect(built.forInput('smelting', items.idOf('coal'))).toBeNull();
+    expect(built.forInput('smelting', items.idOf('iron_ore'), ALL_UNLOCKED)?.id).toBe('smelt_iron');
+    expect(built.forInput('smelting', items.idOf('coal'), ALL_UNLOCKED)).toBeNull();
     // Right item, wrong machine.
-    expect(built.forInput('crafting', items.idOf('iron_ore'))).toBeNull();
-    expect(built.acceptsInput('smelting', items.idOf('iron_ore'))).toBe(true);
-    expect(built.acceptsInput('smelting', items.idOf('coal'))).toBe(false);
+    expect(built.forInput('crafting', items.idOf('iron_ore'), ALL_UNLOCKED)).toBeNull();
+    expect(built.acceptsInput('smelting', items.idOf('iron_ore'), ALL_UNLOCKED)).toBe(true);
+    expect(built.acceptsInput('smelting', items.idOf('coal'), ALL_UNLOCKED)).toBe(false);
   });
 
   it('refuses to guess when two recipes in a category want the same ingredient', () => {
@@ -75,8 +77,8 @@ describe('RecipeRegistry', () => {
     });
     // Ambiguous, so nothing is auto-selected — but the item is still accepted,
     // because a player-chosen recipe (C16) may well want it.
-    expect(built.forInput('smelting', items.idOf('iron_ore'))).toBeNull();
-    expect(built.acceptsInput('smelting', items.idOf('iron_ore'))).toBe(true);
+    expect(built.forInput('smelting', items.idOf('iron_ore'), ALL_UNLOCKED)).toBeNull();
+    expect(built.acceptsInput('smelting', items.idOf('iron_ore'), ALL_UNLOCKED)).toBe(true);
   });
 
   it('groups by category, which is what a machine may run', () => {
@@ -104,6 +106,13 @@ describe('RecipeRegistry', () => {
       'make_generator',
       'make_power_pole',
       'make_electric_furnace',
+      // C22's five: §15's two held-back materials, the lab, and the two
+      // tier-2 buildings the tech tree unlocks.
+      'make_frame',
+      'make_data_core',
+      'make_lab',
+      'make_miner_2',
+      'make_assembler_2',
     ]);
   });
 
@@ -202,6 +211,37 @@ describe('the shipped recipe table', () => {
         outputs: ['1 electric_furnace'],
         ticks: 90,
       },
+      // C22. The first two are §15's rows, held back until the lab existed to
+      // consume what they make; the lab's own bill is not §15's — the frames
+      // it asks for are behind a technology, and nothing on the path to the
+      // first technology may be (see `data/recipes.ts`). The tier-2 bills and
+      // all five times are C22's, on C20's rule that a craft time tracks the
+      // size of its bill.
+      { id: 'make_frame', inputs: ['2 steel', '4 brick'], outputs: ['1 frame'], ticks: 120 },
+      {
+        id: 'make_data_core',
+        inputs: ['1 gear', '1 copper_plate'],
+        outputs: ['1 data_core'],
+        ticks: 75,
+      },
+      {
+        id: 'make_lab',
+        inputs: ['10 gear', '10 circuit', '12 brick'],
+        outputs: ['1 lab'],
+        ticks: 150,
+      },
+      {
+        id: 'make_miner_2',
+        inputs: ['6 gear', '4 circuit', '4 steel'],
+        outputs: ['1 miner_2'],
+        ticks: 90,
+      },
+      {
+        id: 'make_assembler_2',
+        inputs: ['10 gear', '6 circuit', '4 frame'],
+        outputs: ['1 assembler_2'],
+        ticks: 150,
+      },
     ]);
   });
 
@@ -219,7 +259,7 @@ describe('the shipped recipe table', () => {
   it('lets every smelting ingredient pick its own recipe, so a furnace never needs telling', () => {
     for (const recipe of built.byCategory('smelting')) {
       for (const input of recipe.inputs) {
-        expect(built.forInput('smelting', input.itemId)?.id).toBe(recipe.id);
+        expect(built.forInput('smelting', input.itemId, ALL_UNLOCKED)?.id).toBe(recipe.id);
       }
     }
   });
@@ -229,10 +269,17 @@ describe('the shipped recipe table', () => {
     // so the index answers "ambiguous" rather than picking the first. That is
     // a property of §15's table and not a rule about categories — C16 makes
     // the *choosing* a building's `recipeSelection`, precisely because this
-    // answer cannot carry it: a copper plate is unambiguous and an assembler
-    // fed one must still wait to be told (see `production-system.ts`).
-    expect(built.forInput('crafting', items.idOf('iron_plate'))).toBeNull();
-    expect(built.acceptsInput('crafting', items.idOf('iron_plate'))).toBe(true);
-    expect(built.forInput('crafting', items.idOf('copper_plate'))?.id).toBe('make_wire');
+    // answer cannot carry it.
+    expect(built.forInput('crafting', items.idOf('iron_plate'), ALL_UNLOCKED)).toBeNull();
+    expect(built.acceptsInput('crafting', items.idOf('iron_plate'), ALL_UNLOCKED)).toBe(true);
+    // **Copper plate was C16's unambiguous example and is not one any more**:
+    // C22's `make_data_core` takes one as well as `make_wire` does. It costs
+    // nothing, and that it costs nothing is the point — every machine that
+    // runs crafting recipes is `recipeSelection: 'player'`, so no machine has
+    // ever asked this question about a crafting ingredient. The ambiguity is
+    // a fact about the content table, which is why a *technology* unlocking
+    // only one of the two still leaves it ambiguous (see `forInput`).
+    expect(built.forInput('crafting', items.idOf('copper_plate'), ALL_UNLOCKED)).toBeNull();
+    expect(built.acceptsInput('crafting', items.idOf('copper_plate'), ALL_UNLOCKED)).toBe(true);
   });
 });

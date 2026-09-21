@@ -145,6 +145,11 @@ export function canonicalState(simulation: Simulation): Record<string, unknown> 
     nextEntityId: simulation.entities.nextId,
     entities,
     player: simulation.player.toJSON(),
+    // §10: "research state and unlocked technologies" is authoritative. The
+    // *unlock tables* are not and are deliberately absent — they are a pure
+    // function of this (`research/unlocks.ts`), and hashing both would hide a
+    // rebuild that had gone wrong behind the state it was derived from.
+    research: simulation.research.toJSON(),
     world: chunks,
   };
 }
@@ -189,6 +194,7 @@ export function canonicalLayout(simulation: Simulation): Record<string, unknown>
     nextEntityId: state['nextEntityId'],
     entities: byTile,
     player: state['player'],
+    research: state['research'],
     world: state['world'],
   };
 }

@@ -33,6 +33,9 @@
  *                no_recipe        it has never been told what to make
  *                no_power         it is not on a network (C21)
  *
+ *   alert        research_complete  a technology landed while you were looking
+ *                                   somewhere else (C22)
+ *
  *   no alert     low_power        the network is stretched, not broken; the
  *                                 HUD's power tile says so continuously
  *                output_full      the consumer will catch up, or it will not,
@@ -73,7 +76,17 @@ export type AlertType =
    * frees. It is raised once per blocked order, not once per tick, for the
    * reason the miner's is.
    */
-  | 'craft_blocked';
+  | 'craft_blocked'
+  /**
+   * C22: a technology finished.
+   *
+   * The one alert in the game that is not a problem, and it earns its place by
+   * the same test the others pass read backwards: the player has been waiting
+   * several minutes for it, it happens while they are looking somewhere else,
+   * and there is something to do about it — the thing it unlocked. The toast
+   * names the technology, which is what `subject` is for.
+   */
+  | 'research_complete';
 
 /**
  * It carries the tile as well as the entity id because the id alone is not
@@ -86,4 +99,13 @@ export interface Alert {
   readonly entityId: EntityId;
   readonly x: number;
   readonly y: number;
+  /**
+   * What it happened to, when that is not an entity on a tile (C22).
+   *
+   * A technology's name, and nothing else in v1. It is a plain string because
+   * an alert is a frozen fact a toast is written from, and the alternative —
+   * a technology id the UI would look up — is the seam §4 closes: `ui/**` may
+   * not reach a registry.
+   */
+  readonly subject?: string;
 }

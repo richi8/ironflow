@@ -33,12 +33,23 @@ export interface BuildMenuEntry {
   /**
    * Whether research has revealed this building.
    *
-   * Always true until C22 gives the game a technology tree. It is here rather
-   * than added later because §13 lists "locked/unlocked" as part of what the
-   * build menu shows, and a menu that gains a whole visual state in C22 is a
-   * menu that gets re-laid-out then instead of now.
+   * It was `true` for every row from C07 to C21 — declared early because §13
+   * lists "locked/unlocked" as part of what the build menu shows, and a menu
+   * that gained a whole visual state later is a menu that would have been
+   * re-laid-out then instead of at the start. C22 is when it started varying,
+   * and nothing about the panel's layout had to move.
    */
   readonly unlocked: boolean;
+  /**
+   * The technology that would reveal it, or null for one already available
+   * (C22 task 5).
+   *
+   * A **name**, not an id: this is display text, and §4 will not let the menu
+   * ask a registry what a technology is called. §13's rule about a view model
+   * carrying only what exists is why it is null rather than an empty string —
+   * most rows have no such technology and never will.
+   */
+  readonly unlockedBy: string | null;
   readonly selected: boolean;
   /** 1–9 for an entry the number row reaches, null for the rest. */
   readonly hotkey: number | null;

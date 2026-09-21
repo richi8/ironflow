@@ -55,12 +55,15 @@ import { NO_ENTITY } from '../entities/entity.js';
 import { MAX_CRAFT_BATCH, MAX_CRAFT_ORDERS, type PlayerState } from '../player/player-state.js';
 import { CANNOT_CRAFT, type CraftDurations } from '../registries/craft-durations.js';
 import type { Recipe, RecipeRegistry } from '../registries/recipe-registry.js';
+import type { Unlocks } from '../research/unlocks.js';
 
 export interface CraftingSystemOptions {
   readonly player: PlayerState;
   readonly recipes: RecipeRegistry;
   readonly crafts: CraftDurations;
   readonly alerts: AlertLog;
+  /** What research has revealed (C22). A live holder — see `BuildSystem`. */
+  readonly unlocks: Unlocks;
 }
 
 export class CraftingSystem {
@@ -68,6 +71,7 @@ export class CraftingSystem {
   private readonly recipes: RecipeRegistry;
   private readonly durations: CraftDurations;
   private readonly alerts: AlertLog;
+  private readonly unlocks: Unlocks;
 
   /**
    * Has the head order already complained that it cannot be delivered?
@@ -84,6 +88,7 @@ export class CraftingSystem {
     this.recipes = options.recipes;
     this.durations = options.crafts;
     this.alerts = options.alerts;
+    this.unlocks = options.unlocks;
   }
 
   /**
@@ -94,14 +99,21 @@ export class CraftingSystem {
    *
    * ```text
    * unknown_recipe    no such thing
+   * locked            research has not revealed it (C22)
    * not_craftable     §15 says that one needs a machine
    * unaffordable      you are not carrying the ingredients
    * craft_queue_full  you have too many orders already
    * ```
+   *
+   * `locked` is asked before `not_craftable` because it is the more general
+   * answer: a recipe that is both is one the player cannot make *at all* yet,
+   * and telling them to go and build a machine for it would send them to the
+   * wrong place.
    */
   craft(recipeId: string, count: number): CommandRejectionReason | null {
     if (!this.recipes.has(recipeId)) return 'unknown_recipe';
     const recipe = this.recipes.get(recipeId);
+    if (!this.unlocks.isRecipeUnlocked(recipe.recipeId)) return 'locked';
     if (this.durations.handTicksFor(recipe.recipeId) === CANNOT_CRAFT) return 'not_craftable';
 
     // Clamped rather than refused: a batch button asking for more than the cap

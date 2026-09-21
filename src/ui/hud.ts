@@ -6,11 +6,13 @@
  * research progress, tick rate, alerts"; §11 supplies the icon set and §13's
  * budget table says this panel updates at 5 Hz.
  *
- * ## One tile that reads "offline", and one that stopped
+ * ## The two tiles that had no data, and now have
  *
- * Research has a tile and no data: there is no research until C22. It is drawn
- * dimmed rather than left out, because §11's icon set is decided and a HUD that
- * grows a tile in the middle later is a HUD the player has to re-learn.
+ * Research had a tile and nothing behind it from C07 to C22: it was drawn
+ * dimmed rather than left out, because §11's icon set is decided and a HUD
+ * that grows a tile in the middle later is a HUD the player has to re-learn.
+ * C22 filled it in, and it is a button as well — the tech tree opens from the
+ * thing that says how research is going.
  *
  * **Power was the other one until C21.** It now reads the worst network's
  * satisfaction, with supply and demand in the tooltip, and it still shows the
@@ -33,7 +35,7 @@ import type { HudView } from '../game/views/hud-view.js';
 
 import { createIcon, setIcon, type IconName } from './icons.js';
 
-/** What C21 and C22 will replace. See the file header. */
+/** What a tile says when the thing it reads does not exist yet. */
 const OFFLINE = '—';
 
 interface Tile {
@@ -53,6 +55,14 @@ export interface HudOptions {
    * never find.
    */
   readonly onOpenInventory: () => void;
+  /**
+   * Called when the RESEARCH tile is pressed (C22).
+   *
+   * The tile has shown a dash since C07 with nothing behind it; it is the
+   * obvious place to look for what is being researched, so it is the way in —
+   * the ITEMS tile's argument, one tile along.
+   */
+  readonly onOpenResearch: () => void;
 }
 
 export class Hud {
@@ -63,6 +73,7 @@ export class Hud {
   private readonly pauseLabel = document.createElement('span');
   private readonly onTogglePause: () => void;
   private readonly onOpenInventory: () => void;
+  private readonly onOpenResearch: () => void;
 
   /** The previous sample, for the measured tick rate. `null` until the second one. */
   private lastTick: number | null = null;
@@ -72,6 +83,7 @@ export class Hud {
   constructor(options: HudOptions) {
     this.onTogglePause = options.onTogglePause;
     this.onOpenInventory = options.onOpenInventory;
+    this.onOpenResearch = options.onOpenResearch;
   }
 
   mount(parent: HTMLElement): void {
@@ -82,6 +94,7 @@ export class Hud {
     this.addTile('buildings', 'building', 'BUILT');
     this.addTile('power', 'power', 'POWER');
     this.addTile('research', 'research', 'RESEARCH');
+    this.makeButton('research', 'RESEARCH — open the technology tree (T)', this.onOpenResearch);
     this.addTile('map', 'map', 'CHUNKS');
     this.addTile('alerts', 'alert', 'ALERTS');
     this.addTile('rate', null, 'TPS');
@@ -94,9 +107,6 @@ export class Hud {
     this.pauseButton.append(this.pauseIcon, this.pauseLabel);
     this.pauseButton.addEventListener('click', this.onTogglePause);
     this.root.append(this.pauseButton);
-
-    // Research has no data yet, and this never changes again until C22.
-    this.setValue('research', OFFLINE);
 
     parent.append(this.root);
   }
@@ -116,6 +126,7 @@ export class Hud {
     this.setValue('map', formatCount(view.exploredChunks));
     this.setValue('alerts', formatCount(view.alerts));
     this.updatePower(view);
+    this.updateResearch(view);
     this.setValue('rate', this.ticksPerSecond.toFixed(1));
     this.setValue('time', formatClock(view.playtimeSeconds));
 
@@ -131,6 +142,8 @@ export class Hud {
     this.pauseButton.removeEventListener('click', this.onTogglePause);
     const items = this.tiles.get('items');
     if (items !== undefined) items.root.removeEventListener('click', this.onOpenInventory);
+    const research = this.tiles.get('research');
+    if (research !== undefined) research.root.removeEventListener('click', this.onOpenResearch);
     this.root.remove();
     this.tiles.clear();
   }
@@ -177,6 +190,33 @@ export class Hud {
     const networks = power.networks === 1 ? '1 network' : `${power.networks} networks`;
     tile.root.title = `POWER — ${formatKw(power.supplyKw)} supplied of ${formatKw(power.demandKw)} demanded, ${networks}`;
     tile.root.classList.toggle('is-warning', power.satisfactionPercent < 100);
+  }
+
+  /**
+   * The research tile: how far through the active technology, and a warning
+   * when nothing is turning it (C22 task 5).
+   *
+   * A dash when nothing is queued, which is a real state rather than missing
+   * data — the distinction the power tile has drawn since C21. The warning
+   * tone is for a factory that *is* researching and has no lab working: the
+   * bar would otherwise sit still with nothing on screen to say why.
+   */
+  private updateResearch(view: HudView): void {
+    const tile = this.tiles.get('research');
+    if (tile === undefined) return;
+    const research = view.research;
+
+    if (research === null) {
+      this.setValue('research', OFFLINE);
+      tile.root.title = 'RESEARCH — nothing queued';
+      tile.root.classList.remove('is-warning');
+      return;
+    }
+
+    this.setValue('research', `${research.progressPercent}%`);
+    const labs = research.labs === 0 ? 'no labs' : `${research.labsWorking} of ${research.labs} labs working`;
+    tile.root.title = `RESEARCH — ${research.name}, ${research.unitsDone} of ${research.units} units, ${labs}`;
+    tile.root.classList.toggle('is-warning', research.labsWorking === 0);
   }
 
   private addTile(key: string, icon: IconName | null, label: string): void {

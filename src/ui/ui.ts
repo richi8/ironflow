@@ -43,6 +43,7 @@ import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
 import { InventoryPanel } from './inventory.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
+import { ResearchPanel } from './research-panel.js';
 import { Toolbar } from './toolbar.js';
 
 /** §13's HUD rate: counters, power, research. */
@@ -67,6 +68,7 @@ export class GameUI {
   private readonly buildMenu: BuildMenu;
   private readonly inspector: Inspector;
   private readonly inventory: InventoryPanel;
+  private readonly research: ResearchPanel;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -82,6 +84,10 @@ export class GameUI {
 
     this.hud = new Hud({
       onTogglePause: () => this.controller.togglePause(),
+      // C22. The RESEARCH tile has shown a dash since C07 with nothing behind
+      // it; making it the way in is why the panel is findable without reading
+      // a keybinding list — the same argument the ITEMS tile makes.
+      onOpenResearch: () => this.toggleResearch(),
       // C21A. The ITEMS tile is where the player has been reading a number
       // with no way to see what it was made of since C07; making it the way
       // in is why the panel is findable without reading a keybinding list.
@@ -91,6 +97,7 @@ export class GameUI {
       onSelectSlot: (slot) => this.controller.selectSlot(slot),
       onToggleBuildMenu: () => this.toggleBuildMenu(),
       onToggleInventory: () => this.toggleInventory(),
+      onToggleResearch: () => this.toggleResearch(),
     });
     this.buildMenu = new BuildMenu({
       onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
@@ -121,6 +128,13 @@ export class GameUI {
       onCancel: (index) => this.controller.cancelCraft(index),
       onClose: () => this.toggleInventory(),
     });
+    this.research = new ResearchPanel({
+      // The same arrangement every other panel uses: the panel names a
+      // technology, the controller builds the command, the simulation decides.
+      onStart: (technologyId) => this.controller.startResearch(technologyId),
+      onCancel: (technologyId) => this.controller.cancelResearch(technologyId),
+      onClose: () => this.toggleResearch(),
+    });
   }
 
   mount(): void {
@@ -133,6 +147,7 @@ export class GameUI {
     this.buildMenu.mount(this.root, menuView);
     this.inspector.mount(this.root);
     this.inventory.mount(this.root, this.controller.getInventoryView());
+    this.research.mount(this.root, this.controller.getResearchView());
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
@@ -151,7 +166,13 @@ export class GameUI {
       // Warned rather than rejected: nothing the player did was refused, and
       // the factory is still running, minus one miner.
       this.controller.subscribe('alert', (event) => {
-        this.notifications.push(alertMessage(event.alert), 'warn');
+        // C22's completed technology is the one alert that is not a warning,
+        // so it is not drawn as one: an `info` toast, in the blue every other
+        // piece of good news in this UI would use.
+        this.notifications.push(
+          alertMessage(event.alert),
+          event.alert.type === 'research_complete' ? 'info' : 'warn',
+        );
       }),
       this.controller.subscribe('buildMenuChanged', () => {
         const view = this.controller.getBuildMenuView();
@@ -197,6 +218,10 @@ export class GameUI {
       // a hand-craft, and five updates a second is smooth for a craft that
       // takes at least fifteen ticks.
       this.refreshInventory();
+      // The research panel rides the same lane, for the inventory's reason:
+      // what it shows is a unit count and a queue, which change at the speed
+      // of a lab rather than of a machine.
+      this.refreshResearch();
     }
 
     this.liveAccumulatorMs += frameMs;
@@ -223,7 +248,21 @@ export class GameUI {
   toggleInventory(): boolean {
     const open = this.setInventoryOpen(!this.inventory.isOpen());
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
+    if (open && this.research.isOpen()) this.setResearchOpen(false);
     return open;
+  }
+
+  /** Open or close the research panel. Returns the new state (C22). */
+  toggleResearch(): boolean {
+    const open = this.setResearchOpen(!this.research.isOpen());
+    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
+    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
+    return open;
+  }
+
+  /** Is the research panel on screen? For the composition root and the tests. */
+  isResearchOpen(): boolean {
+    return this.research.isOpen();
   }
 
   /** Is the inventory on screen? For the composition root and the tests. */
@@ -235,6 +274,7 @@ export class GameUI {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.research.destroy();
     this.inventory.destroy();
     this.inspector.destroy();
     this.toolbar.destroy();
@@ -262,6 +302,25 @@ export class GameUI {
   private refreshInventory(): void {
     if (!this.inventory.isOpen()) return;
     this.inventory.update(this.controller.getInventoryView());
+  }
+
+  /**
+   * Show or hide the research panel, repainting on the way in.
+   *
+   * The repaint is the inventory's, for its reason: a player who pauses to
+   * plan is exactly the player who opens the tech tree, and both lanes are
+   * stopped then.
+   */
+  private setResearchOpen(open: boolean): boolean {
+    this.research.setOpen(open);
+    this.toolbar.setResearchOpen(open);
+    if (open) this.refreshResearch();
+    return open;
+  }
+
+  private refreshResearch(): void {
+    if (!this.research.isOpen()) return;
+    this.research.update(this.controller.getResearchView());
   }
 
   /** Read a fresh snapshot of the selected machine, or close the panel. */

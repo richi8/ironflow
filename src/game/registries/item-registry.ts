@@ -190,6 +190,16 @@ export class ItemRegistry {
   /** Burn time in ticks, indexed by runtime id. `0` is "not a fuel". */
   private readonly fuelTicks: readonly number[];
 
+  /**
+   * Is this a science item, indexed by runtime id (C22)?
+   *
+   * Beside `fuelTicks` and for its reason: a lab asks it of everything an
+   * inserter offers it, once per swing, and "what category is this" is a fact
+   * about content that an array index answers faster than a map and a string
+   * comparison.
+   */
+  private readonly science: readonly boolean[];
+
   constructor(definitions: readonly ItemDefinition[], options: ItemRegistryOptions = {}) {
     const assigned = options.assignedIds;
     if (assigned !== undefined) validateMapping(assigned);
@@ -206,6 +216,7 @@ export class ItemRegistry {
     const frozen: ItemDefinition[] = [];
     const stackSizes: number[] = [];
     const fuelTicks: number[] = [];
+    const science: boolean[] = [];
 
     for (const definition of definitions) {
       validate(definition);
@@ -222,11 +233,13 @@ export class ItemRegistry {
       this.ids.set(value.id, itemId);
       stackSizes[itemId] = value.stackSize;
       fuelTicks[itemId] = fuelTicksOf(value);
+      science[itemId] = value.category === 'science';
     }
 
     this.definitions = Object.freeze(frozen);
     this.stackSizes = Object.freeze(stackSizes);
     this.fuelTicks = Object.freeze(fuelTicks);
+    this.science = Object.freeze(science);
   }
 
   /** Every item, in content order. What the inventory panel follows. */
@@ -301,6 +314,17 @@ export class ItemRegistry {
    */
   readonly fuelTicksOf = (itemId: ItemId): number => {
     return this.fuelTicks[itemId] ?? 0;
+  };
+
+  /**
+   * Is `itemId` something a lab consumes (C22)?
+   *
+   * An unknown id answers `false` for `fuelTicksOf`'s reason: a lab asks this
+   * of whatever is offered to it, and "that is not science" is the honest
+   * answer to "what is this thing I cannot identify".
+   */
+  readonly isScience = (itemId: ItemId): boolean => {
+    return this.science[itemId] ?? false;
   };
 
   /**

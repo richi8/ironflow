@@ -13,6 +13,10 @@ import { ProductionCounters } from './production.js';
 import { Rng, toUint32 } from './rng.js';
 import { RECIPES } from './data/recipes.js';
 import { RecipeRegistry } from './registries/recipe-registry.js';
+import { TECHNOLOGIES } from './data/technologies.js';
+import { TechnologyRegistry } from './registries/technology-registry.js';
+import { ResearchState } from './research/research-state.js';
+import { Unlocks, recipeForBuilding } from './research/unlocks.js';
 import { CraftDurations } from './registries/craft-durations.js';
 import { BeltSystem } from './systems/belt-system.js';
 import { BuildSystem, countResourceTiles } from './systems/build-system.js';
@@ -21,6 +25,7 @@ import { HandSystem } from './systems/hand-system.js';
 import { InserterSystem } from './systems/inserter-system.js';
 import { MiningSystem } from './systems/mining-system.js';
 import { ProductionSystem } from './systems/production-system.js';
+import { ResearchSystem } from './systems/research-system.js';
 import { PlayerSystem } from './systems/player-system.js';
 import { PowerSystem } from './systems/power-system.js';
 import type { Rotation } from './world/coordinates.js';
@@ -57,6 +62,8 @@ export interface SimulationOptions {
   /** The item content table (C08). Defaulted from `data/items.ts`, like buildings. */
   readonly items?: ItemRegistry;
   readonly recipes?: RecipeRegistry;
+  /** The technology content table (C22). Defaulted from `data/technologies.ts`. */
+  readonly technologies?: TechnologyRegistry;
   /**
    * The player (C10). Defaulted to one standing at the origin, so a test that
    * cares about ticks and not about walking can still say `new Simulation({
@@ -94,6 +101,26 @@ export class Simulation {
 
   /** What every machine in the game can make (C15). Built from `data/recipes.ts`. */
   readonly recipes: RecipeRegistry;
+
+  /** The technology content table (C22). Built from `data/technologies.ts`. */
+  readonly technologies: TechnologyRegistry;
+
+  /**
+   * What has been researched, and what is being researched (C22).
+   * Authoritative (§10), and the whole of what a save carries about the tree.
+   */
+  readonly research: ResearchState;
+
+  /**
+   * What research has made available. **Derived** (§10), never serialized —
+   * `ResearchSystem` recomputes it from `research` whenever it changes, and on
+   * a load.
+   *
+   * Exposed because five systems, the build validator and the controller all
+   * ask it questions, and because `rebuildDerived()` for research is one call
+   * on the system that owns it.
+   */
+  readonly unlocks: Unlocks;
 
   /**
    * How long one craft takes in each kind of machine (C16 task 5).
@@ -152,6 +179,20 @@ export class Simulation {
   private readonly inserterSystem: InserterSystem;
 
   private readonly playerSystem: PlayerSystem;
+
+  /**
+   * Research (C22), phase 7. It owns the `startResearch` and `cancelResearch`
+   * commands, the queue, and the rebuild of `unlocks` — the one place the
+   * derived tables are written.
+   *
+   * Exposed, like `power` and `hands`, because two callers outside a tick need
+   * it: C24's load, which restores `research` and must then ask for the
+   * derived tables to be rebuilt (§10), and a test that wants to start from a
+   * factory which has already researched something. Neither is a way to change
+   * the world behind a command — `grant` and `rebuild` are the only methods
+   * that are not a command handler.
+   */
+  readonly researchSystem: ResearchSystem;
 
   /**
    * Hand-crafting (C21A), phase 8. It owns the `craftItem` and `cancelCraft`
@@ -230,6 +271,24 @@ export class Simulation {
     this.items = options.items ?? new ItemRegistry(ITEMS);
     this.recipes = options.recipes ?? new RecipeRegistry(RECIPES, this.items);
     this.crafts = new CraftDurations(this.buildings, this.recipes);
+    this.technologies =
+      options.technologies ??
+      new TechnologyRegistry(TECHNOLOGIES, this.items, {
+        hasBuilding: (id) => this.buildings.has(id),
+        hasRecipe: (id) => this.recipes.has(id),
+        // The same answer `unlocks.ts` gives when it grants a building's
+        // recipe along with the building, asked here so that a tree claiming
+        // that recipe separately is a content error (see the registry).
+        recipeForBuilding: (id) =>
+          recipeForBuilding({ buildings: this.buildings, recipes: this.recipes, items: this.items }, id)?.id ?? null,
+      });
+    this.research = new ResearchState(this.technologies.size);
+    this.unlocks = new Unlocks({
+      technologies: this.technologies,
+      buildings: this.buildings,
+      recipes: this.recipes,
+      items: this.items,
+    });
     this.player = options.player ?? new PlayerState({ stackSizeOf: this.items.stackSizeOf });
     this.inventory = new BuildMaterials(this.player.inventory, this.items);
     this.builder = new BuildSystem({
@@ -237,6 +296,7 @@ export class Simulation {
       entities: this.entities,
       buildings: this.buildings,
       inventory: this.inventory,
+      unlocks: this.unlocks,
     });
     this.power = new PowerSystem({
       entities: this.entities,
@@ -261,12 +321,14 @@ export class Simulation {
       alerts: this.alerts,
       production: this.production,
       power: this.power,
+      unlocks: this.unlocks,
     });
     this.beltSystem = new BeltSystem({
       entities: this.entities,
       buildings: this.buildings,
       items: this.items,
       recipes: this.recipes,
+      unlocks: this.unlocks,
     });
     this.inserterSystem = new InserterSystem({
       entities: this.entities,
@@ -274,6 +336,7 @@ export class Simulation {
       items: this.items,
       recipes: this.recipes,
       alerts: this.alerts,
+      unlocks: this.unlocks,
     });
     this.hands = new HandSystem({
       entities: this.entities,
@@ -281,11 +344,22 @@ export class Simulation {
       items: this.items,
       recipes: this.recipes,
       player: this.player,
+      unlocks: this.unlocks,
     });
     this.craftingSystem = new CraftingSystem({
       player: this.player,
       recipes: this.recipes,
       crafts: this.crafts,
+      alerts: this.alerts,
+      unlocks: this.unlocks,
+    });
+    this.researchSystem = new ResearchSystem({
+      entities: this.entities,
+      buildings: this.buildings,
+      technologies: this.technologies,
+      research: this.research,
+      unlocks: this.unlocks,
+      power: this.power,
       alerts: this.alerts,
     });
     this.playerSystem = new PlayerSystem({
@@ -429,7 +503,12 @@ export class Simulation {
     // throughput is a property of the layout rather than of array order.
     this.inserterSystem.tick();
 
-    // Phase 7 arrives with C22.
+    // Phase 7 — research. Labs spend science, a finished unit counts toward
+    // the head of the queue, and a finished technology applies its unlocks
+    // here — before phase 8 and before the next tick's commands, which is
+    // what makes "completing a technology immediately makes its unlocks
+    // buildable" a property of the phase order rather than of a callback.
+    this.researchSystem.tick();
 
     // Phase 8 — player. Movement, manual mining (C10) and hand-crafting
     // (C21A). It runs after every machine so that the world a step of walking
@@ -497,6 +576,10 @@ export class Simulation {
         return this.craftingSystem.craft(command.recipeId, command.count);
       case 'cancelCraft':
         return this.craftingSystem.cancel(command.index);
+      case 'startResearch':
+        return this.researchSystem.start(command.technologyId);
+      case 'cancelResearch':
+        return this.researchSystem.cancel(command.technologyId);
       case 'stopMining':
         // A no-op when nothing is being mined. Releasing the button over empty
         // ground is not a mistake, and telling the player it was would put a

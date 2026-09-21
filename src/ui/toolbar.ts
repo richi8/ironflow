@@ -27,6 +27,8 @@ export interface ToolbarOptions {
   readonly onToggleBuildMenu: () => void;
   /** Open or close the inventory panel (C21A). */
   readonly onToggleInventory: () => void;
+  /** Open or close the technology tree (C22). */
+  readonly onToggleResearch: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -37,6 +39,7 @@ export class Toolbar {
   private readonly slots: Slot[] = [];
   private readonly menuButton = document.createElement('button');
   private readonly bagButton = document.createElement('button');
+  private readonly techButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -63,6 +66,14 @@ export class Toolbar {
     this.bagButton.title = 'Open your inventory and craft by hand (I)';
     this.bagButton.addEventListener('click', this.handleBag);
     this.root.append(this.bagButton);
+
+    // The third panel that opens from here, for the bag's reason (C22).
+    this.techButton.type = 'button';
+    this.techButton.className = 'if-toolbar__menu';
+    this.techButton.textContent = 'TECH';
+    this.techButton.title = 'Open the technology tree (T)';
+    this.techButton.addEventListener('click', this.handleTech);
+    this.root.append(this.techButton);
 
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
@@ -99,9 +110,15 @@ export class Toolbar {
     this.bagButton.setAttribute('aria-pressed', String(open));
   }
 
+  setResearchOpen(open: boolean): void {
+    this.techButton.classList.toggle('is-active', open);
+    this.techButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.menuButton.removeEventListener('click', this.handleMenu);
     this.bagButton.removeEventListener('click', this.handleBag);
+    this.techButton.removeEventListener('click', this.handleTech);
     for (const slot of this.slots) slot.button.removeEventListener('click', this.handleSlot);
     this.root.remove();
     this.slots.length = 0;
@@ -109,6 +126,10 @@ export class Toolbar {
 
   private readonly handleMenu = (): void => {
     this.options.onToggleBuildMenu();
+  };
+
+  private readonly handleTech = (): void => {
+    this.options.onToggleResearch();
   };
 
   private readonly handleBag = (): void => {

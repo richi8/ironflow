@@ -447,23 +447,27 @@ describe('the recipe picker (C16)', () => {
     select(assembler().id);
 
     expect(picker().hidden).toBe(false);
-    // Every crafting recipe, C20's seven building ones included: with them the
-    // assembler is the machine that makes the factory's own parts.
+    // Every crafting recipe **research has unlocked**, in content order. C16
+    // asked for "a grid of unlocked recipes" and until C22 that was all of
+    // them; the five missing here are the ones the tech tree holds back —
+    // `make_splitter`, `make_electric_furnace`, `make_frame`, `make_miner_2`
+    // and `make_assembler_2`.
     expect(buttons().map((button) => button.dataset['recipe'])).toEqual([
       'make_gear',
       'make_wire',
       'make_circuit',
       'make_miner',
       'make_belt',
-      'make_splitter',
       'make_inserter',
       'make_furnace',
       'make_assembler',
       'make_chest',
-      // C21's three power buildings.
+      // C21's power buildings, less the electric furnace `power_1` unlocks.
       'make_generator',
       'make_power_pole',
-      'make_electric_furnace',
+      // C22's, less the three its own tree holds back.
+      'make_data_core',
+      'make_lab',
     ]);
     // The ingredients and the rate, which is what task 3 asks the grid to show.
     expect(buttons()[0]?.textContent).toContain('2 Iron Plate');
@@ -473,6 +477,28 @@ describe('the recipe picker (C16)', () => {
     // gets a grid of buttons that would not mean anything.
     select(harness.miner.id);
     expect(picker().hidden).toBe(true);
+  });
+
+  /**
+   * C22's second acceptance criterion, seen from the panel: "completing a
+   * technology immediately makes its unlocks buildable".
+   *
+   * The picker is where an assembler is *told* to make the thing, so a recipe
+   * that appeared in the build menu and not here would be a building the
+   * player could place and never produce.
+   */
+  it('gains a recipe the moment the technology that unlocks it is researched', () => {
+    const machine = assembler();
+    select(machine.id);
+    expect(buttons().map((button) => button.dataset['recipe'])).not.toContain('make_splitter');
+
+    harness.simulation.researchSystem.grant('logistics_1');
+    // Re-read the same machine: the panel takes a fresh snapshot, and the
+    // technology landed between two of them.
+    select(null);
+    select(machine.id);
+
+    expect(buttons().map((button) => button.dataset['recipe'])).toContain('make_splitter');
   });
 
   it('sets a recipe by dispatching a command and nothing else', () => {

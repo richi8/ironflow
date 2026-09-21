@@ -79,12 +79,14 @@ function isAscending(ids: readonly number[]): boolean {
 }
 
 describe('EntityType', () => {
-  it('covers §15s eleven buildings, C21s twelfth, and rejects anything else', () => {
-    // Eleven from §15's building table plus `ElectricFurnace`, which C21
-    // appended: §15 has no row for it, and appending is what keeps every
-    // existing number — and therefore every save that carries one — valid.
-    expect(ENTITY_TYPE_COUNT).toBe(12);
+  it('covers §15s eleven buildings and the three appended since, rejecting anything else', () => {
+    // Eleven from §15's building table, plus `ElectricFurnace` (C21) and the
+    // tier-2 miner and assembler C22's tech tree unlocks. §15 has a row for
+    // none of the three, and appending is what keeps every existing number —
+    // and therefore every save that carries one — valid.
+    expect(ENTITY_TYPE_COUNT).toBe(14);
     expect(isEntityType(EntityType.ElectricFurnace)).toBe(true);
+    expect(isEntityType(EntityType.Assembler2)).toBe(true);
     expect(isEntityType(EntityType.Radar)).toBe(true);
     expect(isEntityType(ENTITY_TYPE_COUNT)).toBe(false);
     expect(isEntityType(-1)).toBe(false);
@@ -93,7 +95,9 @@ describe('EntityType', () => {
 
   it('names every type, and throws rather than returning undefined', () => {
     for (let type = 0; type < ENTITY_TYPE_COUNT; type++) {
-      expect(entityTypeName(type)).toMatch(/^[a-z_]+$/);
+      // Digits allowed since C22: a tier is part of a building's id
+      // (`miner_2`), and the debug name is that id.
+      expect(entityTypeName(type)).toMatch(/^[a-z0-9_]+$/);
     }
     expect(() => entityTypeName(ENTITY_TYPE_COUNT)).toThrow(RangeError);
   });

@@ -52,6 +52,9 @@ import { BuildingRegistry, type BuildingDefinition } from './registries/building
 import { CANNOT_CRAFT } from './registries/craft-durations.js';
 import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-registry.js';
 import type { Simulation } from './simulation.js';
+import { NO_TECHNOLOGY, type Technology, type Unlock } from './registries/technology-registry.js';
+import { asLab, type LabEntity } from './entities/lab-entity.js';
+import { MachineStatus } from './entities/machine-status.js';
 import { TPS } from './simulation-clock.js';
 import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
 import type { Inventory } from './items/inventory.js';
@@ -59,7 +62,7 @@ import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
 import type { MachinePowerView, MachineStack, MachineView } from './views/building-view.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
-import type { HudItemCount, HudPowerView, HudView } from './views/hud-view.js';
+import type { HudItemCount, HudPowerView, HudResearchView, HudView } from './views/hud-view.js';
 import type {
   CraftOptionView,
   CraftPartView,
@@ -68,6 +71,13 @@ import type {
   InventoryView,
 } from './views/inventory-view.js';
 import type { PlacementView } from './views/placement-view.js';
+import type {
+  ResearchCostView,
+  ResearchView,
+  TechnologyState,
+  TechnologyView,
+  UnlockView,
+} from './views/research-view.js';
 import type { RecipePartView, RecipeView } from './views/recipe-view.js';
 import type { SelectionView } from './views/selection-view.js';
 import type { PlayerActivity, PlayerView } from './views/player-view.js';
@@ -310,6 +320,7 @@ export class GameController {
       itemTotal,
       alerts: this.alerts,
       power: this.powerView(),
+      research: this.researchTileView(),
     });
   }
 
@@ -379,8 +390,12 @@ export class GameController {
           category: definition.category,
           cost: freeze(cost),
           affordable: this.simulation.inventory.canAfford(definition.buildCost),
-          // Every building is unlocked until C22 has a technology tree.
-          unlocked: true,
+          // C22: the derived unlock tables, asked per row. The technology's
+          // *name* rides along so a locked row can say what would reveal it —
+          // "visible locks are motivating; invisible ones are confusing"
+          // (C22 task 5).
+          unlocked: this.simulation.unlocks.isBuildingUnlocked(definition.entityType),
+          unlockedBy: this.simulation.technologies.unlockedBy('building', definition.id)?.name ?? null,
           selected: held?.buildingId === definition.id,
           hotkey: index < HOTBAR_SLOTS ? index + 1 : null,
         }),
@@ -428,6 +443,12 @@ export class GameController {
 
     const crafts = this.simulation.recipes
       .handCraftable()
+      // C22: a recipe research has not revealed is left out rather than
+      // greyed. A hand-craft button is about what is in the bag — a row that
+      // said "you cannot make this" for a reason that has nothing to do with
+      // the bag would be answering a different question than the panel asks.
+      // The research panel is where a lock is explained.
+      .filter((recipe) => this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId))
       .map((recipe) => this.craftOptionView(recipe, bag));
 
     const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
@@ -481,6 +502,153 @@ export class GameController {
       // the toast said it once, a while ago.
       blocked: progress !== null && order.progressTicks >= duration,
     });
+  }
+
+  /**
+   * The tech tree, as the research panel draws it (C22 task 5).
+   *
+   * Every technology in content order with its own state, one frozen snapshot
+   * — see `views/research-view.ts` on why the whole tree is in it rather than
+   * a diff. Built from scratch on each call, which is a few dozen small
+   * objects at 5 Hz while the panel is open and nothing at all while it is
+   * shut, exactly as the inventory is.
+   */
+  getResearchView(): ResearchView {
+    const labs = this.countLabs();
+    const technologies = this.simulation.technologies
+      .all()
+      .map((technology) => this.technologyView(technology));
+    const queue = this.simulation.research.queue.map((id) => this.simulation.technologies.byId(id).id);
+
+    return freeze({
+      technologies: freeze(technologies),
+      queue: queue.length === 0 ? EMPTY_IDS : freeze(queue),
+      labs: labs.total,
+      labsWorking: labs.working,
+    });
+  }
+
+  /** One node of the tree: where it stands, what it costs, what it grants. */
+  private technologyView(technology: Technology): TechnologyView {
+    const research = this.simulation.research;
+    const queuePosition = research.queue.indexOf(technology.technologyId);
+    const unitsDone = research.unitsOf(technology.technologyId);
+    const cost: ResearchCostView[] = technology.cost.map((line) => {
+      const part = this.partView(line.itemId, line.count);
+      return freeze({ itemId: part.itemId, name: part.name, count: part.count });
+    });
+
+    return freeze({
+      id: technology.id,
+      name: technology.name,
+      summary: technology.summary,
+      tier: technology.tier,
+      state: this.technologyState(technology, queuePosition),
+      queuePosition: queuePosition < 0 ? null : queuePosition,
+      units: technology.units,
+      unitsDone,
+      // Guarded like every other division that reaches a view (§6 R7): the
+      // registry refuses a technology of no units, and a view that divided by
+      // one anyway would hand the panel an `Infinity` to draw a bar from.
+      progress: technology.units > 0 ? unitsDone / technology.units : 0,
+      cost: freeze(cost),
+      unitSeconds: technology.durationTicks / TPS,
+      prerequisites: freeze(
+        technology.prerequisites.map((id) => this.simulation.technologies.byId(id).name),
+      ),
+      unlocks: freeze(technology.unlocks.map((unlock) => this.unlockView(unlock))),
+    });
+  }
+
+  /**
+   * The five words the panel draws a node in. See `TechnologyState`.
+   *
+   * `locked` is decided by the *prerequisites*, not by the unlock tables: a
+   * technology is locked when something that leads to it is not done, which is
+   * the thing the player can act on. Whether its grants are available is the
+   * same question one step later and is the build menu's to answer.
+   *
+   * **A prerequisite already in the queue counts as satisfied**, because
+   * `ResearchSystem.start` accepts one — a panel that greyed the node out
+   * would make the queue's whole point, lining a branch up in one pass,
+   * unreachable from the UI. §7 lets a pre-check be *looser* than the
+   * simulation nowhere; this is the pre-check agreeing with it exactly.
+   */
+  private technologyState(technology: Technology, queuePosition: number): TechnologyState {
+    if (this.simulation.research.isUnlocked(technology.technologyId)) return 'researched';
+    if (queuePosition === 0) return 'active';
+    if (queuePosition > 0) return 'queued';
+    for (const prerequisite of technology.prerequisites) {
+      if (this.simulation.research.isUnlocked(prerequisite)) continue;
+      if (this.simulation.research.isQueued(prerequisite)) continue;
+      return 'locked';
+    }
+    return 'available';
+  }
+
+  /** One grant, named: a building's own name, or what a recipe makes. */
+  private unlockView(unlock: Unlock): UnlockView {
+    if (unlock.kind === 'building') {
+      const name = this.simulation.buildings.has(unlock.id)
+        ? this.simulation.buildings.get(unlock.id).name
+        : unlock.id;
+      return freeze({ kind: unlock.kind, id: unlock.id, name });
+    }
+    if (!this.simulation.recipes.has(unlock.id)) {
+      return freeze({ kind: unlock.kind, id: unlock.id, name: unlock.id });
+    }
+    const recipe = this.simulation.recipes.get(unlock.id);
+    const first = recipe.outputs[0];
+    return freeze({
+      kind: unlock.kind,
+      id: unlock.id,
+      name: first === undefined ? recipe.id : this.partView(first.itemId, first.count).name,
+    });
+  }
+
+  /**
+   * The active technology, for the HUD's research tile, or null for an empty
+   * queue (C22 task 5).
+   */
+  private researchTileView(): HudResearchView | null {
+    const active = this.simulation.research.active;
+    if (active === NO_TECHNOLOGY || !this.simulation.technologies.isTechnologyId(active)) return null;
+
+    const technology = this.simulation.technologies.byId(active);
+    const unitsDone = this.simulation.research.unitsOf(active);
+    const labs = this.countLabs();
+    return freeze({
+      name: technology.name,
+      unitsDone,
+      units: technology.units,
+      progressPercent: technology.units > 0 ? Math.floor((unitsDone * 100) / technology.units) : 0,
+      labs: labs.total,
+      labsWorking: labs.working,
+    });
+  }
+
+  /**
+   * How many labs exist, and how many are turning over.
+   *
+   * Walked rather than counted incrementally, for `PowerSystem.syncPoles`'s
+   * reason: labs are a handful of entities and a bookkeeping hook missed on
+   * one code path would leave the HUD explaining a stall that is not there.
+   * The status is the one the *simulation* set in phase 7, so "working" here
+   * means what it means in the inspector.
+   */
+  private countLabs(): { readonly total: number; readonly working: number } {
+    let total = 0;
+    let working = 0;
+    for (const type of this.simulation.buildings.researchTypes()) {
+      const labs = this.simulation.entities.byType<LabEntity>(type);
+      for (let i = 0; i < labs.length; i++) {
+        const lab = labs[i];
+        if (lab === undefined) continue;
+        total += 1;
+        if (lab.status === MachineStatus.Running || lab.status === MachineStatus.LowPower) working += 1;
+      }
+    }
+    return { total, working };
   }
 
   /**
@@ -768,6 +936,23 @@ export class GameController {
     return this.dispatch({ type: 'cancelCraft', index });
   }
 
+  /**
+   * Put a technology in the research queue (C22).
+   *
+   * A command like everything else (§7): the panel names a technology, the
+   * simulation decides whether its prerequisites allow it, and a refusal
+   * comes back as a toast one tick later. The panel greys out a node it
+   * expects to be refused, which §7 permits as a pre-check.
+   */
+  startResearch(technologyId: string): CommandResult {
+    return this.dispatch({ type: 'startResearch', technologyId });
+  }
+
+  /** Take a technology out of the queue (C22). Nothing is lost by it. */
+  cancelResearch(technologyId: string): CommandResult {
+    return this.dispatch({ type: 'cancelResearch', technologyId });
+  }
+
   /* ---------------------------------------------------------------- *
    * Pause
    * ---------------------------------------------------------------- */
@@ -828,14 +1013,20 @@ export class GameController {
   /**
    * The three facts the build menu shows, flattened into one comparable string.
    *
-   * Stock, affordability and selection. Anything a panel renders that is not in
-   * here would be a change the panel never hears about, so a field added to
-   * `BuildMenuEntry` belongs in this string too.
+   * Stock, affordability, selection and — since C22 — whether research has
+   * revealed the row. Anything a panel renders that is not in here would be a
+   * change the panel never hears about, so a field added to `BuildMenuEntry`
+   * belongs in this string too.
    */
   private buildMenuSignature(): string {
     const parts: string[] = [this.cursor.buildTool?.buildingId ?? '-', String(this.cursor.buildRotation)];
     for (const definition of this.simulation.buildings.all()) {
       parts.push(definition.id);
+      // C22. Without this the menu would learn about a completed technology
+      // only when the next ore landed in the bag — the rows would be right
+      // and the moment would be wrong, which is exactly the bug this
+      // signature exists to prevent.
+      parts.push(this.simulation.unlocks.isBuildingUnlocked(definition.entityType) ? 'u' : 'l');
       for (const stack of definition.buildCost) {
         parts.push(String(this.simulation.inventory.count(stack.itemId)));
       }
@@ -866,6 +1057,19 @@ export class GameController {
       const craftTicks = this.simulation.crafts.ticksFor(entity.type, machine.recipe);
       if (craftTicks === CANNOT_CRAFT) return null;
       return machine.progressTicks / craftTicks;
+    }
+
+    // C22. A lab's denominator is the *active technology's* unit length, not
+    // the lab's own: a unit of research work is anonymous (`lab-entity.ts`),
+    // and what it is worth is decided by whatever is at the head of the queue.
+    // Null with nothing queued, because then it is not partway through
+    // anything that is going to finish.
+    const lab = asLab(entity, this.simulation.buildings);
+    if (lab !== null) {
+      const active = this.simulation.research.active;
+      if (active === NO_TECHNOLOGY || !this.simulation.technologies.isTechnologyId(active)) return null;
+      const ticks = this.simulation.technologies.byId(active).durationTicks;
+      return ticks > 0 ? lab.progressTicks / ticks : null;
     }
 
     const miner = asMiner(entity);
@@ -903,9 +1107,9 @@ export class GameController {
    * The list is the machine's *category*, in content order, which is the order
    * `data/recipes.ts` is written in — so the grid does not reshuffle itself
    * between two frames, and adding a recipe puts it where the content author
-   * put it. Every recipe is unlocked until C22, so nothing is filtered out
-   * yet; when something is, it is filtered here and the panel never learns
-   * that it happened.
+   * put it. A recipe research has not revealed is filtered out here (C22), so
+   * the panel never learns that it happened — and a machine already set to
+   * one could not be, because research only ever unlocks.
    */
   private recipeChoicesFor(entity: Entity): readonly RecipeView[] | null {
     const config = this.simulation.buildings.productionFor(entity.type);
@@ -914,6 +1118,10 @@ export class GameController {
     const selected = machine === null ? NO_RECIPE : machine.recipe;
     const views = this.simulation.recipes
       .byCategory(config.category)
+      // C22, closing this method's own note: "every recipe is unlocked until
+      // C22, so nothing is filtered out yet; when something is, it is
+      // filtered here and the panel never learns that it happened."
+      .filter((recipe) => this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId))
       .map((recipe) => this.recipeView(entity, recipe, selected));
     return views.length === 0 ? EMPTY_RECIPES : freeze(views);
   }
@@ -969,6 +1177,9 @@ const EMPTY_RECIPES: readonly RecipeView[] = Object.freeze([]);
 
 /** Nothing being made by hand, which is most of the time. Shared and frozen. */
 const EMPTY_QUEUE: readonly CraftQueueView[] = Object.freeze([]);
+
+/** An empty research queue, which is most of the time. Shared and frozen. */
+const EMPTY_IDS: readonly string[] = Object.freeze([]);
 
 /**
  * Freeze a view before it leaves the controller (§13).

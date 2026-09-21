@@ -23,6 +23,7 @@ import type { EntityStore } from '../entities/entity-store.js';
 import { initialBuildingState } from '../entities/building-init.js';
 import { footprintExtent, forEachFootprintTile, type Footprint } from '../entities/entity.js';
 import type { BuildMaterials } from '../items/build-materials.js';
+import type { Unlocks } from '../research/unlocks.js';
 import { BuildingRegistry, type BuildingDefinition } from '../registries/building-registry.js';
 import { TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
 import type { World } from '../world/world.js';
@@ -37,6 +38,12 @@ export interface BuildSystemOptions {
    * `items/build-materials.ts`.
    */
   readonly inventory: BuildMaterials;
+  /**
+   * What research has revealed (C22). A live holder, not a snapshot: a
+   * technology completed in phase 7 must make its building placeable on the
+   * next command, which is C22's second acceptance criterion.
+   */
+  readonly unlocks: Unlocks;
 }
 
 /** A placement that would work, or the one reason it would not. */
@@ -47,19 +54,23 @@ export class BuildSystem {
   private readonly entities: EntityStore;
   private readonly buildings: BuildingRegistry;
   private readonly inventory: BuildMaterials;
+  private readonly unlocks: Unlocks;
 
   constructor(options: BuildSystemOptions) {
     this.world = options.world;
     this.entities = options.entities;
     this.buildings = options.buildings;
     this.inventory = options.inventory;
+    this.unlocks = options.unlocks;
   }
 
   /**
    * Could this building be placed here, right now? `null` means yes.
    *
    * The order of the checks is the order of the answers a player finds useful,
-   * not the order that is cheapest to compute. Affordability is last on
+   * not the order that is cheapest to compute. C22's lock comes first for that
+   * reason: a building research has not revealed is refused the same way on
+   * every tile, so nothing about the ground under it is worth saying. Affordability is last on
    * purpose: told that a tile is water *and* unaffordable, "water" is the one
    * that explains the red ghost, and "you cannot afford it" is a fact about
    * the inventory that would be just as true one tile to the left.
@@ -67,6 +78,10 @@ export class BuildSystem {
   validate(buildingId: string, x: number, y: number, rotation: Rotation): PlacementResult {
     if (!this.buildings.has(buildingId)) return 'unknown_building';
     const definition = this.buildings.get(buildingId);
+    // Before anything about the ground: a locked building is refused wherever
+    // it is pointed, so "research that first" is the whole answer rather than
+    // the second half of one about terrain (C22).
+    if (!this.unlocks.isBuildingUnlocked(definition.entityType)) return 'locked';
     const facing = BuildingRegistry.normalizeRotation(definition, rotation);
 
     // Bounds first, and before anything touches the occupancy index: a tile
@@ -148,6 +163,12 @@ export class BuildSystem {
     // second time would mint a free building out of a double right-click.
     if (entity === undefined || this.entities.isPendingRemoval(entity.id)) return 'nothing_there';
 
+    // Deliberately not gated on research (C22): a building that is standing
+    // there may always be taken down, whatever the tech tree has to say. The
+    // only way to be holding a locked building's item is to have had one
+    // before it was locked, which no save can currently produce — and if one
+    // ever does, refusing to demolish would be a building the player could
+    // neither use nor remove.
     const refund = this.buildings.forEntityType(entity.type).buildCost;
     if (!this.inventory.hasRoomFor(refund)) return 'inventory_full';
 

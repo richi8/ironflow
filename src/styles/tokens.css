@@ -66,6 +66,15 @@
   --if-generator: #c9a227;
   --if-power_pole: #8f9c5a;
   --if-electric_furnace: #e07a62;
+  /* research (C22). A cold cyan for the science item, because nothing else on
+     a belt is cold; a violet for the lab; and, for the two tier-2 buildings,
+     a brighter tone of the tier-1 colour — near enough to say "that is a
+     miner" and far enough to say "that is not the same miner". */
+  --if-frame: #6f7d94;
+  --if-data_core: #46c8d8;
+  --if-lab: #b45fd0;
+  --if-miner_2: #f5b65c;
+  --if-assembler_2: #63d6b6;
 
   --if-radius: 4px;
   --if-font: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

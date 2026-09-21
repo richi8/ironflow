@@ -32,11 +32,12 @@ import type { Entity } from '../entities/entity.js';
 import { asChest } from '../entities/chest-entity.js';
 import { asGenerator } from '../entities/generator-entity.js';
 import { asInserter, inserterHolding } from '../entities/inserter-entity.js';
+import { asLab } from '../entities/lab-entity.js';
 import { asMachine, type MachineEntity } from '../entities/machine-entity.js';
 import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.js';
 import type { BuildingRegistry, ProductionProperties } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
-import type { RecipeRegistry } from '../registries/recipe-registry.js';
+import type { RecipeGate, RecipeRegistry } from '../registries/recipe-registry.js';
 import { BufferInventory, SlotInventory, slotsCount, type Inventory, type ItemSlots } from './inventory.js';
 
 /** One line of a port's contents, for the inspector (C12). */
@@ -71,6 +72,15 @@ export interface PortContext {
   readonly buildings: BuildingRegistry;
   readonly items: ItemRegistry;
   readonly recipes: RecipeRegistry;
+  /**
+   * What research has made available (C22). `ALL_UNLOCKED` for a caller with
+   * no tech tree.
+   *
+   * A port has to consult it because "would you take this item?" is answered
+   * from the recipes a machine could run, and a machine must not accept an
+   * ingredient for a recipe it may not run yet — see `RecipeGate`.
+   */
+  readonly unlocks: RecipeGate;
 }
 
 const NO_STACKS: readonly PortStack[] = Object.freeze([]);
@@ -87,11 +97,13 @@ export function outputPortOf(entity: Entity, ctx: PortContext): ItemSource | nul
   const machine = asMachine(entity, ctx.buildings);
   if (machine !== null) return machineBuffers(machine, production(entity, ctx)).output;
 
-  // A generator (C21) is deliberately absent. Its only buffer is fuel, and an
-  // inserter that could reach in would take the coal straight back out again
-  // — the shuffling this function's one-way rule was written to prevent. The
-  // *player* may still empty it: see `handSourceOf`.
+  // A generator (C21) and a lab (C22) are deliberately absent. Each has one
+  // buffer and it is an *input*, so an inserter that could reach in would take
+  // the coal, or the data core, straight back out again — the shuffling this
+  // function's one-way rule was written to prevent. The *player* may still
+  // empty either: see `handSourceOf`.
   if (ctx.buildings.generatorFor(entity.type) !== null) return null;
+  if (ctx.buildings.researchFor(entity.type) !== null) return null;
 
   const chest = chestPort(entity, ctx);
   if (chest !== null) return chest;
@@ -135,6 +147,11 @@ export function handSourceOf(entity: Entity, ctx: PortContext): ItemSource | nul
   // player may take back anything they put in — applies to it unchanged.
   const generator = generatorPort(entity, ctx);
   if (generator !== null) return generator;
+
+  // A lab's science is the whole of what it holds, and C20's rule — the player
+  // may take back anything they put in — applies to it unchanged.
+  const lab = labPort(entity, ctx);
+  if (lab !== null) return lab;
 
   const machine = asMachine(entity, ctx.buildings);
   if (machine === null) return outputPortOf(entity, ctx);
@@ -196,6 +213,9 @@ export function inputPortOf(entity: Entity, ctx: PortContext): ItemSink | null {
   const generator = generatorPort(entity, ctx);
   if (generator !== null) return generator;
 
+  const lab = labPort(entity, ctx);
+  if (lab !== null) return lab;
+
   return chestPort(entity, ctx);
 }
 
@@ -250,6 +270,35 @@ function generatorPort(entity: Entity, ctx: PortContext): (ItemSource & ItemSink
     take: (itemId, amount) => buffer.take(itemId, amount),
     spaceFor: (itemId) => (ctx.items.fuelTicksOf(itemId) > 0 ? buffer.spaceFor(itemId) : 0),
     give: (itemId, amount) => (ctx.items.fuelTicksOf(itemId) > 0 ? buffer.give(itemId, amount) : 0),
+    stacks: () => buffer.stacks(),
+  };
+}
+
+/**
+ * A lab's science buffer, as both directions of port. Null if not one (C22).
+ *
+ * It **accepts only science items**, which is the generator's rule with a
+ * different test: an inserter pointed at a lab with iron plates on the belt
+ * beside it waits with empty hands rather than filling the one buffer the lab
+ * has with something it can never spend. The test is the item's own category
+ * (§15), so nothing here knows what a data core is.
+ */
+function labPort(entity: Entity, ctx: PortContext): (ItemSource & ItemSink) | null {
+  const config = ctx.buildings.researchFor(entity.type);
+  if (config === null) return null;
+  const lab = asLab(entity, ctx.buildings);
+  if (lab === null) return null;
+
+  const buffer = bufferPort(lab.input, config.inputCapacity);
+  // The six keys in `containerPort`'s order, for the reason `generatorPort`
+  // spells out: two port shapes make every call site that reads one
+  // polymorphic.
+  return {
+    peek: () => buffer.peek(),
+    count: (itemId) => buffer.count(itemId),
+    take: (itemId, amount) => buffer.take(itemId, amount),
+    spaceFor: (itemId) => (ctx.items.isScience(itemId) ? buffer.spaceFor(itemId) : 0),
+    give: (itemId, amount) => (ctx.items.isScience(itemId) ? buffer.give(itemId, amount) : 0),
     stacks: () => buffer.stacks(),
   };
 }
@@ -392,7 +441,7 @@ class MachineInputPort implements ItemSink {
       return recipe.inputs.some((stack) => stack.itemId === itemId);
     }
     if (this.config.recipeSelection === 'player') return false;
-    return this.ctx.recipes.acceptsInput(this.config.category, itemId);
+    return this.ctx.recipes.acceptsInput(this.config.category, itemId, this.ctx.unlocks);
   }
 
   spaceFor(itemId: ItemId): number {

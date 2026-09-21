@@ -70,6 +70,7 @@ import type { BuildingRegistry, ProductionProperties } from '../registries/build
 import { CANNOT_CRAFT, type CraftDurations } from '../registries/craft-durations.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import { NO_RECIPE, type Recipe, type RecipeRegistry } from '../registries/recipe-registry.js';
+import type { Unlocks } from '../research/unlocks.js';
 import { PowerGate, type PowerSystem } from './power-system.js';
 
 export interface ProductionSystemOptions {
@@ -83,6 +84,14 @@ export interface ProductionSystemOptions {
   readonly production: ProductionCounters;
   /** Phase 2's answer about every machine's share of the grid (C21). */
   readonly power: PowerSystem;
+  /**
+   * What research has revealed (C22).
+   *
+   * A machine that picks its own recipe must not pick a locked one: a furnace
+   * fed iron plates before `smelting_2` would otherwise start making steel,
+   * and the technology would be a suggestion.
+   */
+  readonly unlocks: Unlocks;
 }
 
 export class ProductionSystem {
@@ -94,6 +103,7 @@ export class ProductionSystem {
   private readonly alerts: AlertLog;
   private readonly counters: ProductionCounters;
   private readonly power: PowerSystem;
+  private readonly unlocks: Unlocks;
 
   constructor(options: ProductionSystemOptions) {
     this.entities = options.entities;
@@ -104,6 +114,7 @@ export class ProductionSystem {
     this.alerts = options.alerts;
     this.counters = options.production;
     this.power = options.power;
+    this.unlocks = options.unlocks;
   }
 
   tick(): void {
@@ -237,6 +248,11 @@ export class ProductionSystem {
     buffers: MachinePorts,
   ): Recipe | null {
     const current = this.recipes.isRecipeId(machine.recipe) ? this.recipes.byId(machine.recipe) : null;
+    // A recipe cannot become locked while a machine is running it — research
+    // only ever unlocks — so `current` is tested for its category and not for
+    // its lock. What *is* tested is the recipe a machine picks for itself,
+    // below and in `select`, which is where a locked recipe could be chosen
+    // for the first time (C22).
     if (current !== null && current.category === config.category) {
       if (config.recipeSelection === 'player') return current;
       if (machine.progressTicks > 0 || this.hasIngredients(current, buffers)) return current;
@@ -265,7 +281,7 @@ export class ProductionSystem {
    */
   private select(machine: MachineEntity, config: ProductionProperties, buffers: MachinePorts): Recipe | null {
     for (const entry of machine.input) {
-      const recipe = this.recipes.forInput(config.category, entry[0]);
+      const recipe = this.recipes.forInput(config.category, entry[0], this.unlocks);
       if (recipe !== null && this.hasIngredients(recipe, buffers)) return recipe;
     }
     return null;

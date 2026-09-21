@@ -88,6 +88,14 @@ export type InputAction =
    */
   | 'ui.toggleInventory'
   /**
+   * Open and close the technology tree (C22).
+   *
+   * `T`, which is what this genre has bound it to for as long as it has had
+   * one, and which is free: it is nowhere near the number row or WASD, so it
+   * cannot be hit mid-drag.
+   */
+  | 'ui.toggleResearch'
+  /**
    * Show what every machine is making, over the world (C20 task 5).
    *
    * A **toggle**, not a hold, which is the one decision in it. The genre's
@@ -140,6 +148,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyB: 'ui.toggleBuildMenu',
   KeyI: 'ui.toggleInventory',
   KeyE: 'ui.toggleInventory',
+  KeyT: 'ui.toggleResearch',
   // Both alts, because which one is under the player's thumb depends on the
   // keyboard, and `KeyV` beside it for the platforms that swallow alt entirely.
   AltLeft: 'ui.toggleAltMode',

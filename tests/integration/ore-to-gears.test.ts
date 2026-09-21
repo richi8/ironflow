@@ -269,22 +269,24 @@ describe('ore -> smelt -> assemble -> chest', () => {
     const view = controller.getBuildingView(assembler.id);
     expect(view?.name).toBe('Assembler');
     expect(view?.recipe?.id).toBe('make_gear');
-    // Every crafting recipe is offered, with exactly one of them lit.
+    // Every crafting recipe research has unlocked is offered, with exactly one
+    // of them lit. The five the v1 tech tree holds back are absent (C22).
     expect(view?.recipes?.map((choice) => choice.id)).toEqual([
       'make_gear',
       'make_wire',
       'make_circuit',
       'make_miner',
       'make_belt',
-      'make_splitter',
       'make_inserter',
       'make_furnace',
       'make_assembler',
       'make_chest',
-      // C21's three power buildings.
+      // C21's power buildings, less the electric furnace `power_1` unlocks.
       'make_generator',
       'make_power_pole',
-      'make_electric_furnace',
+      // C22's, less the three its own tree holds back.
+      'make_data_core',
+      'make_lab',
     ]);
     expect(view?.recipes?.filter((choice) => choice.selected).map((choice) => choice.id)).toEqual(['make_gear']);
     // 60 ticks a gear is 30 a minute — the machine's nominal rate, beside the

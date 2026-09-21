@@ -15,7 +15,10 @@ import { BuildSystem } from '../../src/game/systems/build-system.js';
 import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, SOUTH, TILE_MAX, WEST, type Rotation } from '../../src/game/world/coordinates.js';
 import { TileType } from '../../src/game/world/tile.js';
+import { RECIPES } from '../../src/game/data/recipes.js';
+import { RecipeRegistry } from '../../src/game/registries/recipe-registry.js';
 import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
+import { openUnlocks } from '../fixtures/unlocks.js';
 import { World } from '../../src/game/world/world.js';
 
 /**
@@ -129,13 +132,14 @@ function harness(extra: readonly BuildingDefinition[] = [PIPE], stock = 10): Har
     new SlotInventory({ slots: 200, stackSizeOf: items.stackSizeOf }),
     items,
   );
+  const recipes = new RecipeRegistry(RECIPES, items);
   for (const definition of buildings.all()) inventory.add(definition.id, stock);
   return {
     world,
     entities,
     inventory,
     buildings,
-    system: new BuildSystem({ world, entities, buildings, inventory }),
+    system: new BuildSystem({ world, entities, buildings, inventory, unlocks: openUnlocks(buildings, recipes, items) }),
   };
 }
 
@@ -152,6 +156,9 @@ describe('BuildingRegistry', () => {
       'generator',
       'power_pole',
       'electric_furnace',
+      'lab',
+      'miner_2',
+      'assembler_2',
     ]);
   });
 
@@ -176,9 +183,12 @@ describe('BuildingRegistry', () => {
     const registry = new BuildingRegistry(BUILDINGS);
     expect(registry.footprintOf(EntityType.Miner)).toEqual({ width: 2, height: 2 });
     expect(registry.footprintOf(EntityType.Chest)).toEqual({ width: 1, height: 1 });
-    // A type nothing defines yet still has to answer something the store can
-    // use; 1×1 is the only size that cannot claim a tile it was not given.
-    expect(registry.footprintOf(EntityType.Lab)).toEqual({ width: 1, height: 1 });
+    // C22 gave the lab a definition, so the 3x3 is now content. The fallback
+    // it used to stand for is still the rule and still needs a type nothing
+    // defines: `Radar`, until C23. 1x1 is the only size that cannot claim a
+    // tile it was not given.
+    expect(registry.footprintOf(EntityType.Lab)).toEqual({ width: 3, height: 3 });
+    expect(registry.footprintOf(EntityType.Radar)).toEqual({ width: 1, height: 1 });
   });
 
   it.each([
@@ -534,9 +544,10 @@ describe('adding a building', () => {
       id: 'sawmill',
       name: 'Sawmill',
       // Any type no shipped building has claimed — C16's assembler took the
-      // one this used to borrow, which is the registry refusing two buildings
-      // one entity type exactly as it is supposed to.
-      entityType: EntityType.Lab,
+      // one this used to borrow and C22's lab took the one after that, which
+      // is the registry refusing two buildings one entity type exactly as it
+      // is supposed to.
+      entityType: EntityType.Radar,
       category: 'production',
       size: { width: 3, height: 2 },
       rotationCount: 4,
@@ -544,7 +555,11 @@ describe('adding a building', () => {
       placement: { onTerrain: [TileType.Grass] },
       sprite: 'building:production:SA:3x2:2',
     };
-    const h = harness([PIPE, sawmill]);
+    // The sawmill alone, because it and `PIPE` are now the only two test
+    // buildings and the shipped table has taken every entity type but one
+    // (C22's lab took `Lab`, leaving `Radar` until C23). A harness of one
+    // proves the same thing: nothing outside `data/buildings.ts` was touched.
+    const h = harness([sawmill]);
 
     expect(h.system.place('sawmill', 8, 8, EAST)).toBeNull();
     expect(h.inventory.count('sawmill')).toBe(8);
@@ -657,8 +672,15 @@ describe('the playground world', () => {
       new SlotInventory({ slots: 30, stackSizeOf: items.stackSizeOf }),
       items,
     );
+    const recipes = new RecipeRegistry(RECIPES, items);
     for (const definition of buildings.all()) inventory.add(definition.id, 1);
-    const system = new BuildSystem({ world, entities, buildings, inventory });
+    const system = new BuildSystem({
+      world,
+      entities,
+      buildings,
+      inventory,
+      unlocks: openUnlocks(buildings, recipes, items),
+    });
 
     expect(system.validate('chest', 14, 3, NORTH)).toBe('bad_terrain'); // the pond
     expect(system.validate('miner', 2, 12, NORTH)).toBeNull(); // the iron patch

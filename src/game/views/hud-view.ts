@@ -6,11 +6,12 @@
  * the player's iron, and every field here is a number or a string for the same
  * reason: there is nothing in a `HudView` to mutate.
  *
- * **What is not here is as deliberate as what is.** There is no research
- * progress, because there is no research until C22, and a field that is always
- * `null` is a promise the view model cannot keep. The HUD draws that tile from
- * §11's icon set and shows it as offline; C22 adds the field and the tile
- * reads it.
+ * **What is not here is as deliberate as what is.** There was no research
+ * progress here until C22, because there was no research: a field that is
+ * always `null` is a promise the view model cannot keep, so the HUD drew the
+ * tile from §11's icon set and showed it as offline. C22 added the field, and
+ * it is nullable for the *other* reason — nothing is being researched — which
+ * is the same distinction `power` has drawn since C21.
  *
  * `power` is what that sentence looked like when it came true. It is nullable,
  * but not always null: it is null until the player builds their first pole,
@@ -38,6 +39,25 @@ export interface HudPowerView {
   /** The worst network's, 0..100 — the one the player has to do something about. */
   readonly satisfactionPercent: number;
   readonly networks: number;
+}
+
+/**
+ * The active technology, for the HUD's research tile (C22 task 5).
+ *
+ * Null on `HudView` when nothing is queued, which is a real state rather than
+ * a missing system — the same distinction `power` draws between "no grid yet"
+ * and "no power system". The tile then reads a dash.
+ */
+export interface HudResearchView {
+  readonly name: string;
+  /** Units completed and units needed. "3 / 10" is what the tile shows. */
+  readonly unitsDone: number;
+  readonly units: number;
+  /** 0..100, so the tile can draw a bar without dividing. */
+  readonly progressPercent: number;
+  /** Labs in the world, and how many turned over this tick. Explains a stall. */
+  readonly labs: number;
+  readonly labsWorking: number;
 }
 
 export interface HudView {
@@ -72,4 +92,14 @@ export interface HudView {
    * reading a dash rather than a confident 100%.
    */
   readonly power: HudPowerView | null;
+  /**
+   * What is being researched, or `null` when nothing is (C22).
+   *
+   * The field this file said would arrive — "there is no research progress,
+   * because there is no research until C22, and a field that is always `null`
+   * is a promise the view model cannot keep". It is now null for the same
+   * reason `power` is: a factory that has queued nothing has no research
+   * progress, which is a fact about the game rather than about the code.
+   */
+  readonly research: HudResearchView | null;
 }

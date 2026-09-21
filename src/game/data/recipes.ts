@@ -50,8 +50,19 @@
  *
  * C21 adds three more — the generator, the power pole and the electric
  * furnace — under that same rule: each is a building that can now be placed
- * and does something. The lab and the radar, and with them `make_frame` and
- * `make_data_core`, still wait for C22 and C23.
+ * and does something. C22 adds five: `make_frame` and `make_data_core`, which
+ * §15 held back until the lab existed to consume them, the lab, and the two
+ * tier-2 buildings the tech tree unlocks. The radar waits for C23.
+ *
+ * ## Locked recipes (C22)
+ *
+ * From C22 a recipe can be **unavailable** — `data/technologies.ts` decides
+ * which, and nothing in this file says so, for the same reason a build cost
+ * does not say which building menu it appears in. A technology that unlocks a
+ * building unlocks the recipe that makes its item along with it, so only a
+ * recipe whose product is *not* a building is ever named in the tree: in v1
+ * that is `smelt_steel` and `make_frame`. Everything this table declares and
+ * no technology claims is available from the first frame.
  *
  * ## `handCraftable` (C21A)
  *
@@ -264,6 +275,91 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     ],
     outputs: [{ itemId: 'electric_furnace', count: 1 }],
     seconds: 3.0,
+    category: 'crafting',
+  },
+
+  /* ---------------------------------------------------------------------- *
+   * Research (C22). The two rows §15 held back — "`make_frame` and
+   * `make_data_core` wait for C22's lab, which is what consumes what they
+   * make" — plus the lab itself and the two tier-2 buildings its tree
+   * unlocks.
+   * ---------------------------------------------------------------------- */
+  {
+    // §15's row, transcribed. Its only consumer is `make_assembler_2`, which
+    // is the other half of what `construction_1` unlocks: a technology that
+    // hands the player a material and the one thing that eats it, so the
+    // frame is never a stack with nowhere to go.
+    id: 'make_frame',
+    inputs: [
+      { itemId: 'steel', count: 2 },
+      { itemId: 'brick', count: 4 },
+    ],
+    outputs: [{ itemId: 'frame', count: 1 }],
+    seconds: 4.0,
+    category: 'crafting',
+  },
+  {
+    // §15's row, transcribed, and the most load-bearing 2.5 in the game: at a
+    // tier-1 assembler's speed 0.5 one core takes five seconds, which is
+    // exactly one lab's five seconds per research unit. **One assembler feeds
+    // one lab.** See §15's derived ratios.
+    id: 'make_data_core',
+    inputs: [
+      { itemId: 'gear', count: 1 },
+      { itemId: 'copper_plate', count: 1 },
+    ],
+    outputs: [{ itemId: 'data_core', count: 1 }],
+    seconds: 2.5,
+    category: 'crafting',
+  },
+  {
+    // §15's building table says 10 gear, 10 circuit, **4 frame**, and the
+    // frames are gone. A frame is two steel, steel is what `smelting_2`
+    // unlocks, and `smelting_2` is a technology — so a lab made of frames
+    // would be a lab you needed research to build and research you needed a
+    // lab to do. Nothing on the path to the *first* technology may be behind
+    // one (C22's entry-path rule); the twelve brick are the furnace's own
+    // material and cost the same detour through stone that a furnace does.
+    id: 'make_lab',
+    inputs: [
+      { itemId: 'gear', count: 10 },
+      { itemId: 'circuit', count: 10 },
+      { itemId: 'brick', count: 12 },
+    ],
+    outputs: [{ itemId: 'lab', count: 1 }],
+    // Five seconds, which at a tier-1 assembler's speed is ten and takes the
+    // title of longest single craft from `make_assembler`. C20's rule — a
+    // building's craft time tracks the size of its bill — and this bill is
+    // the biggest in the game.
+    seconds: 5.0,
+    category: 'crafting',
+  },
+  {
+    // The tier-1 miner's bill with its plates turned to steel and two more
+    // gears on top. **Balance numbers**, on C20's rule: a building that mines
+    // twice as fast costs about twice as much and costs it in the material
+    // the technology two tiers above it unlocked.
+    id: 'make_miner_2',
+    inputs: [
+      { itemId: 'gear', count: 6 },
+      { itemId: 'circuit', count: 4 },
+      { itemId: 'steel', count: 4 },
+    ],
+    outputs: [{ itemId: 'miner_2', count: 1 }],
+    seconds: 3.0,
+    category: 'crafting',
+  },
+  {
+    // The tier-1 assembler's bill, grown, with the frames that are the other
+    // half of `construction_1`. **Balance numbers.**
+    id: 'make_assembler_2',
+    inputs: [
+      { itemId: 'gear', count: 10 },
+      { itemId: 'circuit', count: 6 },
+      { itemId: 'frame', count: 4 },
+    ],
+    outputs: [{ itemId: 'assembler_2', count: 1 }],
+    seconds: 5.0,
     category: 'crafting',
   },
 ] satisfies readonly RecipeDefinition[]);

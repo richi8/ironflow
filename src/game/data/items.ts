@@ -42,7 +42,12 @@
  * not exist cannot be paid for, and an unplaceable building item is a stack a
  * player can never spend. C21 brings the generator and the power pole, which
  * §15 owed, and the electric furnace, which it did not — see C21's deviations.
- * The lab and the radar arrive with C22 and C23.
+ * C22 brings the lab, which §15 owed, and the two tier-2 buildings its
+ * technology tree unlocks; the radar arrives with C23. **The one-to-one
+ * correspondence and the shared order both survive C22's two *materials*
+ * landing after the building items**: the test that compares the two tables
+ * filters out everything that is not a building, so a material in the middle
+ * costs nothing and the append-only rule above is kept.
  *
  * Stack sizes are **balance numbers**. A hundred belts and fifty of everything
  * else: belts are spent a dozen at a time and a stack that ran out mid-drag is
@@ -86,4 +91,22 @@ export const ITEMS: readonly ItemDefinition[] = Object.freeze([
     sprite: 'item:electric_furnace',
     category: 'building',
   },
+
+  /* ---------------------------------------------------------------------- *
+   * C22. Two materials and three buildings, and they are at the **end** of
+   * the table rather than in §15's row order, because the header's rule is
+   * append-only: the runtime ids are this file's order, and sliding `frame`
+   * and `data_core` up among the plates would renumber every building item
+   * below them for no gain.
+   * ---------------------------------------------------------------------- */
+  { id: 'frame', name: 'Structural Frame', stackSize: 50, sprite: 'item:frame', category: 'intermediate' },
+  /**
+   * The science item (§15, C22 task 3). Everything research costs is counted
+   * in these, and the lab is the only thing that consumes one — which is why
+   * it is the one item in the table whose consumer is not a recipe.
+   */
+  { id: 'data_core', name: 'Data Core', stackSize: 200, sprite: 'item:data_core', category: 'science' },
+  { id: 'lab', name: 'Lab', stackSize: 50, sprite: 'item:lab', category: 'building' },
+  { id: 'miner_2', name: 'Miner Mk2', stackSize: 50, sprite: 'item:miner_2', category: 'building' },
+  { id: 'assembler_2', name: 'Assembler Mk2', stackSize: 50, sprite: 'item:assembler_2', category: 'building' },
 ] satisfies readonly ItemDefinition[]);

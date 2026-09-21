@@ -150,6 +150,22 @@ function resolve(stacks: readonly ItemStack[], items: ItemRegistry): readonly Re
   );
 }
 
+/**
+ * Whether a recipe may be run at all. See `research/unlocks.ts`, which
+ * implements it, and `ALL_UNLOCKED`, which is the answer for a caller with no
+ * tech tree.
+ *
+ * It is a parameter of the two questions a *machine* asks — "what does this
+ * item make?" and "would you take this item?" — rather than a field on the
+ * registry, because the registry is content and what is unlocked is state
+ * (§10). Without it a furnace fed iron plates would quietly start smelting
+ * steel before `smelting_2` was researched, which would make the lock a
+ * suggestion.
+ */
+export interface RecipeGate {
+  isRecipeUnlocked(recipeId: RecipeId): boolean;
+}
+
 /** Ambiguous: more than one recipe in the category takes this item. */
 const AMBIGUOUS = null;
 
@@ -248,10 +264,20 @@ export class RecipeRegistry {
    * The recipe this item selects in this category, or `null` when it selects
    * none or more than one. A machine with no recipe calls this with whatever
    * it has just been handed; see `production-system.ts`.
+   *
+   * A recipe the `gate` has not unlocked is not selected (C22), which is what
+   * keeps a locked recipe out of a machine that picks for itself. Note the
+   * **ambiguity is decided before the gate**: two recipes claiming one item
+   * stay ambiguous even when research has only unlocked one of them, because
+   * the ambiguity is a fact about the content table and letting a technology
+   * resolve it would make a furnace change what it smelts the moment an
+   * unrelated node completed.
    */
-  forInput(category: RecipeCategory, itemId: ItemId): Recipe | null {
+  forInput(category: RecipeCategory, itemId: ItemId, gate: RecipeGate): Recipe | null {
     if (itemId < FIRST_ITEM_ID) return null;
-    return this.inputIndex.get(category)?.get(itemId) ?? null;
+    const recipe = this.inputIndex.get(category)?.get(itemId) ?? null;
+    if (recipe === null || !gate.isRecipeUnlocked(recipe.recipeId)) return null;
+    return recipe;
   }
 
   /**
@@ -265,10 +291,25 @@ export class RecipeRegistry {
     return this.byHand;
   }
 
-  /** True when some recipe in the category takes this item, ambiguous or not. */
-  acceptsInput(category: RecipeCategory, itemId: ItemId): boolean {
+  /**
+   * True when some **unlocked** recipe in the category takes this item,
+   * ambiguous or not (C22).
+   *
+   * The gate matters here for the same reason it matters in `forInput`, one
+   * step earlier: this is what a machine that has not chosen a recipe yet
+   * answers "would you take this?" with, and a furnace that accepted iron
+   * plates for a smelting recipe it may not run would fill fifty slots with
+   * an ingredient it can never spend — C14 task 6's failure exactly.
+   */
+  acceptsInput(category: RecipeCategory, itemId: ItemId, gate: RecipeGate): boolean {
     if (itemId < FIRST_ITEM_ID) return false;
-    return this.inputIndex.get(category)?.has(itemId) ?? false;
+    const byItem = this.inputIndex.get(category);
+    if (byItem === undefined || !byItem.has(itemId)) return false;
+    for (const recipe of this.byCategory(category)) {
+      if (!gate.isRecipeUnlocked(recipe.recipeId)) continue;
+      if (recipe.inputs.some((stack) => stack.itemId === itemId)) return true;
+    }
+    return false;
   }
 }
 

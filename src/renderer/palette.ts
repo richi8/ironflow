@@ -92,6 +92,19 @@ export const PALETTE = Object.freeze({
   generator: '#c9a227',
   power_pole: '#8f9c5a',
   electric_furnace: '#e07a62',
+
+  /* research (C22). A cold cyan for the data core, because nothing else that
+     rides a belt is cold and a science line should read at a glance; a violet
+     for the lab; and a brighter tone of each tier-1 colour for the two tier-2
+     buildings — near enough to say "that is a miner", far enough to say "that
+     is not the same miner". `frame` is its own grey rather than steel's,
+     because a belt carrying both is exactly the belt that feeds an assembler
+     making frames. */
+  frame: '#6f7d94',
+  data_core: '#46c8d8',
+  lab: '#b45fd0',
+  miner_2: '#f5b65c',
+  assembler_2: '#63d6b6',
 });
 
 /** Every colour token the renderer may name. */

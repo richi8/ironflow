@@ -36,6 +36,20 @@ export enum EntityType {
    * logistics vs. power infrastructure" choice. See C21's deviations.
    */
   ElectricFurnace = 11,
+  /**
+   * C22. The tier-2 miner and assembler `mining_2` and `construction_1`
+   * unlock, appended for the reason the electric furnace was: an existing
+   * number may never move, so a new kind of building takes the next free one.
+   *
+   * §15's tree names two more tier-2 buildings — the fast belt and the fast
+   * inserter — and they are **not** here. Both are drawn by the procedural
+   * atlas as a lane of chevrons and an arm, neither of which has a way to say
+   * which tier it is, so shipping them would put two buildings on the map that
+   * the player cannot tell apart. They belong to the chunk that gives the
+   * renderer that vocabulary. See C22's deviations.
+   */
+  Miner2 = 12,
+  Assembler2 = 13,
 }
 
 /**
@@ -57,6 +71,8 @@ const ENTITY_TYPE_NAMES: readonly string[] = Object.freeze([
   'lab',
   'radar',
   'electric_furnace',
+  'miner_2',
+  'assembler_2',
 ]);
 
 /** How many entity types exist. Kept in step with the table, not hand-written. */

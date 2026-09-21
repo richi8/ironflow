@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C21A complete — the bag has a door, and the player has hands.** §13's inventory panel exists at last, and hand-crafting is in: eight of §15's recipes, a queue, and a craft that costs real time. The *opening* is still given rather than earned — that is a content change and it is named in C21A's "Noticed, not fixed". Next: C22 — research. |
+| **Status** | **C22 complete — the factory can now change what it is allowed to be.** Labs turn data cores into technologies, five of them, each unlocking a new decision rather than a bigger number; locked buildings are visible in the build menu with the technology that would reveal them. §15's tech tree did not survive contact with §15's building table and was re-derived — see C22's deviations. Next: C23 — expansion, map & radar. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C22 — Research & progression** |
+| **First action** | Chunk **C23 — Expansion, map & radar** |
 
 ---
 
@@ -576,12 +576,36 @@ export type Command =
   | { type: 'insertItems'; entityId: EntityId; itemId: string; amount: number }
   | { type: 'takeItems';  entityId: EntityId; itemId: string; amount: number }
   | { type: 'startResearch'; technologyId: string }
+  | { type: 'cancelResearch'; technologyId: string }   // added in C22
   | { type: 'craftItem';  recipeId: string; count: number }   // added in C21A
   | { type: 'cancelCraft'; index: number }                    // added in C21A
   | { type: 'movePlayer'; dx: number; dy: number }
   | { type: 'mineTile';   x: number; y: number }
   | { type: 'stopMining' };                      // added in C10, see below
 ```
+
+**Implementation note (C22).** `cancelResearch` is the member this union did
+not predict, for the reason `stopMining` was C10's: `startResearch` puts a
+technology in a *queue*, and a queue a player can add to and never remove from
+punishes a misclick for the next ten minutes. Encoding the release as "start it
+again to cancel it" would make one button mean two things.
+
+It is the one command in the game that **cannot fail for a reason the player
+would have to undo**: the units already researched stay recorded against the
+technology, and a lab holding a part-finished unit keeps it, because a unit of
+research work belongs to no particular technology. Cancelling a technology that
+other queued technologies depend on takes them with it, since a queue with an
+unreachable entry in the middle is a stall nothing would explain.
+
+The refusals are `unknown_technology`, `already_researched`, `already_queued`,
+`missing_prerequisites` and `research_queue_full` for `startResearch`, and
+`unknown_technology` or `nothing_queued` for `cancelResearch`. C22 also adds
+**`locked`** to the vocabulary, which is not a research command's refusal at
+all: it is what `build`, `craftItem` and `setRecipe` answer when research has
+not revealed what they name. One reason for a building and a recipe alike,
+because the player does the same thing about either — and *which* technology is
+printed beside the thing itself in the build menu and the research panel, where
+it can be read without a toast going past.
 
 **Implementation note (C21A).** `craftItem` and `cancelCraft` are the two
 members hand-crafting needed, and they are owned by
@@ -691,6 +715,15 @@ accumulator.
 
 Also handle `visibilitychange` by resetting `last` on resume, and pause the loop
 outright when a modal save/load dialog is open.
+
+**Implementation note (C22).** Phase 7 exists. It walks the labs, spends one
+science item per **research unit**, and applies a completed technology's
+unlocks *inside the phase* — which is what makes "completing a technology
+immediately makes its unlocks buildable" a property of the phase order rather
+than of a callback: phase 8 and the next tick's phase 1 both see the new
+tables. The head of the queue is re-read per lab rather than once for the
+phase, so a lab that finishes a technology is seen by the labs walked after it
+and the next technology starts on the same tick.
 
 **Implementation note (C21A).** Phase 8 has a second system in it. Hand-crafting
 (`crafting-system.ts`) runs **before** movement and manual mining, and the
@@ -827,6 +860,7 @@ feel fake.
 | belt item contents and positions | tooltip and inspector text |
 | resource tile remaining amounts | selected-building panel contents |
 | research state and unlocked technologies | spatial index / occupancy grid |
+| *(C22: the queue, the completed set, and part-finished units)* | *(C22: which buildings and recipes are unlocked — a pure function of the left column, `research/unlocks.ts`)* |
 | player position and inventory | belt network topology |
 | next entity id | reachability and connectivity graphs |
 
@@ -1098,11 +1132,37 @@ asked three ways and they have to agree — a craft button greyed out because
 the bag is short, beside a bag row saying otherwise, would be two photographs
 taken a frame apart.
 
-**A view model carries only what exists.** `HudView` has no research progress,
-because there is no research until C22; a field that is always `null` is a
-promise the view cannot keep. The HUD still draws the tile from §11's icon set,
-dimmed, so the bar does not gain one in the middle later — the placeholder is
-one string in the panel.
+**Implementation note (C22).** `ResearchPanel` is real, and it is the last
+panel in the structure diagram above that had been listed and never built. It
+follows `InventoryPanel`'s arrangement exactly — a card per technology and a
+fixed pool of queue rows, both sized by the content table and handed to
+`mount()` in the first view, with a `MutationObserver` in the tests asserting
+that nothing is created or destroyed while the game runs — and it rides the
+same 5 Hz lane, because what it shows is a unit count and a queue.
+
+Two things about it are its own:
+
+- **The tree is drawn as rows of tiers, not as a graph with edges.** Every
+  technology carries `tier`, the longest path from a root, so a row per tier
+  puts a node's prerequisites always in a row above it, and each card names
+  them in words. Drawing the wires would mean absolute positioning and a
+  second geometry to keep in step with a content table that is allowed to
+  grow — for a tree five nodes deep. The chunk that makes the tree wide enough
+  for the rows to stop reading is the chunk that earns an SVG.
+- **A node whose prerequisite is merely *queued* is offered, not greyed.**
+  `ResearchSystem.start` accepts one, because that is what makes the queue
+  worth having; a panel that refused it would put the simulation's own rule
+  out of reach of the UI. §7 lets a pre-check be stricter than the simulation
+  nowhere — this is the pre-check agreeing with it exactly.
+
+**A view model carries only what exists.** `HudView` had no research progress
+from C07 to C22, because there was no research; a field that is always `null`
+is a promise the view cannot keep, so the HUD drew the tile from §11's icon set
+dimmed and the bar did not gain one in the middle later. C22 filled it in, and
+the field is nullable for the *other* reason — nothing is queued — which is the
+distinction `power` has drawn since C21. The tile is a button too: the tech
+tree opens from the thing that says how research is going, exactly as the bag
+opens from the thing that counts what is in it.
 
 **C21 is what that looked like coming true.** `HudView.power` is nullable and
 is *not* always null: it is null until the player's first pole, which is a real
@@ -4869,6 +4929,163 @@ research state.
 **Out of scope.** Infinite research, research productivity, branching exclusive
 choices (a strong post-v1 replayability lever — note it, do not build it).
 
+### What C22 shipped
+
+**Acceptance, one by one.**
+
+- Prerequisites are enforced; an unreachable technology cannot be started.
+  *(Met. A prerequisite that is merely **queued ahead** counts, which is what
+  makes the queue worth having — it is still enforced, because the
+  prerequisite will be done first, and cancelling it takes the technologies
+  that depended on it out with it.)*
+- Completing a technology immediately makes its unlocks buildable. *(Met, and
+  it is a property of the phase order rather than of a callback: the unlock is
+  applied inside phase 7, so phase 8 and the next tick's phase 1 both see it.
+  Asserted from both ends — a `checkPlacement` that answers `locked` and then
+  `null`, and a recipe picker that gains a row.)*
+- Research progress consumes science at the specified rate and pauses when
+  starved. *(Met. One science item per research unit, taken when the unit
+  starts; a starved lab reports `no_input` and carries on the tick something
+  arrives.)*
+- Unlock state after loading a save exactly matches the pre-save state.
+  *(Half met, and the half that exists is the one C24 will build on: there is
+  no save format yet, so the test round-trips `ResearchState` through its own
+  `toJSON` and asserts the derived unlock tables come back identical from the
+  restored state alone. The determinism hash gained a `research` root.)*
+
+**Decisions.**
+
+- **A technology is researched in *units*, and a unit is one of each item in
+  its cost plus `durationTicks` of one lab's time.** So the count in §15's
+  "automation_1 (10 data_core)" *is* the unit total, and the registry refuses a
+  bill whose counts disagree — a bill of 10 of one pack and 20 of another would
+  run out of the first halfway through with nothing to call the stall (§13). A
+  second lab is a second unit in flight rather than a faster one, which is what
+  keeps every rate in the system a whole number of items per lab per unit.
+- **Every v1 technology takes five seconds a unit.** The cost is the lever
+  (10 cores to 100) and the duration is the constant, so a lab's rate is
+  something a player can hold in their head — twelve units a minute, always.
+  It also lands §15's cleanest ratio without anyone choosing it: `make_data_core`
+  is 2.5 s at a tier-1 assembler's speed 0.5, so **one assembler feeds exactly
+  one lab**.
+- **A research unit is anonymous.** A lab's `progressTicks` does not say which
+  technology it is for; the unit lands on whatever is at the head of the queue
+  when it finishes. Switching research mid-unit therefore costs nothing and
+  loses no science, and a lab left running with an empty queue parks its
+  part-finished unit until there is something to spend it on. A field naming
+  the technology would have made both of those into stalls that had to be
+  explained.
+- **Progress is remembered per technology, not per session.** Cancel a
+  half-researched technology, research something else, come back, and the units
+  already paid for are still there. The alternative would make the queue a trap
+  and would destroy science the player watched a lab consume.
+- **Locked is the exception, not the rule.** `computeUnlocks` starts with every
+  building and recipe available and turns off what an *unfinished* technology
+  claims, so the tech tree is the whole lock list in one place and nothing in
+  `data/buildings.ts` or `data/recipes.ts` says a word about research. A
+  building unlock carries the recipe that makes its item with it, and the
+  registry refuses a tree that claims that recipe separately.
+- **A locked recipe is refused at the machine's *port*, not only at the
+  system.** A furnace fed iron plates before `smelting_2` would otherwise
+  quietly start making steel, and an inserter would silt it up with an
+  ingredient for a recipe it may not run — C14 task 6's failure. `RecipeGate`
+  is the narrow interface that carries the answer into `RecipeRegistry`'s two
+  selection questions.
+- **The lab is not a `MachineEntity`.** It makes no item, so it has no output
+  buffer and nothing to hold when one is full; it burns nothing; and what it is
+  working on is not its own. Three fields — an input buffer, a tick count and a
+  status — are the whole of it.
+
+**Deviations.**
+
+- **§15's technology tree was re-derived, and four of its nine nodes are gone.**
+  The full reasoning is in §15, which now carries the shipped tree. In short:
+  research is entered through a building, so nothing on the path to the first
+  technology may be behind a technology — which struck `electronics_1`
+  (circuits are in the lab, the inserter and the miner), took `steel`'s
+  companion `brick` off `smelting_2` (a furnace is twelve brick), and struck
+  `automation_1` for as long as the starting kit contains the assembler it
+  would unlock. `logistics_1` and `exploration_1` unlocked C23's buildings and
+  are C23's to fill in; `logistics_2` waits for a renderer that can draw two
+  belt tiers apart. The five that shipped keep §15's names and §15's costs.
+- **`make_lab`'s bill lost its four frames.** A frame is two steel, steel is
+  `smelting_2`'s, and a lab made of frames is a lab you need research to build.
+  Twelve brick replaced them; the frame's consumer is now `make_assembler_2`,
+  unlocked by the same node, so nothing is a material with nowhere to go.
+- **Three buildings were added that §15's building table does not list**: the
+  lab, which §15 owed, and `miner_2` and `assembler_2`, which §15's *tree* has
+  always named as unlocks without giving them rows. §15's table now has all
+  three.
+- **`Unlock` has no `modifier` member.** C22 task 1 writes the kind as
+  "building | recipe | modifier" and no technology in v1 changes a number, so a
+  third member would be a shape with no producer, no consumer and no test —
+  §19 rule 10 exactly. The machinery a modifier needs is real (every derived
+  content table would have to be rebuilt when one landed) and belongs to the
+  chunk that has one to apply.
+- **`cancelResearch` was added to §7's command union**, recorded there, for the
+  reason C10 added `stopMining`: `startResearch` fills a queue and a queue
+  needs a way out.
+- **The power column decision C21 deferred was taken by striking it.** The
+  miner, the inserter and the assembler stay free; the lab is what makes the
+  grid mandatory. Recorded in §15.
+
+**Tests.**
+
+- `tests/unit/technology-registry.test.ts` — the content table and every way
+  it can be wrong: dangling prerequisites, cycles, duplicate ids, unlocks that
+  name nothing, two technologies claiming one unlock (in both orders), a
+  non-science cost, a bill whose counts disagree, tiers as the longest path
+  from a root, and the shipped tree asserted node for node.
+- `tests/unit/unlocks.test.ts` — the pure function: what the tree locks and
+  what it leaves alone, a building bringing its recipe, idempotence, order
+  independence, monotonicity as the tree completes, and the holder whose
+  identity survives a rebuild.
+- `tests/unit/research-system.test.ts` — the two commands and all their
+  refusals, the queue that chains, a cancel that keeps its units, a lab's
+  consumption tick by tick, starvation, no power, the anonymous unit that
+  survives an empty queue, two labs in parallel, the in-flight guard that stops
+  a wasted core, the unlock landing on the tick, what a lock actually stops
+  (build, hand-craft, `setRecipe`) and what it does not (demolition), the
+  state's JSON round trip, and three determinism assertions over the hash.
+- `tests/integration/plates-to-research.test.ts` — the chunk's acceptance
+  chain, unattended: assembler → inserter → lab → a technology → a splitter
+  that can be placed where one could not be a moment earlier, plus the
+  one-assembler-one-lab ratio measured as time the lab spends starved.
+- `tests/unit/research-panel.dom.test.ts` — the panel through the real
+  `GameUI`: every node drawn whatever its state, both ways in, the queue and
+  its cancels, commands and nothing else, a `MutationObserver` proving no card
+  is rebuilt, and the build menu's half of the same sentence.
+- `tests/unit/production-system.test.ts` gained the other half of the port
+  gate: a furnace that will not pick `smelt_steel` until `smelting_2` lands,
+  and gets straight on with it when it does.
+
+**Noticed, not fixed.**
+
+- **The opening is *still* given rather than earned, and research is now the
+  reason it matters.** C21A named this and C22 has made it sharper:
+  `automation_1` — the strongest first unlock the genre has — is unavailable
+  because the starting kit hands the player an assembler. Cutting the kit to
+  roughly "a furnace, some plates and a pick" would let the assembler be the
+  first technology, and the work is one content table, two numbers and a
+  rewrite of the second milestone in `tests/balance/first-factory.test.ts`.
+  It also needs `make_assembler` to become hand-craftable, or the first
+  assembler could never be made.
+- **The fast belt and the fast inserter have no way to be drawn.** They are the
+  only two v1 unlocks that are blocked by the *renderer*: `beltSprite` and
+  `inserterSprite` carry a rotation and a phase and no tier. Adding one is
+  perhaps eighty lines across the atlas and its test, and it would bring
+  `logistics_2` back into the tree.
+- **`rotate` is still in §7's command union with no implementation.** Named by
+  C20 and by C21A, and untouched again for the same reason: this chunk widened
+  the union once already and a second unrelated system is not its scope.
+- **Research state has no save migration.** `SerializedResearch` is new, like
+  C21A's craft queue before it. C24 owns the format; both fields are now known
+  migrations rather than hypothetical ones.
+- **A `MutationObserver` cannot see `hidden`.** The panel tests assert that no
+  *element* is added, which is the bar C07 set, but a panel that toggled
+  `hidden` on the wrong rows would pass. Nothing has done so; it is worth a
+  sharper assertion the day one does.
+
 ---
 
 ## C23 — Expansion, map & radar
@@ -4898,6 +5115,13 @@ choices (a strong post-v1 replayability lever — note it, do not build it).
 validation and item transit determinism.
 
 **Out of scope.** Trains, waypoints, blueprint-based outpost stamping.
+
+**What C22 leaves here.** Two technology nodes and their content. C23 adds
+`exploration_1` (radar, map panel) as a **leaf** hanging off `power_1` —
+appending a node needs no save migration, where adding a prerequisite to an
+existing one would — and adds the underground belt as a second unlock on
+`logistics_1`, which is where §15 always put it. Both are content rows in
+`data/technologies.ts`; the machinery is in place.
 
 ---
 
@@ -5313,9 +5537,15 @@ player bag        = 30 slots
 | `frame` | Structural Frame | 50 | intermediate |
 | `data_core` | Data Core | 200 | science |
 
-13 items. Add the 14th only if a recipe needs it. Eleven of them exist: C16
-adds `gear`, `copper_wire` and `circuit` with the recipes that make them, and
-`frame` and `data_core` wait for C22's lab, which is what consumes them.
+13 items, and **all thirteen exist from C22**: C16 added `gear`, `copper_wire`
+and `circuit` with the recipes that make them, and C22 added `frame` and
+`data_core` with the lab that consumes them. Add the 14th only if a recipe
+needs it.
+
+`frame` and `data_core` are at the **end** of `data/items.ts` rather than in
+this table's row order, because that file is append-only — the runtime ids are
+its order, and sliding two rows up would renumber every building item below
+them for no gain.
 
 **Building items (C20).** The thirteen above are the *materials*. Every
 building in the table below is also an item — that is what "placed by consuming
@@ -5334,12 +5564,16 @@ order, with `category: 'building'`:
 | `generator` | 50 |
 | `power_pole` | 50 |
 | `electric_furnace` | 50 |
+| `lab` | 50 |
+| `miner_2` | 50 |
+| `assembler_2` | 50 |
 
 A hundred belts and fifty of everything else: belts are spent a dozen at a time
 and a stack that runs out mid-drag reads as a bug (C13); fifty of anything else
 is past what a player carries before they run out of somewhere to put it. Both
-are **balance numbers**. C21 added the last three; the two buildings still owed
-— lab and radar — bring their items with them in C22 and C23.
+are **balance numbers**. C21 added the generator, the pole and the electric
+furnace; C22 added the lab §15 owed and the two tier-2 buildings its tech tree
+unlocks. Only the radar is still outstanding, and it arrives with C23.
 
 **Ten buildings is one more than the hotbar.** C21 is the chunk that overflows
 `HOTBAR_SLOTS`, and the tenth entry is reached through the build menu with no
@@ -5404,15 +5638,29 @@ lands on 150 kW by derivation rather than by choice. The constant lives in
 | `make_generator` | 8 `gear` + 10 `iron_plate` + 6 `brick` | 1 `generator` | 3.0 s | assembler |
 | `make_power_pole` | 1 `copper_wire` + 2 `iron_plate` | 1 `power_pole` | 0.5 s | assembler |
 | `make_electric_furnace` | 12 `brick` + 5 `circuit` + 3 `steel` | 1 `electric_furnace` | 3.0 s | assembler |
+| `make_lab` | 10 `gear` + 10 `circuit` + 12 `brick` | 1 `lab` | 5.0 s | assembler |
+| `make_miner_2` | 6 `gear` + 4 `circuit` + 4 `steel` | 1 `miner_2` | 3.0 s | assembler |
+| `make_assembler_2` | 10 `gear` + 6 `circuit` + 4 `frame` | 1 `assembler_2` | 5.0 s | assembler |
 
 A time in this table is the **recipe's own**. What a machine takes is that
 divided by its `craftingSpeed`, rounded to whole ticks once at startup (C16):
 `make_gear` is 1.0 s and a tier-1 assembler takes 60 ticks over it.
 
-The last three are examples of the **building recipes**: every building in the
-table below has one, taking exactly the ingredients in its "crafted from" column.
-Total v1 recipe count: **9 processing + 12 building = 21**, the twelfth
-building being C21's electric furnace.
+The building rows are exactly that: every building in the table below has one,
+taking the ingredients in its "crafted from" column. Total v1 recipe count:
+**9 processing + 14 building = 23**, of which 22 exist — the radar's is C23's.
+
+**`make_lab`'s bill is not the one the building table below used to give.** It
+said 10 gear, 10 circuit and **4 frame**, and the frames are gone: a frame is
+two steel, steel is what `smelting_2` unlocks, and `smelting_2` is a
+technology — so a lab made of frames would be a lab you needed research to
+build and research you needed a lab to do. That is C22's **entry-path rule**,
+and the twelve brick that replaced them cost the same detour through stone
+that a furnace does. The frame's consumer is now `make_assembler_2`, which is
+the other half of what `construction_1` unlocks, so it is never a material
+with nowhere to go. Its five seconds make it the longest single craft in the
+game, taking that title from `make_assembler` on C20's rule that a craft time
+tracks the size of its bill.
 
 C20 shipped seven of the eleven — one per building that exists — and authored
 the four times this table did not give. They are **balance numbers**, chosen so
@@ -5473,6 +5721,22 @@ smallest scale it can — but it is written down so that a later tweak to either
 number makes a decision about it rather than an accident.
 `tests/balance/ratios.test.ts` holds all six.
 
+**C22 adds a seventh, and it is the cleanest in the game:**
+
+```text
+1 assembler making data cores    1 core / 5 s   (2.5 s recipe at speed 0.5)
+1 lab                            1 unit / 5 s   (every v1 technology, uniform)
+                                 ->  one assembler feeds exactly one lab
+```
+
+Nothing in either number is chosen to make that true twice: §15 already gave
+`make_data_core` its 2.5 s and the tier-1 assembler its speed 0.5, and C22's
+uniform five seconds a unit is what falls out of them. The consequence a
+player can act on is that a science line scales in whole assemblers, and that
+one standard inserter — 1.0 items/s against a core wanted every five seconds —
+has four seconds of slack in every five, which is the first ratio in the game
+with room in it.
+
 ### Buildings
 
 Buildings are **placed by consuming their item** from the player's inventory.
@@ -5492,8 +5756,10 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s **at full load**, pro rata below it (C21) |
 | `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8 (a radius), supply area 5 (a square) |
 | `electric_furnace` | 2×2 | 12 brick, 5 circuit, 3 steel | 150 kW | smelting, speed 1.0, **no fuel buffer**; buffers 50 in / 50 out, 4 rotations (C21) |
-| `lab` | 3×3 | 10 gear, 10 circuit, 4 frame | 180 kW | consumes data cores |
+| `lab` | 3×3 | 10 gear, 10 circuit, **12 brick** | 180 kW | consumes data cores; one research unit per 5 s (C22) |
 | `radar` | 2×2 | 5 gear, 5 circuit, 10 iron_plate | 300 kW | reveals map world chunks |
+| `miner_2` | 2×2 | 6 gear, 4 circuit, 4 steel | — | 1.0 items/s; unlocked by `mining_2` (C22) |
+| `assembler_2` | 3×3 | 10 gear, 6 circuit, 4 frame | — | speed 1.0; unlocked by `construction_1` (C22) |
 
 Hand-craftable without a machine (so a new game is never soft-locked):
 `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they need.
@@ -5523,10 +5789,21 @@ assembler, so the assembler's whole value is automation rather than speed. See
 C21A's decisions for why that is the opposite of the genre's usual answer and
 why it is the right one here.
 
-12 buildings — above the "5–8" of the previous revision, but each one is a
-distinct verb, not a variant. The twelfth is C21's `electric_furnace`; see
-below for why it exists and why the `electric_miner` C21 task 6 also names
-does not.
+14 buildings. Ten of them are distinct verbs, which is what the previous
+revision's "5–8" was protecting; four are variants, and each one is there
+because a **technology needed something to unlock**. The twelfth is C21's
+`electric_furnace`; the thirteenth and fourteenth are C22's `miner_2` and
+`assembler_2`, which §15's own tech tree has always named (`mining_2` unlocks
+"miner tier 2 (1.0/s)", `construction_1` unlocks "assembler tier 2") without
+giving them rows. C22 gave them rows. Thirteen of the fourteen exist; the
+radar is C23's.
+
+**The fast belt and the fast inserter are not among them**, and the reason is
+the renderer rather than the tree: the procedural atlas draws a belt as a lane
+of chevrons and an inserter as an arm, and neither sprite id has a way to say
+which tier it is. Two buildings on the map the player cannot tell apart is a
+worse answer than one technology fewer, so `logistics_2` waits for the chunk
+that gives the renderer that vocabulary. See C22's deviations.
 
 ### The power column, as C21 charges it
 
@@ -5551,16 +5828,25 @@ draws power    electric_furnace 150 kW      (C21)
                lab              180 kW      (C22)
                radar            300 kW      (C23)
 
-free in v1     miner, inserter, assembler   §15's figures stand as intent;
-                                            C22 either charges them and moves
-                                            power_1 to the front of the tree,
-                                            or strikes them
+free in v1     miner, inserter, assembler   struck by C22 — see below
 ```
 
 This is a real reduction in what power *touches* in v1, and it is worth being
 honest about: with only the electric furnace drawing on it, C21's grid is
 optional. What makes it worth building anyway is the logistics trade below,
 and what will make it mandatory is C22's lab.
+
+**C22 made the decision C21 left it, and it struck the three figures.** The
+miner, the inserter and the assembler run for free in v1. The alternative —
+charge them and move `power_1` to the front of the tree — was considered and
+rejected: it would make a generator the price of the *first* miner, which
+inverts §15's own progression and makes the opening more given rather than
+less. What replaces it is the lab. Every technology in the game goes through a
+building that draws 180 kW and will not turn over without a pole in reach, so
+the grid stops being optional the moment the player wants anything from the
+tech tree — which is exactly the sentence C21 wrote and could not yet keep.
+The generator and the pole are therefore **start content** (see the tree
+below), because nothing on the path to the first technology may be behind one.
 
 ### The electric furnace, and the electric miner that is not here
 
@@ -5589,47 +5875,84 @@ size of C20's pass and is not C21's to make.
 
 ### Technology tree v1
 
+**Rewritten by C22.** The tree drawn in revision 2 does not survive contact
+with §15's own building table, and the rule that resolves it is worth stating
+before the tree itself:
+
+> **Nothing on the path to the first technology may be behind a technology.**
+
+Research is entered through a *building*, so the lab, the grid that powers it,
+and every recipe that goes into a data core have to exist before any of them
+can be researched. Four of the nine nodes as drawn broke that, or else unlocked
+something no chunk has built:
+
 ```text
-                       [start: miner, belt, inserter, chest, furnace]
-                                     |
-                            automation_1  (10 data_core)
-                            unlocks: assembler, splitter
-                                     |
-                +--------------------+--------------------+
-                |                    |                    |
-        smelting_2 (20)      electronics_1 (20)    logistics_1 (25)
-        unlocks: steel,      unlocks: circuit,     unlocks: underground
-        brick                  wire                  belt
-                |                    |                    |
-                +--------------------+--------------------+
-                                     |
-                             power_1 (40 data_core)
-                             unlocks: generator, pole, lab,
-                                      electric miner, electric furnace
-                                     |
-                +--------------------+--------------------+
-                |                    |                    |
-        mining_2 (60)        logistics_2 (60)     exploration_1 (60)
-        unlocks: miner       unlocks: fast belt,  unlocks: radar,
-        tier 2 (1.0/s)       fast inserter        map panel
-                |                    |                    |
-                +--------------------+--------------------+
-                                     |
-                          construction_1 (100 data_core)
-                          unlocks: frame, assembler tier 2
+  node            unlocked                 why it could not
+  automation_1    assembler, splitter      C20's starting kit contains an
+                                           assembler; a locked building the
+                                           player is given is one they cannot
+                                           place
+  electronics_1   circuit, wire            the inserter, the miner and the lab
+                                           are all made of circuits
+  smelting_2      steel, brick             a furnace is twelve brick, and a
+                                           furnace is a starting building
+  logistics_1     underground belt         C23's building (§19 rule 4)
+  exploration_1   radar, map               C23's, likewise
 ```
 
-Nine technologies. Note that only `mining_2` and `logistics_2` are numerical
-upgrades, and even those change the ratios enough to force a rebuild — which is
-the point. Everything else unlocks a **new verb**.
+The shipped tree keeps five of the nine names, all of §15's costs, and the
+shape of a spine: every node unlocks something that exists and creates a
+decision rather than a number.
 
-**Two things C22 inherits from C21.** First, `power_1`'s "electric miner" is
-not implemented and the reason is above — either give the base miner a fuel
-buffer first, or make `mining_2`'s tier-2 miner the electric one. Second, the
-tree's *order* has to be reconciled with the power column: as written it hands
-the player an assembler two tiers before a generator, which is why C21 charges
-nothing to it. Moving `power_1` ahead of `automation_1` and charging §15's
-figures is the alternative, and it is a decision, not a tidy-up.
+```text
+          [start: miner, belt, inserter, chest, furnace,
+                  generator, power pole, LAB, and every recipe
+                  on the path to a data core]
+                                |
+                    logistics_1 (10 data_core)
+                    unlocks: splitter
+                    -> one line, two ways: the routing puzzle
+                                |
+                    smelting_2 (20 data_core)
+                    unlocks: steel
+                    -> a second smelting chain, 16 s a unit, and
+                       the material everything below is made of
+                                |
+                    power_1 (40 data_core)
+                    unlocks: electric furnace
+                    -> one coal line to one generator, or one to
+                       every furnace (C21's trade)
+                                |
+                +---------------+---------------+
+                |                               |
+        mining_2 (60)                   construction_1 (100)
+        unlocks: miner tier 2 (1.0/s)   unlocks: frame, assembler tier 2
+        -> every ratio re-derived       -> the machine §15's recipe times
+                                           were actually written for
+```
+
+Five technologies, 230 data cores in total, and at one lab that is about
+twenty minutes of research spread across a game that has to build the science
+line to pay for it. `construction_1` requires `mining_2`, so the tree is a
+chain with one fork rather than a diamond — a five-node tree with three ways
+in would be a menu, not a progression.
+
+**What became of the other four names.** `electronics_1` is **struck**:
+everything it unlocked is on the path to the first lab, and a node that
+unlocks nothing fails C22's own test. `automation_1` is **struck** for as long
+as the starting kit contains an assembler — it is the strongest first unlock
+in the genre and it is unavailable while the player is handed the thing it
+would grant, which is a *content* decision about the kit and is named in C22's
+"Noticed, not fixed". `logistics_2` (fast belt, fast inserter) waits for a
+renderer that can tell two belt tiers apart. `exploration_1` is C23's, with
+the radar and the map panel it names, and C23 adds the underground belt to
+`logistics_1` — appending an unlock to an existing node, which needs no save
+migration, rather than adding a prerequisite to one, which would.
+
+**Only `mining_2` is a numerical upgrade**, and §15's original claim about it
+holds: doubling a miner to 1.0 items/s re-derives every ratio downstream of it,
+so a line built for tier-1 miners becomes short of furnaces rather than short
+of ore. Everything else unlocks a **new verb**.
 
 ---
 

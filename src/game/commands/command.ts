@@ -44,6 +44,18 @@ export type Command =
   | { readonly type: 'takeItems'; readonly entityId: EntityId; readonly itemId: string; readonly amount: number }
   | { readonly type: 'startResearch'; readonly technologyId: string }
   /**
+   * Take a technology out of the research queue. Added in C22.
+   *
+   * §7's union was written out complete on day one and predicted
+   * `startResearch` without predicting its release, exactly as C10's
+   * `mineTile` needed `stopMining`. A queue the player can add to and never
+   * remove from is a queue that punishes a misclick for the next ten minutes,
+   * and "start it again to cancel it" would make one button mean two things.
+   * Nothing is lost by cancelling — see `systems/research-system.ts` — so this
+   * is a command that cannot fail for a reason the player would have to undo.
+   */
+  | { readonly type: 'cancelResearch'; readonly technologyId: string }
+  /**
    * Queue `count` hand-crafts of `recipeId`. Added in C21A; see the note below.
    *
    * The ingredients leave the bag when the order is queued, not when each
@@ -143,8 +155,29 @@ export type CommandRejectionReason =
   | 'not_craftable'
   /** The hand-craft queue already holds `MAX_CRAFT_ORDERS` orders. */
   | 'craft_queue_full'
-  /** There is no order at that index to cancel. */
-  | 'nothing_queued';
+  /** There is no order at that index to cancel — nor, since C22, that technology. */
+  | 'nothing_queued'
+  /* Added in C22. */
+  /**
+   * Research has not revealed this yet.
+   *
+   * One reason for a building and for a recipe, because it is one sentence to
+   * the player — "you have not researched that" — and because the thing they
+   * do about it is the same either way. The *which technology* half is on the
+   * build menu and the research panel, beside the thing itself, where it can
+   * be read without a toast going past.
+   */
+  | 'locked'
+  /** No technology has this id. A stale panel, or a hand-written command. */
+  | 'unknown_technology'
+  /** It is already researched; there is nothing left to do to it. */
+  | 'already_researched'
+  /** It is already in the research queue. */
+  | 'already_queued'
+  /** Something it needs is neither researched nor queued ahead of it. */
+  | 'missing_prerequisites'
+  /** The research queue already holds `MAX_RESEARCH_QUEUE` technologies. */
+  | 'research_queue_full';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {
@@ -201,6 +234,7 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
       if (!isName(command.itemId)) return 'malformed';
       return isCount(command.amount) ? null : 'malformed';
     case 'startResearch':
+    case 'cancelResearch':
       return isName(command.technologyId) ? null : 'malformed';
     case 'craftItem':
       if (!isName(command.recipeId)) return 'malformed';

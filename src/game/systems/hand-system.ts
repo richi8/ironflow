@@ -65,6 +65,7 @@ import { MINE_RANGE_TILES, type PlayerState } from '../player/player-state.js';
 import { BuildingRegistry } from '../registries/building-registry.js';
 import type { ItemId, ItemRegistry } from '../registries/item-registry.js';
 import { NO_RECIPE, type Recipe, type RecipeRegistry, type RecipeStack } from '../registries/recipe-registry.js';
+import type { Unlocks } from '../research/unlocks.js';
 
 export interface HandSystemOptions {
   readonly entities: EntityStore;
@@ -72,6 +73,8 @@ export interface HandSystemOptions {
   readonly items: ItemRegistry;
   readonly recipes: RecipeRegistry;
   readonly player: PlayerState;
+  /** What research has revealed (C22). A live holder — see `BuildSystem`. */
+  readonly unlocks: Unlocks;
 }
 
 export class HandSystem {
@@ -80,6 +83,7 @@ export class HandSystem {
   private readonly items: ItemRegistry;
   private readonly recipes: RecipeRegistry;
   private readonly player: PlayerState;
+  private readonly unlocks: Unlocks;
 
   /** What each building holds and accepts — see `items/item-port.ts` (C15). */
   private readonly ports: PortContext;
@@ -90,7 +94,13 @@ export class HandSystem {
     this.items = options.items;
     this.recipes = options.recipes;
     this.player = options.player;
-    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
+    this.unlocks = options.unlocks;
+    this.ports = {
+      buildings: options.buildings,
+      items: options.items,
+      recipes: options.recipes,
+      unlocks: options.unlocks,
+    };
   }
 
   /**
@@ -204,7 +214,7 @@ export class HandSystem {
    * Tell a machine what to make. The `setRecipe` command (§7, C16 task 2).
    *
    * ```text
-   *   refuse    gone, out of reach, not a machine, not a recipe it can run
+   *   refuse    gone, out of reach, not a machine, locked, not one it can run
    *   give back a craft in progress, then everything in the input buffer
    *   set       the new recipe, with progress at zero
    * ```
@@ -248,6 +258,11 @@ export class HandSystem {
     if (recipeId !== null) {
       if (!this.recipes.has(recipeId)) return 'unknown_recipe';
       next = this.recipes.get(recipeId);
+      // C22: a recipe research has not revealed is refused before the machine
+      // is asked whether it could run one, because "you have not researched
+      // that" is true of every machine and `not_accepted` would suggest
+      // another one might take it.
+      if (!this.unlocks.isRecipeUnlocked(next.recipeId)) return 'locked';
       if (next.category !== config.category) return 'not_accepted';
     }
 

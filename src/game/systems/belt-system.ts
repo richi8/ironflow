@@ -98,6 +98,7 @@ import {
   type SplitterSide,
 } from '../entities/splitter-entity.js';
 import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
+import type { Unlocks } from '../research/unlocks.js';
 import type { BuildingRegistry } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import type { RecipeRegistry } from '../registries/recipe-registry.js';
@@ -110,6 +111,11 @@ export interface BeltSystemOptions {
   readonly items: ItemRegistry;
   /** Part of the port context; belts never look a recipe up themselves (C15). */
   readonly recipes: RecipeRegistry;
+  /**
+   * What research has revealed (C22). Held only to build the port context: a
+   * machine's input port asks it what a machine would accept.
+   */
+  readonly unlocks: Unlocks;
 }
 
 /** Is this a tile the occupancy index can be asked about without throwing? */
@@ -160,7 +166,12 @@ export class BeltSystem {
   constructor(options: BeltSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
-    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
+    this.ports = {
+      buildings: options.buildings,
+      items: options.items,
+      recipes: options.recipes,
+      unlocks: options.unlocks,
+    };
 
     const types = Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) => type as EntityType);
     this.carrierUnits = Object.freeze(

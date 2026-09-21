@@ -58,6 +58,8 @@ interface Row {
   readonly button: HTMLButtonElement;
   readonly cost: HTMLElement;
   readonly hotkey: HTMLElement;
+  /** What research would reveal it. Empty, and hidden, for an unlocked row. */
+  readonly lock: HTMLElement;
 }
 
 export interface BuildMenuOptions {
@@ -116,12 +118,22 @@ export class BuildMenu {
 
       setText(row.cost, describeCost(entry));
       setText(row.hotkey, entry.hotkey === null ? '' : String(entry.hotkey));
+      // C22 task 5: "locked buildings appear greyed in the build menu with
+      // their unlocking technology named — visible locks are motivating;
+      // invisible ones are confusing."
+      setText(row.lock, entry.unlocked || entry.unlockedBy === null ? '' : entry.unlockedBy);
+      row.lock.hidden = entry.unlocked || entry.unlockedBy === null;
+      row.cost.hidden = !entry.unlocked;
       row.button.classList.toggle('is-selected', entry.selected);
       row.button.classList.toggle('is-unaffordable', !entry.affordable);
       row.button.classList.toggle('is-locked', !entry.unlocked);
       // A locked building is visible and unusable, which is the point of
       // showing it: it is the tech tree advertising itself (C22).
       row.button.disabled = !entry.unlocked;
+      row.button.title =
+        entry.unlocked || entry.unlockedBy === null
+          ? entry.name
+          : `${entry.name} — researching ${entry.unlockedBy} unlocks it`;
     }
   }
 
@@ -172,8 +184,15 @@ export class BuildMenu {
     const hotkey = document.createElement('span');
     hotkey.className = 'if-build-row__hotkey';
 
-    button.append(name, cost, hotkey);
-    this.rows.set(entry.buildingId, { button, cost, hotkey });
+    // Drawn in the cost's place rather than beside it: the two are never both
+    // interesting, because a building the player cannot build yet is one whose
+    // price is not the thing standing in their way.
+    const lock = document.createElement('span');
+    lock.className = 'if-build-row__lock';
+    lock.hidden = true;
+
+    button.append(name, cost, lock, hotkey);
+    this.rows.set(entry.buildingId, { button, cost, hotkey, lock });
     return button;
   }
 }

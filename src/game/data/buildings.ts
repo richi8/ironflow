@@ -31,6 +31,12 @@
  * order — which is why the inserter goes between the belt and the chest
  * rather than on the end, and why C17's splitter pushes it along a slot
  * rather than being appended.
+ *
+ * C22's three are the lab — the first building whose output is not an item at
+ * all — and the tier-2 miner and assembler its tree unlocks. The tier-2 pair
+ * is the proof of this file's central claim taken one step further: they
+ * differ from the rows above them in exactly one number each, and no file
+ * outside `data/` knows they exist.
  */
 
 import { EntityType } from '../entities/entity-types.js';
@@ -286,5 +292,86 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     },
     power: { consumptionKw: 150 },
     sprite: 'building:production:EF:2x2:2',
+  },
+
+  /* ---------------------------------------------------------------------- *
+   * Research (C22). Appended for C21's reason: content order is hotkey order,
+   * and inserting a row renumbers a hotbar the player has already learned.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'lab',
+    name: 'Lab',
+    entityType: EntityType.Lab,
+    category: 'research',
+    size: { width: 3, height: 3 },
+    // One. A lab has no output side: what it makes is a technology, and that
+    // leaves through the tech tree rather than through a tile. Three
+    // rotations the player cannot tell apart is the chest's argument.
+    rotationCount: 1,
+    buildCost: [{ itemId: 'lab', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // The whole of "this building researches" (C22). One number, because a
+    // lab's *speed* is the technology's own duration and there is no second
+    // tier of lab to divide it by — see `ResearchProperties`.
+    //
+    // Fifty is the machine buffers' number and a **balance number**: at one
+    // data core every five seconds it is four minutes of research, which is
+    // long enough that a lab can be filled by hand and short enough that a
+    // factory researching in earnest wants a belt to it.
+    research: { inputCapacity: 50 },
+    // §15's power column, and the row that makes C21's grid mandatory rather
+    // than optional: every technology in the game goes through this building,
+    // and it does not turn over without a pole in reach.
+    power: { consumptionKw: 180 },
+    sprite: 'building:research:LA:3x3:3',
+  },
+
+  /* ---------------------------------------------------------------------- *
+   * The tier-2 buildings the tech tree unlocks (C22).
+   *
+   * Each is the row above it with **one number changed**, which is the claim
+   * every `*Properties` doc-comment in `building-registry.ts` has been making
+   * since C11: "a second tier is a table entry rather than a code change".
+   * This is where that claim is cashed, and nothing outside `data/` moved.
+   * ---------------------------------------------------------------------- */
+  {
+    id: 'miner_2',
+    name: 'Miner Mk2',
+    entityType: EntityType.Miner2,
+    category: 'extraction',
+    size: { width: 2, height: 2 },
+    rotationCount: 4,
+    buildCost: [{ itemId: 'miner_2', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN, requiresResource: true },
+    // §15's tree: "miner tier 2 (1.0/s)" — 30 ticks per item exactly, twice
+    // the tier-1 anchor. It is the one unlock in v1 that is a *number*, and
+    // §15 is explicit that it earns its place by re-deriving every ratio
+    // downstream of it: one of these feeds 3.2 plate furnaces, and a line
+    // built for tier-1 miners is suddenly short of furnaces rather than short
+    // of ore.
+    mining: { itemsPerSecond: 1.0, bufferCapacity: 50 },
+    sprite: 'building:extraction:M2:2x2:2',
+  },
+  {
+    id: 'assembler_2',
+    name: 'Assembler Mk2',
+    entityType: EntityType.Assembler2,
+    category: 'production',
+    size: { width: 3, height: 3 },
+    rotationCount: 4,
+    buildCost: [{ itemId: 'assembler_2', count: 1 }],
+    placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // The assembler with `craftingSpeed` doubled to 1.0, which is §15's
+    // "assembler tier 2". At speed 1.0 a recipe takes exactly the time §15
+    // authors it at, so the tier-2 assembler is the machine the content table
+    // was written for and the tier-1 one is the handicap.
+    production: {
+      category: 'crafting',
+      recipeSelection: 'player',
+      craftingSpeed: 1.0,
+      inputCapacity: 50,
+      outputCapacity: 50,
+    },
+    sprite: 'building:production:A2:3x3:2',
   },
 ]);

@@ -158,8 +158,9 @@ describe('the shipped item table', () => {
     const registry = new ItemRegistry(ITEMS);
 
     expect(registry.all().map((item) => item.id)).toEqual([
-      // §15's materials: eleven of its thirteen. `frame` and `data_core` wait
-      // for C22's lab, which is the only thing that consumes them.
+      // §15's materials: eleven of its thirteen, in its order. The other two
+      // are C22's and are at the *end* of the table, because the rule is
+      // append-only (see `data/items.ts`).
       'iron_ore',
       'copper_ore',
       'coal',
@@ -183,6 +184,14 @@ describe('the shipped item table', () => {
       'generator',
       'power_pole',
       'electric_furnace',
+      // C22: §15's last two materials, then the lab and the two tier-2
+      // buildings its tech tree unlocks. Appended rather than slotted into
+      // §15's row order, so no existing runtime id moves.
+      'frame',
+      'data_core',
+      'lab',
+      'miner_2',
+      'assembler_2',
     ]);
     expect(registry.stackSizeOf(registry.idOf('iron_ore'))).toBe(50);
     expect(registry.stackSizeOf(registry.idOf('iron_plate'))).toBe(100);

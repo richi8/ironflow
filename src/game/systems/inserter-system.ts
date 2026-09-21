@@ -87,6 +87,7 @@ import {
 import { MachineStatus } from '../entities/machine-status.js';
 import type { AlertLog } from '../alerts.js';
 import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
+import type { Unlocks } from '../research/unlocks.js';
 import type { BuildingRegistry, InserterConfig } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import type { RecipeRegistry } from '../registries/recipe-registry.js';
@@ -99,6 +100,11 @@ export interface InserterSystemOptions {
   readonly items: ItemRegistry;
   /** Needed to know what a machine beside it will accept (C15). */
   readonly recipes: RecipeRegistry;
+  /**
+   * What research has revealed (C22). Held only to build the port context: a
+   * machine's input port asks it what a machine would accept.
+   */
+  readonly unlocks: Unlocks;
   /** Where "this inserter is pointed at nothing" is reported (C20). */
   readonly alerts: AlertLog;
 }
@@ -137,7 +143,12 @@ export class InserterSystem {
     this.entities = options.entities;
     this.buildings = options.buildings;
     this.alerts = options.alerts;
-    this.ports = { buildings: options.buildings, items: options.items, recipes: options.recipes };
+    this.ports = {
+      buildings: options.buildings,
+      items: options.items,
+      recipes: options.recipes,
+      unlocks: options.unlocks,
+    };
     this.configs = Object.freeze(
       Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) =>
         this.buildings.inserterFor(type as EntityType),

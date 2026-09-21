@@ -398,6 +398,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* The technology that would reveal a locked row, drawn in the cost's place. */
+.if-build-row__lock {
+  color: var(--if-blue-high);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .if-build-row__hotkey:not(:empty) {
   /* A key cap, so the hotkey does not read as another digit of the cost. */
   min-width: 16px;
@@ -914,6 +921,183 @@ body {
 .if-queue-row__cancel:hover {
   border-color: var(--if-danger);
   color: var(--if-text);
+}
+
+/* --- Research panel (C22) --------------------------------------------------
+ *
+ * The same frame as the inventory, in the same place and with the same head:
+ * they are two panels the player opens with their left hand, and a tech tree
+ * that landed somewhere else on screen would be a third layout to learn.
+ * Opening either puts the other away.
+ * -------------------------------------------------------------------------- */
+
+.if-research {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(680px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.if-research__active {
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+}
+
+.if-research__active-name {
+  color: var(--if-text);
+}
+
+.if-research__active-detail {
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.if-research__track {
+  grid-column: 1 / -1;
+  display: block;
+  overflow: hidden;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 3px;
+  background: var(--if-bg-deep);
+}
+
+.if-research__bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--if-accent);
+}
+
+/* The tree scrolls; the heading above it and the queue below it do not. */
+.if-research__tree {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  margin-bottom: 8px;
+}
+
+/* One row per tier, so a card's prerequisites are always in a row above it.
+   See `ui/research-panel.ts` on why the edges are not drawn. */
+.if-research__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.if-research__row + .if-research__row {
+  padding-top: 6px;
+  border-top: 1px dashed var(--if-stroke);
+}
+
+.if-tech {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-tech:hover:not(:disabled) {
+  border-color: var(--if-accent);
+}
+
+.if-tech:disabled {
+  cursor: default;
+}
+
+.if-tech__name {
+  color: var(--if-text);
+  letter-spacing: 0.04em;
+}
+
+.if-tech__summary,
+.if-tech__grants,
+.if-tech__cost,
+.if-tech__needs {
+  color: var(--if-text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.if-tech__grants {
+  color: var(--if-blue-high);
+}
+
+.if-tech__needs:empty {
+  display: none;
+}
+
+.if-tech__track {
+  display: block;
+  overflow: hidden;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--if-bg-deep);
+}
+
+.if-tech__bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--if-accent-dim);
+}
+
+/* Four states, four tones. A researched card is done and says so quietly; the
+   active one carries the accent; a locked one is dimmed but still readable,
+   because §15's whole argument for showing locks is that they are motivating. */
+.if-tech[data-state='researched'] {
+  border-color: color-mix(in srgb, var(--if-ok) 50%, var(--if-stroke));
+}
+
+.if-tech[data-state='researched'] .if-tech__name {
+  color: var(--if-ok);
+}
+
+.if-tech[data-state='active'] {
+  border-color: var(--if-accent);
+}
+
+.if-tech[data-state='active'] .if-tech__name {
+  color: var(--if-accent-high);
+}
+
+.if-tech[data-state='queued'] {
+  border-color: var(--if-accent-dim);
+}
+
+.if-tech[data-state='locked'] {
+  opacity: 0.55;
+}
+
+.if-research .if-queue {
+  flex: none;
+  max-height: 120px;
 }
 
 /* --- Notifications -------------------------------------------------------- */

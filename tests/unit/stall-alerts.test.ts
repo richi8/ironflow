@@ -127,6 +127,7 @@ describe('the hand may take from an input buffer; an inserter may not (C20)', ()
       buildings: simulation.buildings,
       items: simulation.items,
       recipes: simulation.recipes,
+      unlocks: simulation.unlocks,
     };
 
     // The port an inserter reads offers nothing; the port the hand reads

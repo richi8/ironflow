@@ -11,6 +11,7 @@ import { newMachine } from '../../src/game/entities/machine-entity.js';
 import { newMiner } from '../../src/game/entities/miner-entity.js';
 import type { Entity } from '../../src/game/entities/entity.js';
 import { inputPortOf, outputPortOf, type PortContext } from '../../src/game/items/item-port.js';
+import { openUnlocks } from '../fixtures/unlocks.js';
 import { BuildingRegistry } from '../../src/game/registries/building-registry.js';
 import { ItemRegistry, NO_ITEM } from '../../src/game/registries/item-registry.js';
 import { RecipeRegistry } from '../../src/game/registries/recipe-registry.js';
@@ -33,7 +34,7 @@ import { ResourceType } from '../../src/game/world/resource.js';
 const items = new ItemRegistry(ITEMS);
 const buildings = new BuildingRegistry(BUILDINGS);
 const recipes = new RecipeRegistry(RECIPES, items);
-const ctx: PortContext = { buildings, items, recipes };
+const ctx: PortContext = { buildings, items, recipes, unlocks: openUnlocks(buildings, recipes, items) };
 
 const IRON_ORE = items.idOf('iron_ore');
 const COPPER_ORE = items.idOf('copper_ore');

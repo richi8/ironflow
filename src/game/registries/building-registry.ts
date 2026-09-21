@@ -251,6 +251,32 @@ export interface ProductionProperties {
 }
 
 /**
+ * What makes a building a **lab** (C22 task 2).
+ *
+ * Its presence is what makes a building research things — `building-init.ts`
+ * branches on this field and on nothing else — so a second tier of lab is a
+ * table entry rather than a code change (§19 rule 17).
+ *
+ * One field, and the absence of a second is the decision worth recording:
+ * there is no `speed`. A recipe has a duration and a machine divides it by its
+ * own speed (`craft-durations.ts`), but a technology's duration is authored
+ * per *unit* in `data/technologies.ts` and v1 has exactly one kind of lab to
+ * run it — so a speed multiplier would be a number with no second value and a
+ * division with nothing to divide (§19 rule 10). The chunk that adds a faster
+ * lab adds the field.
+ */
+export interface ResearchProperties {
+  /**
+   * Ceiling on each science item it holds.
+   *
+   * Per item, like a machine's buffers and for the same reason: a ceiling is
+   * what makes backpressure reach the belt in front of it (§9), so a lab that
+   * is full stops its inserter rather than swallowing a whole chest of cores.
+   */
+  readonly inputCapacity: number;
+}
+
+/**
  * What a building draws from a power network. See ironflow.md C21 task 2.
  *
  * Its presence is what makes a building a **consumer** — nothing branches on
@@ -381,6 +407,8 @@ export interface BuildingDefinition {
   readonly generator?: GeneratorProperties;
   /** Present only on buildings that carry a network between machines (C21). */
   readonly pole?: PoleProperties;
+  /** Present only on buildings that turn science items into progress (C22). */
+  readonly research?: ResearchProperties;
   /**
    * Typed `string` rather than the renderer's `SpriteId`, which is the same
    * type: §4 forbids `game/` from importing `renderer/`, and a sprite id is a
@@ -405,6 +433,7 @@ function freezeDefinition(definition: BuildingDefinition): BuildingDefinition {
   if (definition.power !== undefined) Object.freeze(definition.power);
   if (definition.generator !== undefined) Object.freeze(definition.generator);
   if (definition.pole !== undefined) Object.freeze(definition.pole);
+  if (definition.research !== undefined) Object.freeze(definition.research);
   return Object.freeze(definition);
 }
 
@@ -543,6 +572,17 @@ function validate(definition: BuildingDefinition): void {
     }
   }
 
+  const research = definition.research;
+  if (research !== undefined) {
+    checkCapacity(research.inputCapacity, `${where} science buffer`);
+    if (production !== undefined) {
+      // A building that both crafted and researched would have two answers to
+      // "what is this one progress counter counting", and the sensible one —
+      // two counters — is two buildings. Refused here so no system has to ask.
+      throw new Error(`BuildingRegistry: ${where} both runs recipes and researches; it must do one.`);
+    }
+  }
+
   if (definition.placement.onTerrain.length === 0) {
     throw new Error(`BuildingRegistry: ${where} accepts no terrain at all, so it could never be placed.`);
   }
@@ -670,6 +710,9 @@ export class BuildingRegistry {
 
   private readonly poleByType = new Map<EntityType, PoleProperties>();
 
+  /** Research content (C22). One field, unconverted: see `ResearchProperties`. */
+  private readonly researchByType = new Map<EntityType, ResearchProperties>();
+
   /**
    * Entity types that run recipes, ascending. What `ProductionSystem` walks,
    * in a fixed order that does not depend on the content table's (§6 R4).
@@ -700,6 +743,15 @@ export class BuildingRegistry {
   private readonly generatorTypeList: readonly EntityType[];
 
   private readonly poleTypeList: readonly EntityType[];
+
+  /**
+   * Entity types that research, ascending by type number (C22).
+   *
+   * What `ResearchSystem` walks every tick, in a fixed order that does not
+   * depend on the content table's (§6 R4) — the same arrangement the three
+   * power lists above make.
+   */
+  private readonly researchTypeList: readonly EntityType[];
 
   constructor(definitions: readonly BuildingDefinition[]) {
     const frozen: BuildingDefinition[] = [];
@@ -762,6 +814,9 @@ export class BuildingRegistry {
       if (value.pole !== undefined) {
         this.poleByType.set(value.entityType, value.pole);
       }
+      if (value.research !== undefined) {
+        this.researchByType.set(value.entityType, value.research);
+      }
     }
 
     this.definitions = Object.freeze(frozen);
@@ -773,6 +828,7 @@ export class BuildingRegistry {
     this.consumerTypeList = Object.freeze(allTypes.filter((type) => this.powerByType.has(type)));
     this.generatorTypeList = Object.freeze(allTypes.filter((type) => this.generatorByType.has(type)));
     this.poleTypeList = Object.freeze(allTypes.filter((type) => this.poleByType.has(type)));
+    this.researchTypeList = Object.freeze(allTypes.filter((type) => this.researchByType.has(type)));
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */
@@ -916,6 +972,22 @@ export class BuildingRegistry {
   /** Every entity type that carries a network, ascending by type number (C21). */
   poleTypes(): readonly EntityType[] {
     return this.poleTypeList;
+  }
+
+  /**
+   * How this kind of building researches, or null if it does not (C22).
+   *
+   * This is also the answer to "is this entity a lab": `asLab` asks it rather
+   * than testing the entity type, exactly as `asMachine` asks
+   * `productionFor` (§19 rule 17).
+   */
+  researchFor(type: EntityType): ResearchProperties | null {
+    return this.researchByType.get(type) ?? null;
+  }
+
+  /** Every entity type that researches, ascending by type number (C22). */
+  researchTypes(): readonly EntityType[] {
+    return this.researchTypeList;
   }
 
   /**

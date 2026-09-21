@@ -14,7 +14,8 @@
  * `definition.splitter` a splitter, `definition.inserter` an inserter,
  * `definition.storage` a container and
  * `definition.production` a machine that runs recipes and
- * `definition.generator` one that burns fuel into a power network (C21), so
+ * `definition.generator` one that burns fuel into a power network (C21) and
+ * `definition.research` a lab (C22), so
  * the day a second tier of any of them is added, nothing here changes. That is the same rule `build-system.ts`
  * states in its header, kept true by giving the type-specific part its own
  * place to live rather than by care.
@@ -28,6 +29,7 @@ import { newChest } from './chest-entity.js';
 import type { EntityInit } from './entity.js';
 import { newGenerator } from './generator-entity.js';
 import { newInserter } from './inserter-entity.js';
+import { newLab } from './lab-entity.js';
 import { newMachine } from './machine-entity.js';
 import { newMiner } from './miner-entity.js';
 import { newSplitter } from './splitter-entity.js';
@@ -52,6 +54,7 @@ export function initialBuildingState(
   if (definition.storage !== undefined) return newChest(x, y, rotation);
   if (definition.production !== undefined) return newMachine(definition.entityType, x, y, rotation);
   if (definition.generator !== undefined) return newGenerator(definition.entityType, x, y, rotation);
+  if (definition.research !== undefined) return newLab(definition.entityType, x, y, rotation);
   // A power pole, and anything else whose whole state is where it stands: it
   // is a point on a network and nothing more, so it has no fields of its own
   // and falls through to the four every entity has (C21).

@@ -84,6 +84,11 @@ interface Chain {
  */
 function buildChain(branches: 1 | 2 = 2): Chain {
   const simulation = new Simulation({ world: oreWorld(5000) });
+  // C22: the splitter is what `logistics_1` unlocks. This chunk is about what
+  // a splitter *does*, so the technology is granted outright rather than
+  // researched — `tests/unit/research-system.ts` is where the unlocking
+  // itself is tested.
+  simulation.researchSystem.grant('logistics_1');
   simulation.player.setTilePosition(STAND.x, STAND.y);
   simulation.inventory.add('miner', 1);
   simulation.inventory.add('belt', 10);

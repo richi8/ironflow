@@ -77,6 +77,14 @@ const SCRIPT: readonly TimedCommand[] = Object.freeze([
   { tick: 1200, command: { type: 'movePlayer', dx: 0, dy: -1 } satisfies Command },
   { tick: 1260, command: { type: 'movePlayer', dx: 0, dy: 0 } satisfies Command },
   { tick: 4000, command: { type: 'build', buildingId: 'belt', ...SCRATCH_TILE, rotation: EAST } satisfies Command },
+  // C22. The reference factory has no lab, so nothing is *researched* here —
+  // what these two put in the hash is the research **queue**, which is
+  // authoritative state (§10) that a command writes and a save carries. A
+  // queue that reordered itself between two runs would be as much a
+  // determinism bug as a belt that did.
+  { tick: 5000, command: { type: 'startResearch', technologyId: 'logistics_1' } satisfies Command },
+  { tick: 5200, command: { type: 'startResearch', technologyId: 'smelting_2' } satisfies Command },
+  { tick: 7000, command: { type: 'cancelResearch', technologyId: 'smelting_2' } satisfies Command },
 ]);
 
 /** C18's acceptance criterion, as a number. */

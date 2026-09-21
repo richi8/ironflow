@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { ITEMS } from '../../src/game/data/items.js';
 import { RECIPES } from '../../src/game/data/recipes.js';
+import { TECHNOLOGIES } from '../../src/game/data/technologies.js';
 import { BuildingRegistry } from '../../src/game/registries/building-registry.js';
 import { ItemRegistry } from '../../src/game/registries/item-registry.js';
 import { RecipeRegistry } from '../../src/game/registries/recipe-registry.js';
@@ -100,7 +101,14 @@ describe('every item has somewhere to come from and somewhere to go', () => {
     const consumed = RECIPES.some((recipe) => recipe.inputs.some((stack) => stack.itemId === itemId));
     const placeable = buildings.has(itemId);
     const burns = items.get(itemId).fuelSeconds !== undefined;
-    expect(consumed || placeable || burns || KNOWN_DEAD_ENDS.includes(itemId), itemId).toBe(true);
+    // C22 adds a fourth way for an item to have a consumer, and it is the
+    // first that is not a recipe: a lab eats science. `data_core` is made by
+    // `make_data_core` and spent by every technology in the tree, and without
+    // this line it would read as the dead end it is the furthest thing from.
+    const researched = TECHNOLOGIES.some((technology) =>
+      technology.cost.some((stack) => stack.itemId === itemId),
+    );
+    expect(consumed || placeable || burns || researched || KNOWN_DEAD_ENDS.includes(itemId), itemId).toBe(true);
   });
 
   it('has a dead-end list with nothing stale on it', () => {
@@ -151,26 +159,31 @@ describe('the building recipes run in a machine that exists', () => {
 
 describe('the v1 target, and how far off it is', () => {
   /**
-   * §15's v1 target is 11 buildings, 13 materials and 20 recipes, and C21
-   * moves it: the electric furnace is a twelfth building §15 never listed, so
-   * the target is now 12 buildings and 21 recipes (see C21's deviations).
+   * §15's v1 target was 11 buildings, 13 materials and 20 recipes. C21 moved
+   * it once — the electric furnace is a twelfth building §15 never listed —
+   * and C22 moves it again: the tech tree it asks for names tier-2 buildings
+   * that §15's table does not have rows for, and two of them are shipped (see
+   * C22's deviations).
    *
    * ```text
-   *            v1 target   C21 ships   waiting on
-   * buildings         12          10   lab (C22), radar (C23)
-   * materials         13          11   frame, data_core (C22's lab consumes them)
-   * recipes           21          17   make_lab, make_radar, make_frame, make_data_core
+   *            v1 target   C22 ships   waiting on
+   * buildings         14          13   radar (C23)
+   * materials         13          13   —
+   * recipes           23          22   make_radar (C23)
    * ```
    *
-   * The numbers are asserted so that the day C22 adds a lab, this test fails
-   * and the reader is pointed at the table rather than at a comment.
+   * The numbers are asserted so that the day C23 adds a radar, this test
+   * fails and the reader is pointed at the table rather than at a comment.
    */
-  it('ships exactly what C21 can ship, and the rest is accounted for', () => {
-    expect(BUILDINGS).toHaveLength(10);
-    expect(ITEMS.filter((item) => item.category !== 'building')).toHaveLength(11);
-    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(10);
-    expect(RECIPES).toHaveLength(17);
-    // 7 processing recipes + one per building.
-    expect(RECIPES.filter((recipe) => !buildings.has(recipe.outputs[0]?.itemId ?? ''))).toHaveLength(7);
+  it('ships exactly what C22 can ship, and the rest is accounted for', () => {
+    expect(BUILDINGS).toHaveLength(13);
+    // §15's thirteen materials, all of them at last: `frame` and `data_core`
+    // arrived with the lab that consumes them.
+    expect(ITEMS.filter((item) => item.category !== 'building')).toHaveLength(13);
+    expect(ITEMS.filter((item) => item.category === 'building')).toHaveLength(13);
+    expect(RECIPES).toHaveLength(22);
+    // 9 processing recipes — §15's nine, now that `make_frame` and
+    // `make_data_core` exist — plus one per building.
+    expect(RECIPES.filter((recipe) => !buildings.has(recipe.outputs[0]?.itemId ?? ''))).toHaveLength(9);
   });
 });

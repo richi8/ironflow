@@ -261,6 +261,10 @@ function bootstrap(): void {
       ui.toggleInventory();
       return;
     }
+    if (action === 'ui.toggleResearch') {
+      ui.toggleResearch();
+      return;
+    }
     if (action === 'ui.toggleAltMode') {
       altMode = !altMode;
       return;
