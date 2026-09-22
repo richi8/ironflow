@@ -4,7 +4,8 @@
  * Two jobs, both of them per-tick and both of them integer arithmetic:
  *
  * ```text
- * move   one step in the held direction, per axis, blocked by terrain and buildings
+ * move   one step in the held direction, per axis, blocked by terrain and by
+ *        buildings that are not walkable
  * mine   one tick of progress toward the next item, or a reason to stop
  * ```
  *
@@ -27,6 +28,7 @@
  */
 
 import type { EntityStore } from '../entities/entity-store.js';
+import type { BuildingRegistry } from '../registries/building-registry.js';
 import {
   MINE_TICKS_PER_ITEM,
   MINE_RANGE_TILES,
@@ -46,6 +48,8 @@ import type { World } from '../world/world.js';
 export interface PlayerSystemOptions {
   readonly world: World;
   readonly entities: EntityStore;
+  /** Content, for the one question movement asks of it: is this walkable? */
+  readonly buildings: BuildingRegistry;
   readonly player: PlayerState;
   readonly items: ItemRegistry;
 }
@@ -53,12 +57,14 @@ export interface PlayerSystemOptions {
 export class PlayerSystem {
   private readonly world: World;
   private readonly entities: EntityStore;
+  private readonly buildings: BuildingRegistry;
   private readonly player: PlayerState;
   private readonly items: ItemRegistry;
 
   constructor(options: PlayerSystemOptions) {
     this.world = options.world;
     this.entities = options.entities;
+    this.buildings = options.buildings;
     this.player = options.player;
     this.items = options.items;
   }
@@ -112,10 +118,13 @@ export class PlayerSystem {
   /**
    * Could the player's box sit centred here?
    *
-   * Every tile the box touches must be passable terrain with nothing built on
-   * it. `World.getTile` generates a world chunk on a miss, which is exactly
-   * C10's "cannot walk off into an ungenerated void": the collision test is
-   * what pulls the world into existence ahead of the player.
+   * Every tile the box touches must be passable terrain carrying nothing solid
+   * — a belt, a splitter or a tunnel mouth is walkable and does not block, and
+   * which buildings those are is content's answer rather than this file's (see
+   * `BuildingDefinition.walkable`). `World.getTile` generates a world chunk on
+   * a miss, which is exactly C10's "cannot walk off into an ungenerated void":
+   * the collision test is what pulls the world into existence ahead of the
+   * player.
    *
    * The box is half-open on its far edges — `+ radius - 1` — so a player whose
    * edge lands exactly on a tile boundary is not considered to be touching the
@@ -135,7 +144,8 @@ export class PlayerSystem {
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         if (!isPassable(this.world.getTile(x, y))) return false;
-        if (this.entities.at(x, y) !== undefined) return false;
+        const entity = this.entities.at(x, y);
+        if (entity !== undefined && !this.buildings.isWalkable(entity.type)) return false;
       }
     }
     return true;

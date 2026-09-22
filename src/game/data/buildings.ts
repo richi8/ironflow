@@ -84,6 +84,11 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     rotationCount: 4,
     buildCost: [{ itemId: 'belt', count: 1 }],
     placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // A belt is a floor with a motor under it, so the player walks over it.
+    // The whole family is walkable for one reason: a line the player has to
+    // walk around is a wall they built by accident, and the first factory is
+    // exactly where someone lays a belt across their own path to the ore.
+    walkable: true,
     // §9's tier-1 anchor: 2.0 tiles/s over four slots per tile is 8.0 items/s,
     // and that number is what every machine rate in §15 is derived from.
     // Changing it means re-deriving the content bible (§19 rule 18).
@@ -110,6 +115,10 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     rotationCount: 4,
     buildCost: [{ itemId: 'splitter', count: 1 }],
     placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // Walkable, like the belt it sits in: it is the same floor, and a junction
+    // that stopped the player where the two belts either side of it did not
+    // would read as a bug rather than as a rule.
+    walkable: true,
     // The same speed as the belt it sits in, and for a reason rather than for
     // symmetry: a splitter slower than its belt would be a throughput cliff in
     // the middle of a line the player cannot see, and one faster would make
@@ -423,6 +432,10 @@ export const BUILDINGS: readonly BuildingDefinition[] = Object.freeze([
     rotationCount: 4,
     buildCost: [{ itemId: 'underground_belt', count: 1 }],
     placement: { onTerrain: ANY_BUILDABLE_TERRAIN },
+    // Walkable at both mouths — the run itself is underground and was never
+    // in the way, and a tunnel entrance the player cannot step over would make
+    // the building that exists to get *under* things an obstacle.
+    walkable: true,
     // §9's tier-1 anchor, unchanged, and six tiles — see
     // `UndergroundProperties` for why neither is free.
     underground: { tilesPerSecond: 2.0, maxSpan: 6 },

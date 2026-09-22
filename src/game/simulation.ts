@@ -412,6 +412,7 @@ export class Simulation {
     this.playerSystem = new PlayerSystem({
       world: this.world,
       entities: this.entities,
+      buildings: this.buildings,
       player: this.player,
       items: this.items,
     });

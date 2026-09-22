@@ -489,6 +489,21 @@ export interface BuildingDefinition {
    */
   readonly buildCost: readonly ItemStack[];
   readonly placement: PlacementRules;
+  /**
+   * Can the player walk over one of these?
+   *
+   * Absent means no, which is the right default: a machine is a solid object
+   * and content that forgets to say so should not become a hole in the world.
+   * The belt family says yes, because a belt is a floor with a motor under it
+   * — the genre has always let the player walk over one, and a factory whose
+   * lines are walls is a maze the player has to route *themselves* around as
+   * well as their items.
+   *
+   * It lives on the definition rather than in the player system, so that
+   * adding a walkable building is a line of content and not a type test in a
+   * system that would then have to name it (§4, §19 rule 18).
+   */
+  readonly walkable?: boolean;
   /** Present only on buildings that extract from the ground (C11). */
   readonly mining?: MiningProperties;
   /** Present only on buildings that carry items along themselves (C13). */
@@ -839,6 +854,9 @@ export class BuildingRegistry {
 
   private readonly byType = new Map<EntityType, BuildingDefinition>();
 
+  /** Entity types the player may stand on. See `BuildingDefinition.walkable`. */
+  private readonly walkableTypes = new Set<EntityType>();
+
   /**
    * Mining content, converted to ticks once (§6 R3). Keyed by entity type
    * because the mining system iterates entities, and an entity carries a type.
@@ -996,6 +1014,10 @@ export class BuildingRegistry {
       }
     }
 
+    for (const definition of frozen) {
+      if (definition.walkable === true) this.walkableTypes.add(definition.entityType);
+    }
+
     this.definitions = Object.freeze(frozen);
     // Built by walking the *type numbers*, not the definitions, so the order is
     // the enum's and not the content table's (§6 R4).
@@ -1007,6 +1029,20 @@ export class BuildingRegistry {
     this.poleTypeList = Object.freeze(allTypes.filter((type) => this.poleByType.has(type)));
     this.researchTypeList = Object.freeze(allTypes.filter((type) => this.researchByType.has(type)));
     this.radarTypeList = Object.freeze(allTypes.filter((type) => this.radarByType.has(type)));
+  }
+
+  /**
+   * May the player stand on a tile this kind of building occupies? C10, C13.
+   *
+   * A question rather than a lookup, because the caller is the player system
+   * asking about whatever the occupancy map handed it — including, in
+   * principle, an entity type no definition claims. That is a content bug
+   * rather than a movement bug, so the answer is "no, it is solid" instead of
+   * the throw `forEntityType` would give: the player is blocked by something
+   * they can see, which is recoverable, rather than the tick dying.
+   */
+  isWalkable(type: EntityType): boolean {
+    return this.walkableTypes.has(type);
   }
 
   /** Every building, in content order. What the build menu and hotkeys follow. */

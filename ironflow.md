@@ -2857,6 +2857,14 @@ rate in ticks; build-range validation; frame-rate independence of movement.
 
 **Deviations.**
 
+- **Buildings block the player, except the belt family (changed 2026-09-22).**
+  C10 task 3 says movement is blocked by terrain and buildings, and it was: any
+  entity on a tile refused the step. A belt line is a floor with a motor under
+  it, and a line the player has to walk *around* is a wall they built by
+  accident — the first factory is exactly where someone lays a belt across
+  their own path to the ore. `canStandAt` now asks the building registry
+  whether what it found is walkable, and §15's table says which three are.
+
 - **`stopMining` was added to §7's command union**, and `movePlayer` now sets a
   *persistent direction* rather than moving one step. Both are recorded in §7
   with the reasoning; the short version is that a command stream arrives at
@@ -6903,8 +6911,8 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | id | size | crafted from | power | notes |
 |---|---|---|---|---|
 | `miner` | 2×2 | 4 gear, 2 circuit, 4 iron_plate | — *(see below)* | needs ≥1 resource tile under footprint |
-| `belt` | 1×1 | 1 gear + 1 iron_plate → **2 belts** | — | 4 rotations, 8 items/s |
-| `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | 4 rotations, deterministic round-robin, 8 items/s per lane (C17) |
+| `belt` | 1×1 | 1 gear + 1 iron_plate → **2 belts** | — | 4 rotations, 8 items/s, **walkable** |
+| `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | 4 rotations, deterministic round-robin, 8 items/s per lane (C17), **walkable** |
 | `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | — *(see below)* | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
 | `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
@@ -6914,9 +6922,17 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `electric_furnace` | 2×2 | 12 brick, 5 circuit, 3 steel | 150 kW | smelting, speed 1.0, **no fuel buffer**; buffers 50 in / 50 out, 4 rotations (C21) |
 | `lab` | 3×3 | 10 gear, 10 circuit, **12 brick** | 180 kW | consumes data cores; one research unit per 5 s (C22) |
 | `radar` | 2×2 | 5 gear, 5 circuit, 10 iron_plate | 300 kW | reveals a 5-world-chunk square, one chunk every 0.5 s (C23) |
-| `underground_belt` | 1×1 | 2 gear, 4 iron_plate → **2 mouths** | — | 4 rotations, 8 items/s, span ≤ 6 tiles (C23) |
+| `underground_belt` | 1×1 | 2 gear, 4 iron_plate → **2 mouths** | — | 4 rotations, 8 items/s, span ≤ 6 tiles (C23), **walkable** |
 | `miner_2` | 2×2 | 6 gear, 4 circuit, 4 steel | — | 1.0 items/s; unlocked by `mining_2` (C22) |
 | `assembler_2` | 3×3 | 10 gear, 6 circuit, 4 frame | — | speed 1.0; unlocked by `construction_1` (C22) |
+
+**Walkable buildings (added 2026-09-22).** The belt family — `belt`,
+`splitter`, `underground_belt` — does not block the player. Everything else
+does. It is a `walkable` flag on the building definition rather than a rule in
+the player system, so adding one is a line of content and no system has to
+learn the names of the buildings it applies to (§19 rule 18). The player is
+*not* carried along by a belt they stand on; that is a gameplay decision nobody
+has made yet, and it would be a change to §9 rather than to this flag.
 
 Hand-craftable without a machine (so a new game is never soft-locked):
 `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they need.

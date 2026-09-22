@@ -11,7 +11,7 @@ import {
 } from '../../src/game/player/player-state.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.js';
-import { NORTH } from '../../src/game/world/coordinates.js';
+import { EAST, NORTH } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { TileType } from '../../src/game/world/tile.js';
 import { World } from '../../src/game/world/world.js';
@@ -173,6 +173,37 @@ describe('walking', () => {
     run(simulation, 300, [{ type: 'movePlayer', dx: 0, dy: -1 }]);
 
     expect(simulation.player.tileY).toBeGreaterThan(1);
+  });
+
+  it('walks over a belt line rather than around it', () => {
+    const simulation = makeGame(0, 4);
+    simulation.inventory.add('belt', 3);
+    // A belt across the player's path at y = 2, three tiles wide, so the walk
+    // north cannot slip past its end.
+    for (const x of [-1, 0, 1]) {
+      run(simulation, 1, [{ type: 'build', buildingId: 'belt', x, y: 2, rotation: EAST }]);
+    }
+    expect(simulation.entities.at(0, 2)).toBeDefined();
+
+    run(simulation, 120, [{ type: 'movePlayer', dx: 0, dy: -1 }]);
+
+    // Past the line, not stopped at its southern edge.
+    expect(simulation.player.tileY).toBeLessThan(2);
+  });
+
+  it('is still stopped by a chest on the same path', () => {
+    // The other half of the rule, and the reason walkability is a field rather
+    // than "logistics buildings do not collide": a chest is in the same
+    // category as nothing and blocks like every other solid thing.
+    const simulation = makeGame(0, 4);
+    simulation.inventory.add('chest', 3);
+    for (const x of [-1, 0, 1]) {
+      run(simulation, 1, [{ type: 'build', buildingId: 'chest', x, y: 2, rotation: NORTH }]);
+    }
+
+    run(simulation, 120, [{ type: 'movePlayer', dx: 0, dy: -1 }]);
+
+    expect(simulation.player.tileY).toBeGreaterThan(2);
   });
 
   it('slides along a wall instead of stopping dead against it', () => {
