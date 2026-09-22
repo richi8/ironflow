@@ -108,6 +108,10 @@ export interface SaveBridge {
   readonly onLoad: (id: string) => void;
   readonly onDelete: (id: string) => void;
   readonly onRename: (id: string, name: string) => void;
+  /** C26: write a file — the named slot, or the running game for `null`. */
+  readonly onExport: (id: string | null, name: string) => void;
+  /** C26: open a file the player chose or dropped. */
+  readonly onImport: (file: File) => void;
   readonly onTakeOver: () => void;
   /**
    * The panel opened or closed.
@@ -212,6 +216,8 @@ export class GameUI {
       onLoad: (id) => this.saves?.onLoad(id),
       onDelete: (id) => this.saves?.onDelete(id),
       onRename: (id, name) => this.saves?.onRename(id, name),
+      onExport: (id, name) => this.saves?.onExport(id, name),
+      onImport: (file) => this.saves?.onImport(file),
       onTakeOver: () => this.saves?.onTakeOver(),
       onClose: () => this.toggleSaveMenu(),
     });
@@ -382,6 +388,18 @@ export class GameUI {
    */
   setSaveMenuView(view: SaveMenuView): void {
     this.saveMenu.update(view);
+  }
+
+  /**
+   * Open the save menu because something outside the UI needs it open.
+   *
+   * C26's one caller: a save file dropped on the window is imported, and the
+   * status line the import writes to is inside this panel — so an import that
+   * left the menu closed would be an import that happened in silence, whether
+   * it worked or not.
+   */
+  openSaveMenu(): void {
+    if (!this.saveMenu.isOpen()) this.toggleSaveMenu();
   }
 
   /** Open or close the save menu. Returns the new state (C25). */

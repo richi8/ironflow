@@ -23,6 +23,7 @@
 import type { SerializedGameState } from '../game/save/save-format.js';
 import { SAVE_FORMAT, SAVE_VERSION, type SaveFile } from '../game/save/save-format.js';
 
+import type { EncodedSave } from './save-codec.js';
 import {
   SaveError,
   asSaveError,
@@ -92,7 +93,25 @@ export class SaveService {
       }
     }
 
-    const file: SaveFile = {
+    const file = this.fileFor(request);
+
+    try {
+      return await this.repository.save(id, file, request.kind);
+    } catch (cause) {
+      throw asSaveError(cause);
+    }
+  }
+
+  /**
+   * The `SaveFile` §14 defines, around a snapshot.
+   *
+   * Shared by `write` and by C26's export of the *running* game, which is a
+   * save that never goes near storage — and must still be the same document,
+   * or a factory exported from a browser with no IndexedDB would be a second
+   * format nobody tests.
+   */
+  fileFor(request: SaveRequest): SaveFile {
+    return {
       format: SAVE_FORMAT,
       version: SAVE_VERSION,
       metadata: {
@@ -107,18 +126,27 @@ export class SaveService {
       },
       state: request.state,
     };
-
-    try {
-      return await this.repository.save(id, file, request.kind);
-    } catch (cause) {
-      throw asSaveError(cause);
-    }
   }
 
   /** Read a slot's file back. The caller deserializes it. */
   async read(id: string): Promise<SaveFile> {
     try {
       return await this.repository.load(id);
+    } catch (cause) {
+      throw asSaveError(cause);
+    }
+  }
+
+  /**
+   * A slot's stored bytes, undecoded. C26's export of an unreadable save.
+   *
+   * The one read that works on a slot `read` refuses, which is what makes
+   * §14's "refuse and keep the corrupt blob for export" a promise rather than
+   * a hope: the player gets the bytes out, and a bug report gets a file.
+   */
+  async readRaw(id: string): Promise<EncodedSave> {
+    try {
+      return await this.repository.loadRaw(id);
     } catch (cause) {
       throw asSaveError(cause);
     }

@@ -25,6 +25,8 @@
 
 import type { SaveFile, SaveMetadata } from '../game/save/save-format.js';
 
+import type { EncodedSave } from './save-codec.js';
+
 /**
  * Manual saves and autosaves are the same file in different slots.
  *
@@ -80,6 +82,16 @@ export interface SaveRepository {
   save(id: string, save: SaveFile, kind: SaveKind): Promise<SaveSlot>;
   /** Read one back. Throws `SaveError('not_found')` if it is not there. */
   load(id: string): Promise<SaveFile>;
+  /**
+   * The stored bytes, undecoded. C26's export, and §14's promise about them.
+   *
+   * §14 says a corrupt save is "refused and kept for export rather than
+   * deleted", and a corrupt save is by definition one `load` will not return
+   * — so the promise is only real if something can read a slot without
+   * understanding it. This is that something, and it is the *only* method
+   * here that does not care what it is holding.
+   */
+  loadRaw(id: string): Promise<EncodedSave>;
   /** Remove one. Removing something that is not there is not an error. */
   delete(id: string): Promise<void>;
   /** Change a slot's name without touching its state. */

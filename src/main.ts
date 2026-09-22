@@ -15,6 +15,7 @@ import type { World } from './game/world/world.js';
 import { InputManager } from './input/input-manager.js';
 import type { InputAction } from './input/keybindings.js';
 import { Autosave, AUTOSAVE_IDS } from './persistence/autosave.js';
+import { downloadSaveFile, watchSaveFileDrops } from './persistence/export-import.js';
 import { IndexedDbSaveRepository } from './persistence/indexeddb-save-repository.js';
 import { MemorySaveRepository } from './persistence/memory-save-repository.js';
 import { SaveController, type SaveSessionState, type SaveSnapshot } from './persistence/save-controller.js';
@@ -677,6 +678,10 @@ async function bootstrap(): Promise<void> {
     autosave,
     capture: captureSave,
     apply: applyLoadedState,
+    // C26 task 1. The controller stays headless — an anchor and an object URL
+    // are the browser's, not its — so the one line of DOM a download needs is
+    // wired here, where every other browser dependency is.
+    download: (bytes, filename) => downloadSaveFile(bytes, filename),
     onChange: (state) => {
       if (wired) ui.setSaveMenuView(saveMenuView(state));
     },
@@ -719,6 +724,11 @@ async function bootstrap(): Promise<void> {
       onLoad: (id) => void saves.load(id),
       onDelete: (id) => void saves.remove(id),
       onRename: (id, name) => void saves.rename(id, name),
+      // C26. A selected slot exports that slot; nothing selected exports the
+      // factory on screen, which is the only export a browser with no
+      // IndexedDB can offer (§14's first row).
+      onExport: (id, name) => void (id === null ? saves.exportCurrent(name) : saves.exportSlot(id)),
+      onImport: (file) => void saves.importFile(file, file.name),
       onTakeOver: () => saves.takeOver(),
       // §8: "pause the loop outright when a modal save/load dialog is open."
       // Remembered rather than toggled, so closing the menu does not start a
@@ -739,6 +749,16 @@ async function bootstrap(): Promise<void> {
   wired = true;
   centreOnPlayer();
   publishSaves();
+
+  // C26 task 2's other half: a save dropped anywhere on the window is
+  // imported. The listener is here rather than in the panel because a drop
+  // that only worked over one panel is a drop the player has to discover, and
+  // because §4 keeps `ui/**` clear of `persistence/**` either way. Opening the
+  // menu is part of the import: the status line is where the answer appears.
+  watchSaveFileDrops(window, (file) => {
+    ui.openSaveMenu();
+    void saves.importFile(file, file.name);
+  });
 
   // §8: the game does not run in a background tab. Time away costs nothing and
   // produces nothing, and resyncing on return avoids a pointless catch-up lurch.

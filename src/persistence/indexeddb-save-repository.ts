@@ -181,6 +181,13 @@ export class IndexedDbSaveRepository implements SaveRepository {
     return { ...file, metadata: { ...file.metadata, ...slotMetadata(slot) } };
   }
 
+  /** The stored bytes, whatever they turn out to be. See `SaveRepository`. */
+  async loadRaw(id: string): Promise<EncodedSave> {
+    const body = await this.run(BODY_STORE, 'readonly', (store) => store.get(id) as IDBRequest<BodyRecord | undefined>);
+    if (body === undefined) throw new SaveError('not_found', `There is no save under "${id}".`);
+    return { bytes: toBytes(body.bytes), compressed: body.compressed === true };
+  }
+
   async delete(id: string): Promise<void> {
     await this.transact([META_STORE, BODY_STORE], 'readwrite', (tx) => {
       tx.objectStore(META_STORE).delete(id);

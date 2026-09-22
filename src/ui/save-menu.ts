@@ -11,11 +11,11 @@
  *   ● Copper outpost      manual  4 min ago  1h 12m  148 kB
  *     Autosave 1          auto    9 min ago  1h 03m  141 kB
  *   ─────────────────────────────────────────────
- *   LOAD   OVERWRITE   RENAME   DELETE
+ *   LOAD   OVERWRITE   RENAME   DELETE   EXPORT   IMPORT
  *   status line
  * ```
  *
- * ## One selected row, four verbs
+ * ## One selected row, one set of verbs
  *
  * The obvious layout puts four buttons on every row, and the obvious layout is
  * how a player deletes the save they meant to load. A selected row plus one
@@ -23,6 +23,12 @@
  * away from the thing it destroys — and `DELETE` is itself two clicks, which
  * is task 7's "with confirmation" without a modal the game would have to pause
  * behind.
+ *
+ * `EXPORT` and `IMPORT` (C26) are the two verbs that do not need a stored
+ * slot: export writes the selected save — or, with nothing selected, the
+ * running game — to a file, and import reads one back. They stay enabled
+ * while `canWrite` is false, because a browser that cannot store a factory is
+ * exactly the browser a player most needs to get one out of.
  *
  * `OVERWRITE` is offered for a manual slot and refused for an autosave one.
  * §14 says the rotation never overwrites a manual save; letting a manual save
@@ -94,6 +100,10 @@ export interface SaveMenuOptions {
   readonly onLoad: (id: string) => void;
   readonly onDelete: (id: string) => void;
   readonly onRename: (id: string, name: string) => void;
+  /** Write a file: the selected slot, or the running game when `id` is null. */
+  readonly onExport: (id: string | null, name: string) => void;
+  /** Read a file the player chose. The panel never opens it itself. */
+  readonly onImport: (file: File) => void;
   readonly onTakeOver: () => void;
   readonly onClose: () => void;
 }
@@ -119,6 +129,9 @@ export class SaveMenu {
   private readonly overwriteButton = document.createElement('button');
   private readonly renameButton = document.createElement('button');
   private readonly deleteButton = document.createElement('button');
+  private readonly exportButton = document.createElement('button');
+  private readonly importButton = document.createElement('button');
+  private readonly fileInput = document.createElement('input');
   private readonly takeOverButton = document.createElement('button');
   private readonly status = document.createElement('div');
   private readonly rows: Row[] = [];
@@ -181,8 +194,20 @@ export class SaveMenu {
       this.createAction(this.overwriteButton, 'OVERWRITE', 'Write over this save', this.handleOverwrite),
       this.createAction(this.renameButton, 'RENAME', 'Rename this save to the text above', this.handleRename),
       this.createAction(this.deleteButton, 'DELETE', 'Delete this save — click twice', this.handleDelete),
+      this.createAction(this.exportButton, 'EXPORT', 'Write this save to a file you can keep', this.handleExport),
+      this.createAction(this.importButton, 'IMPORT', 'Open a save file — you can also drop one on the window', this.handleImport),
       this.createAction(this.takeOverButton, 'TAKE OVER', 'Make this tab the one that saves', this.handleTakeOver),
     );
+
+    // The real picker, kept out of the layout: a styled button that opens a
+    // hidden input is the only way to have a file dialog and a panel that
+    // looks like the rest of the game.
+    this.fileInput.type = 'file';
+    this.fileInput.accept = '.ifsave,application/octet-stream';
+    this.fileInput.hidden = true;
+    this.fileInput.setAttribute('aria-hidden', 'true');
+    this.fileInput.addEventListener('change', this.handleFileChosen);
+    actions.append(this.fileInput);
     this.deleteButton.classList.add('is-danger');
     this.takeOverButton.hidden = true;
 
@@ -231,6 +256,9 @@ export class SaveMenu {
     this.overwriteButton.removeEventListener('click', this.handleOverwrite);
     this.renameButton.removeEventListener('click', this.handleRename);
     this.deleteButton.removeEventListener('click', this.handleDelete);
+    this.exportButton.removeEventListener('click', this.handleExport);
+    this.importButton.removeEventListener('click', this.handleImport);
+    this.fileInput.removeEventListener('change', this.handleFileChosen);
     this.takeOverButton.removeEventListener('click', this.handleTakeOver);
     for (const row of this.rows) row.button.removeEventListener('click', this.handleRow);
     this.root.remove();
@@ -287,6 +315,24 @@ export class SaveMenu {
     }
     this.armed = { id: slot.id, at: now };
     this.paint();
+  };
+
+  /** Export the selected slot, or the running game when nothing is selected. */
+  private readonly handleExport = (): void => {
+    const slot = this.selectedSlot();
+    this.options.onExport(slot?.id ?? null, slot?.name ?? this.saveName());
+  };
+
+  private readonly handleImport = (): void => {
+    this.fileInput.click();
+  };
+
+  private readonly handleFileChosen = (): void => {
+    const file = this.fileInput.files?.[0];
+    // Cleared whatever happens, so choosing the same file twice in a row
+    // fires a second `change` — which it otherwise would not.
+    this.fileInput.value = '';
+    if (file !== undefined) this.options.onImport(file);
   };
 
   private readonly handleTakeOver = (): void => {
@@ -346,6 +392,10 @@ export class SaveMenu {
     this.overwriteButton.disabled = busy || slot === null || slot.kind === 'auto' || !view.canWrite;
     this.renameButton.disabled = busy || slot === null || !view.canWrite;
     this.deleteButton.disabled = busy || slot === null || !view.canWrite;
+    // Neither export nor import needs storage; see the file header.
+    this.exportButton.disabled = busy;
+    this.importButton.disabled = busy;
+    setText(this.exportButton, slot === null ? 'EXPORT GAME' : 'EXPORT');
 
     const armed = this.armed !== null && slot !== null && this.armed.id === slot.id;
     setText(this.deleteButton, armed ? 'DELETE?' : 'DELETE');

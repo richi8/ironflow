@@ -30,6 +30,7 @@
  */
 
 import { SAVE_FORMAT, SAVE_VERSION, type SaveFile } from '../game/save/save-format.js';
+import { SaveValidationError, validateSaveFile } from '../game/save/save-validator.js';
 
 import { SaveError, asSaveError } from './save-repository.js';
 
@@ -85,7 +86,9 @@ export async function encodeSave(file: SaveFile): Promise<EncodedSave> {
  * The two header checks are not C26's validator and do not pretend to be: they
  * are the difference between "this is not one of ours" and "this is one of
  * ours from the future", which are different messages to the player and
- * different answers from C27.
+ * different answers from C27. C26's validator runs *after* them, on every
+ * save this build reads — stored as much as imported, because "we wrote it"
+ * is a claim about provenance that a half-finished write can falsify.
  */
 export async function decodeSave(encoded: EncodedSave): Promise<SaveFile> {
   const raw = encoded.compressed ? await inflate(encoded.bytes) : encoded.bytes;
@@ -116,7 +119,15 @@ export async function decodeSave(encoded: EncodedSave): Promise<SaveFile> {
   if (file.state === undefined || file.metadata === undefined) {
     throw new SaveError('corrupt', 'Save has no state or no metadata.');
   }
-  return file as SaveFile;
+
+  try {
+    // Field by field, into a fresh object (C26 task 4). What comes back is
+    // never the parsed document, so nothing unvalidated can ride along in it.
+    return validateSaveFile(parsed);
+  } catch (cause) {
+    if (cause instanceof SaveValidationError) throw new SaveError('corrupt', cause.message, { cause });
+    throw asSaveError(cause, 'corrupt');
+  }
 }
 
 /**

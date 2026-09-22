@@ -7,11 +7,13 @@ import { Autosave } from '../../src/persistence/autosave.js';
 import { MemorySaveRepository } from '../../src/persistence/memory-save-repository.js';
 import { SaveController, type SaveSessionState } from '../../src/persistence/save-controller.js';
 import { SaveError } from '../../src/persistence/save-repository.js';
+import { encodeSaveFile, decodeSaveFile } from '../../src/persistence/export-import.js';
 import { SaveService } from '../../src/persistence/save-service.js';
 import { TabLock } from '../../src/persistence/tab-lock.js';
 
 import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
-import { sampleSimulation } from '../fixtures/saves.js';
+import { factorySimulation, sampleSave, sampleSimulation } from '../fixtures/saves.js';
+import { hashState } from '../determinism/state-hash.js';
 
 /**
  * What happens between a click and a message. C25 tasks 5, 6 and 7.
@@ -29,15 +31,20 @@ interface Harness {
   readonly repository: MemorySaveRepository;
   readonly service: SaveService;
   readonly states: SaveSessionState[];
+  /** Files the player was handed (C26), newest last. */
+  readonly downloads: { readonly bytes: Uint8Array; readonly filename: string }[];
   world(): Simulation;
   last(): SaveSessionState;
 }
 
-function harness(options: { lock?: TabLock; warning?: string | null } = {}): Harness {
+function harness(
+  options: { lock?: TabLock; warning?: string | null; start?: Simulation } = {},
+): Harness {
   const repository = new MemorySaveRepository({ now: () => Date.now() });
   const service = new SaveService({ repository, lock: options.lock });
   const states: SaveSessionState[] = [];
-  let world = sampleSimulation();
+  const downloads: { bytes: Uint8Array; filename: string }[] = [];
+  let world = options.start ?? sampleSimulation();
 
   const controller = new SaveController({
     service,
@@ -47,6 +54,10 @@ function harness(options: { lock?: TabLock; warning?: string | null } = {}): Har
     },
     onChange: (state) => states.push(state),
     warning: options.warning ?? null,
+    // The browser's half of an export, which is the composition root's in the
+    // real game (§4) and a list in a test — the whole reason it is injected.
+    download: (bytes, filename) => void downloads.push({ bytes, filename }),
+    now: () => Date.UTC(2026, 8, 22, 14, 32),
   });
 
   return {
@@ -54,6 +65,7 @@ function harness(options: { lock?: TabLock; warning?: string | null } = {}): Har
     repository,
     service,
     states,
+    downloads,
     world: () => world,
     last: () => states[states.length - 1] ?? controller.getState(),
   };
@@ -269,5 +281,140 @@ describe('the standing warning', () => {
     const h = harness({ warning: 'Storage is unavailable — private browsing blocks it.' });
     expect(h.controller.getState().status).toContain('private browsing');
     expect(h.controller.getState().tone).toBe('warn');
+  });
+});
+
+
+/* -------------------------------------------------------------------------- *
+ * C26
+ * -------------------------------------------------------------------------- */
+
+describe('exporting', () => {
+  it('hands the player a named file for the slot they picked', async () => {
+    const h = harness();
+    await h.controller.saveNew('Copper outpost');
+    const id = h.last().slots[0]?.id ?? '';
+
+    await h.controller.exportSlot(id);
+
+    expect(h.downloads).toHaveLength(1);
+    expect(h.downloads[0]?.filename).toBe('ironflow-save-copper-outpost-2026-09-22-1432.ifsave');
+    expect(h.last().status).toBe('Exported "Copper outpost".');
+    expect((await decodeSaveFile(h.downloads[0]?.bytes ?? new Uint8Array(0))).metadata.name).toBe('Copper outpost');
+  });
+
+  it('exports the name the player sees, not the one the body was written under', async () => {
+    const h = harness();
+    await h.controller.saveNew('Old name');
+    const id = h.last().slots[0]?.id ?? '';
+    await h.controller.rename(id, 'New name');
+
+    await h.controller.exportSlot(id);
+    expect((await decodeSaveFile(h.downloads[0]?.bytes ?? new Uint8Array(0))).metadata.name).toBe('New name');
+  });
+
+  it('exports the running game when nothing is stored at all', async () => {
+    // §14's first row: with no IndexedDB there is no slot to pick, and this
+    // is the whole of how a factory survives that session.
+    const h = harness({ start: factorySimulation() });
+    await h.controller.exportCurrent('Unstored');
+
+    expect(h.last().slots).toEqual([]);
+    expect(h.downloads[0]?.filename).toMatch(/^ironflow-save-unstored-/);
+    const file = await decodeSaveFile(h.downloads[0]?.bytes ?? new Uint8Array(0));
+    expect(file.state.entities.length).toBe(h.world().entities.size);
+  });
+
+  it('gets the bytes of an unreadable save out rather than losing them', async () => {
+    // §14: "refuse and keep the corrupt blob for export rather than deleting
+    // it." This is the export that promise was made for.
+    const h = harness();
+    await h.controller.saveNew('Doomed');
+    const id = h.last().slots[0]?.id ?? '';
+    h.repository.poison(id, new TextEncoder().encode('not a save at all'));
+
+    await h.controller.exportSlot(id);
+
+    expect(h.downloads).toHaveLength(1);
+    expect(h.last().tone).toBe('warn');
+    expect(h.last().status).toMatch(/could not be read/);
+    // Wrapped in a header, so what left the browser says what it claims to be
+    // — and is still refused on the way back in.
+    await expect(decodeSaveFile(h.downloads[0]?.bytes ?? new Uint8Array(0))).rejects.toThrow(SaveError);
+  });
+
+  it('says so when there is nothing to export a file with', async () => {
+    const repository = new MemorySaveRepository();
+    const service = new SaveService({ repository });
+    const world = sampleSimulation();
+    const states: SaveSessionState[] = [];
+    const controller = new SaveController({
+      service,
+      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick() }),
+      apply: () => undefined,
+      onChange: (state) => states.push(state),
+    });
+
+    await controller.exportCurrent('Nowhere');
+    expect(states[states.length - 1]?.tone).toBe('error');
+  });
+});
+
+describe('importing', () => {
+  async function fileOf(name = 'Imported', simulation = factorySimulation()): Promise<Blob> {
+    return new Blob([await encodeSaveFile(sampleSave(name, simulation))]);
+  }
+
+  it('plays the factory in the file and stores it', async () => {
+    const source = factorySimulation(31);
+    const h = harness();
+    await h.controller.importFile(await fileOf('From a friend', source), 'from-a-friend.ifsave');
+
+    expect(h.last().status).toBe('Imported "From a friend".');
+    expect(hashState(h.world())).toBe(hashState(source));
+    expect(h.last().slots.map((slot) => slot.name)).toEqual(['From a friend']);
+    expect(h.last().currentId).toBe(h.last().slots[0]?.id);
+  });
+
+  it('refuses a file that is not a save, and says why, changing nothing', async () => {
+    const h = harness();
+    const before = hashState(h.world());
+
+    await h.controller.importFile(new Blob([new TextEncoder().encode('hello')]), 'notes.txt');
+
+    expect(h.last().tone).toBe('error');
+    expect(h.last().status).toMatch(/not imported/);
+    expect(hashState(h.world())).toBe(before);
+    expect(h.last().slots).toEqual([]);
+  });
+
+  it('lists the reason the validator gave rather than shrugging', async () => {
+    const spoiled = JSON.parse(JSON.stringify(sampleSave('Spoiled', factorySimulation())));
+    spoiled.state.research.queue = ['time_travel'];
+    const h = harness();
+
+    await h.controller.importFile(new Blob([await encodeSaveFile(spoiled)]), 'spoiled.ifsave');
+    expect(h.last().status).toMatch(/time_travel/);
+  });
+
+  it('keeps the imported factory even when it cannot be stored', async () => {
+    const source = factorySimulation(7);
+    const h = harness();
+    h.repository.failWrites = new SaveError('quota', 'No room.');
+
+    await h.controller.importFile(await fileOf('Too big', source), 'too-big.ifsave');
+
+    // The world is the imported one; only the slot was lost, and the message
+    // says which of the two happened.
+    expect(hashState(h.world())).toBe(hashState(source));
+    expect(h.last().tone).toBe('warn');
+    expect(h.last().status).toMatch(/could not be stored/);
+  });
+
+  it('names an imported factory after the file when the save has no name', async () => {
+    const nameless = sampleSave('', factorySimulation());
+    const h = harness();
+    await h.controller.importFile(new Blob([await encodeSaveFile(nameless)]), 'rusty-outpost.ifsave');
+    expect(h.last().status).toBe('Imported "rusty-outpost".');
   });
 });

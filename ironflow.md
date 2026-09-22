@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C25 complete — a factory now survives the browser.** `persistence/` puts C24's document in IndexedDB: two object stores so a listing never touches a save body, gzip through `CompressionStream` with an uncompressed fallback and a flag, a three-slot autosave rotation on a three-minute play clock, a `BroadcastChannel` lock so a second tab cannot interleave writes, and a ninth panel to save, load, rename and delete from. Every row of §14's failure table has a specific message and a test; a quota failure leaves the stored factory untouched, because both puts share one transaction. `bootstrap` is asynchronous and resumes the newest save, so `main.ts` is finally covered by a test of its own. Next: C26 — export / import & validation. |
+| **Status** | **C26 complete — a factory now leaves the browser.** `game/save/save-validator.ts` reads an untrusted save field by field and rebuilds it, so nothing that was parsed ever reaches the game; `persistence/export-import.ts` wraps it in an `IRONFLOW-SAVE v1 gzip` line and hands it to a download, a file picker or a drop on the window. The validator is wired into `decodeSave`, so a stored save gets the same distrust as an imported one — 19 ms on §12's 20,020-entity factory. A thousand randomly corrupted saves produce a listed refusal or a world that loads, and nothing else. Next: C27 — save migrations. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C26 — Export / import & validation** |
+| **First action** | Chunk **C27 — Save migrations** |
 
 ---
 
@@ -1437,6 +1437,14 @@ follows is what implementing them decided.
   `pending` is the honest answer until one has had a chance to answer, and
   simultaneous claims are broken by id rather than by timing (§6 R6's
   reasoning, one layer out).
+
+**Implementation note (C26).** Two of those rows moved from "handled" to
+"checked". The *imported file from a stranger* row is
+`game/save/save-validator.ts`, and the *corrupt or truncated stored save* row
+is the same code: the validator is called from `decodeSave`, so a stored save
+is distrusted exactly as far as an imported one. And *keeping* a corrupt blob
+became something a player can act on — `SaveRepository.loadRaw` reads a slot
+without understanding it, which is what lets C26 export one.
 
 ---
 ---
@@ -5957,6 +5965,77 @@ lock.
 saves; a corruption fuzz test; export→import round-trip equality.
 
 **Out of scope.** Save encryption, signing, cheat detection.
+
+### What implementing it decided
+
+**The validator runs on every save this build reads, not only on imported
+ones.** It is called from `decodeSave`, which is the one door both
+repositories and the file importer go through, because "we wrote it" is a
+claim about *provenance* and a half-finished write, a flipped bit or a devtools
+console each falsify it. §14's "corrupt or truncated stored save — validate on
+load" row is the same requirement said about storage. It costs 19 ms on §12's
+20,020-entity reference factory, which is a load, not a frame.
+
+**"Every string item id known" is enforced where it bites.** A save's item
+mapping is allowed to name items this build no longer has — that is the
+*point* of `ItemRegistry`'s reservation rule, which keeps a deleted item's
+number spoken for so no old save's ore turns into copper. What is refused is a
+numeric id actually **used** by a belt, a buffer or a bag that does not resolve
+to an item this build defines: that one would reach `byId` and throw three
+hours into a session rather than at the door.
+
+**Item slots are recognised by shape, item ids by two field names.** §19 rule
+17 forbids a table of field names per entity type, and a validator with one
+would quietly stop checking the newest half of the game. Inside an entity an
+array of `[number, number]` pairs is always an inventory, so that is what the
+capacity check keys on, and the capacity itself is asked of the **building
+registry** — `storageFor`, `productionFor`, `researchFor`, `generatorFor` —
+rather than of an id list. `itemId` and `heldItem` are the two fields that
+carry an item id outside a pair, and they are named because there is no shape
+to recognise a bare number by.
+
+**Reasons are collected per top-level field, and capped at 12.** A save
+rejected one problem at a time is a save fixed one problem at a time, and the
+second reason is usually what explains the first. A field's *first* problem
+ends that field; the next field is still checked.
+
+**Array holes are refused, and the fuzz test is why.** `Array.prototype.map`
+walks around a hole and puts one back, so a validator built on `map` passed an
+array with an element deleted from it and landed an `undefined` inside an
+entity — the exact value `entities/entity.ts` spends a function refusing. Every
+array is now read by index. This was found by the corruption fuzz test on its
+first run, which is the argument for having one.
+
+**The file format is `IRONFLOW-SAVE v<n> <gzip|json>\n` then the payload.**
+Task 1 asks for "a magic header and the schema version in plain sight"; the
+encoding token is there for `save-codec.ts`'s reason — a flag is stored, never
+sniffed, because the gzip magic is right almost always and wrong for the file
+whose first two JSON bytes matched. The version appears twice, in the header
+and inside the document, and a disagreement is refused: the two can only differ
+if somebody edited one of them.
+
+**`SaveRepository.loadRaw` is a fifth method C25 needed and did not have.**
+§14 says a corrupt save is kept "for export rather than deleting it", and a
+corrupt save is by definition one `load` will not return — so the promise was
+only real once something could read a slot without understanding it. The
+exported bytes are wrapped in a header and are refused on import, correctly:
+that file is a bug report, not a factory.
+
+**EXPORT with nothing selected exports the running game.** §14's first row is a
+browser with no IndexedDB, which is exactly the browser with no slot to pick —
+so the export that matters most is the one that never goes near storage.
+`SaveService.fileFor` is shared with `write` so the two cannot become two
+formats.
+
+**Import applies before it stores.** Validate, build the world (`deserialize`
+constructs a fresh `Simulation`, so a failure leaves the running factory
+untouched), then write a slot. A storage failure at the end costs the slot and
+says so; it does not cost the import.
+
+**The decompression cap was already C25's.** Task 5's 64 MB lives in
+`save-codec.ts`, where the allocation happens — a validator that ran after it
+would be a validator that ran after the tab died. `export-import.ts` applies
+the same number to the file before reading it at all.
 
 ---
 

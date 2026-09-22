@@ -68,6 +68,8 @@ interface Calls {
   load: string[];
   remove: string[];
   rename: [string, string][];
+  exports: [string | null, string][];
+  imports: string[];
   takeOver: number;
   close: number;
 }
@@ -81,13 +83,25 @@ interface Harness {
 let harness: Harness;
 
 function mountMenu(): Harness {
-  const calls: Calls = { save: [], overwrite: [], load: [], remove: [], rename: [], takeOver: 0, close: 0 };
+  const calls: Calls = {
+    save: [],
+    overwrite: [],
+    load: [],
+    remove: [],
+    rename: [],
+    exports: [],
+    imports: [],
+    takeOver: 0,
+    close: 0,
+  };
   const menu = new SaveMenu({
     onSave: (name) => calls.save.push(name),
     onOverwrite: (id, name) => calls.overwrite.push([id, name]),
     onLoad: (id) => calls.load.push(id),
     onDelete: (id) => calls.remove.push(id),
     onRename: (id, name) => calls.rename.push([id, name]),
+    onExport: (id, name) => calls.exports.push([id, name]),
+    onImport: (file) => calls.imports.push(file.name),
     onTakeOver: () => (calls.takeOver += 1),
     onClose: () => (calls.close += 1),
   });
@@ -359,6 +373,8 @@ describe('the panel inside GameUI', () => {
         onLoad: () => undefined,
         onDelete: () => undefined,
         onRename: () => undefined,
+        onExport: () => undefined,
+        onImport: () => undefined,
         onTakeOver: () => undefined,
         onVisibility: (open) => visibility.push(open),
       },
@@ -421,5 +437,61 @@ describe('the readouts', () => {
     expect(formatSize(512)).toBe('512 B');
     expect(formatSize(148_000)).toBe('148.0 kB');
     expect(formatSize(2_500_000)).toBe('2.50 MB');
+  });
+});
+
+
+describe('export and import', () => {
+  it('exports the selected slot, and the running game when nothing is selected', () => {
+    harness = mountMenu();
+    harness.menu.update(view({ slots: [row({ id: 'a', name: 'Copper outpost' })] }));
+
+    // Nothing picked: the button offers the game itself, under the typed name.
+    expect(action(harness.root, 'EXPORT GAME').disabled).toBe(false);
+    nameInput(harness.root).value = 'Live factory';
+    action(harness.root, 'EXPORT GAME').click();
+    expect(harness.calls.exports).toEqual([[null, 'Live factory']]);
+
+    visibleRows(harness.root)[0]?.click();
+    action(harness.root, 'EXPORT').click();
+    expect(harness.calls.exports[1]).toEqual(['a', 'Copper outpost']);
+  });
+
+  it('opens the file picker and reports what came back', () => {
+    harness = mountMenu();
+    const input = harness.root.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    expect(input?.hidden).toBe(true);
+    expect(input?.accept).toContain('.ifsave');
+
+    let clicked = 0;
+    if (input !== null) input.click = (): void => void (clicked += 1);
+    action(harness.root, 'IMPORT').click();
+    expect(clicked).toBe(1);
+
+    // The change event is what the panel actually listens to; jsdom will not
+    // let a test set `files`, so it is defined on the element directly.
+    const file = new File(['bytes'], 'factory.ifsave');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input?.dispatchEvent(new Event('change'));
+    expect(harness.calls.imports).toEqual(['factory.ifsave']);
+  });
+
+  it('keeps both verbs available when storage will not take a write', () => {
+    // A browser with no IndexedDB is the browser a player most needs to get a
+    // factory out of, and into.
+    harness = mountMenu();
+    harness.menu.update(view({ canWrite: false, slots: [row({ id: 'a' })] }));
+
+    expect(action(harness.root, 'SAVE').disabled).toBe(true);
+    expect(action(harness.root, 'EXPORT GAME').disabled).toBe(false);
+    expect(action(harness.root, 'IMPORT').disabled).toBe(false);
+  });
+
+  it('holds both while an operation is in flight', () => {
+    harness = mountMenu();
+    harness.menu.update(view({ busy: true }));
+    expect(action(harness.root, 'EXPORT GAME').disabled).toBe(true);
+    expect(action(harness.root, 'IMPORT').disabled).toBe(true);
   });
 });

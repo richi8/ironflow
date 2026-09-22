@@ -91,6 +91,12 @@ export class MemorySaveRepository implements SaveRepository {
     return { ...file, metadata: { ...file.metadata, ...slotMetadata(record.slot) } };
   }
 
+  async loadRaw(id: string): Promise<EncodedSave> {
+    const record = this.records.get(id);
+    if (record === undefined) throw new SaveError('not_found', `There is no save under "${id}".`);
+    return record.encoded;
+  }
+
   async delete(id: string): Promise<void> {
     this.records.delete(id);
   }
