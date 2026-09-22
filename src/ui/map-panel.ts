@@ -37,7 +37,7 @@
  * still clickable where its colours are not.
  */
 
-import type { MapView } from '../game/views/map-view.js';
+import type { MapPoint, MapView } from '../game/views/map-view.js';
 
 import { createIcon } from './icons.js';
 
@@ -53,12 +53,31 @@ const FALLBACK_COLOR = '#3a4354';
 /** How big a building's dot is drawn, in cells, whatever its footprint. */
 const MIN_DOT_CELLS = 1;
 
+/** How thick the view outline is. Thin: it is a frame, not a feature. */
+const VIEWPORT_LINE_PX = 1.5;
+
 export interface MapPanelOptions {
   /**
    * Centre the world view on a tile. Wired to the camera by the composition
    * root, because §4 will not let a panel hold one.
    */
   readonly onJumpTo: (x: number, y: number) => void;
+  /**
+   * The corners of what the world view can currently see, in tile space, or
+   * null when there is no view to draw.
+   *
+   * The other half of `onJumpTo`, and injected for the same reason: the camera
+   * is the renderer's and §4 forbids `ui/**` from importing it. What arrives
+   * here is four plain points.
+   *
+   * It is a **quad and not a rectangle**, and that is not fussiness. The world
+   * view is a screen rectangle, and a screen rectangle is a *rotated* one in
+   * tile space — so its axis-aligned bounding box, which is what the camera
+   * already computes for culling, covers about twice the ground the player can
+   * actually see. A map that overstated the view by that much would send
+   * someone looking for a machine they were never shown.
+   */
+  readonly viewport?: () => readonly MapPoint[] | null;
   readonly onClose: () => void;
 }
 
@@ -262,13 +281,54 @@ export class MapPanel {
       );
     }
 
-    // The player last, and in the accent colour nothing else on the map uses,
-    // because "where am I" is the first question anyone opens a map to ask.
+    // The player, in the accent colour nothing else on the map uses, because
+    // "where am I" is the first question anyone opens a map to ask.
     ctx.fillStyle = this.token('accent');
     const markerX = ((view.playerX - originTileX) / view.cellTiles) * cellPx;
     const markerY = ((view.playerY - originTileY) / view.cellTiles) * cellPx;
     const marker = Math.max(3, cellPx + 2);
     ctx.fillRect(markerX - marker / 2, markerY - marker / 2, marker, marker);
+
+    // And the view outline last of all, over everything, because it is a frame
+    // around the map rather than a thing on it. "Where am I" is answered by
+    // the marker above; this answers "where am I *looking*", which stops being
+    // the same question the moment a click jumps the camera somewhere else.
+    this.strokeViewport(ctx, view, cellPx, originTileX, originTileY);
+  }
+
+  /**
+   * Outline what the world view can see, as a four-sided figure.
+   *
+   * Stroked and never filled: the map under it is the thing the player came to
+   * read, and a wash over a quarter of it would hide the ore. Drawn in the
+   * text colour rather than in any content colour, so it cannot be mistaken
+   * for a building — it is the only mark on the panel that is not a place.
+   *
+   * No clipping and no culling. A view outside the explored rectangle falls
+   * off the canvas on its own, and that it has fallen off is itself the
+   * answer: the player is looking at ground the map has nothing to say about.
+   */
+  private strokeViewport(
+    ctx: CanvasRenderingContext2D,
+    view: MapView,
+    cellPx: number,
+    originTileX: number,
+    originTileY: number,
+  ): void {
+    const corners = this.options.viewport?.() ?? null;
+    if (corners === null || corners.length < 3) return;
+
+    ctx.beginPath();
+    for (const [index, corner] of corners.entries()) {
+      const x = ((corner.x - originTileX) / view.cellTiles) * cellPx;
+      const y = ((corner.y - originTileY) / view.cellTiles) * cellPx;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = this.token('text');
+    ctx.lineWidth = VIEWPORT_LINE_PX;
+    ctx.stroke();
   }
 
   /**

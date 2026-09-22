@@ -34,9 +34,14 @@
  * `buildMenuChanged`, the HUD additionally on `pauseChanged`, and the inspector
  * on `selectionChanged` — which is what lets the word PAUSED appear, and a
  * clicked machine open, on a frame where both lanes are stopped.
+ *
+ * The map (C23) is the one panel that keeps a lane **while paused**, because
+ * the outline it draws follows the camera and the camera keeps moving. See
+ * `update`.
  */
 
 import type { GameController } from '../game/game-controller.js';
+import type { MapPoint } from '../game/views/map-view.js';
 
 import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
@@ -71,6 +76,12 @@ export interface GameUIOptions {
    * click goes nowhere, which is what it would do with no world on screen.
    */
   readonly onJumpTo?: (x: number, y: number) => void;
+  /**
+   * The corners of what the world view can see, in tile space, for the outline
+   * the map draws over itself. Injected for `onJumpTo`'s reason — see
+   * `MapPanelOptions.viewport`. Omitted, the map simply draws no outline.
+   */
+  readonly viewport?: () => readonly MapPoint[] | null;
 }
 
 export class GameUI {
@@ -88,6 +99,8 @@ export class GameUI {
 
   private hudAccumulatorMs = 0;
   private liveAccumulatorMs = 0;
+  /** The map's own lane while paused. See `update`. */
+  private pausedMapAccumulatorMs = 0;
   /** Wall time since the HUD last read a snapshot, so it can measure a rate. */
   private hudElapsedMs = 0;
   private mounted = false;
@@ -148,6 +161,7 @@ export class GameUI {
       // camera is the renderer's (§4), so the composition root supplies it and
       // a UI mounted without one simply does not jump.
       onJumpTo: (x, y) => options.onJumpTo?.(x, y),
+      viewport: () => options.viewport?.() ?? null,
       onClose: () => this.toggleMap(),
     });
     this.research = new ResearchPanel({
@@ -225,7 +239,23 @@ export class GameUI {
     // A paused game updates nothing on a timer. The panels that must still
     // change while paused do it on an event, which is where the acceptance
     // criterion "both stopping when paused" and a HUD that says PAUSED meet.
-    if (this.controller.isPaused()) return;
+    //
+    // The map is the one exception, and it is a narrow one. Everything it
+    // draws is simulation state and cannot move while the simulation is
+    // stopped — except the outline showing where the camera is looking, and
+    // the camera is a *view* control that keeps working while paused (C07:
+    // "a paused game is one the player can still pan around"). An outline
+    // frozen halfway through a pan is worse than no outline, and there is no
+    // camera event for the HUD's `pauseChanged` trick to hang off.
+    if (this.controller.isPaused()) {
+      this.pausedMapAccumulatorMs += frameMs;
+      if (this.pausedMapAccumulatorMs >= HUD_INTERVAL_MS) {
+        this.pausedMapAccumulatorMs %= HUD_INTERVAL_MS;
+        this.refreshMap();
+      }
+      return;
+    }
+    this.pausedMapAccumulatorMs = 0;
 
     this.hudAccumulatorMs += frameMs;
     this.hudElapsedMs += frameMs;

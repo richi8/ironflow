@@ -421,6 +421,22 @@ function bootstrap(): void {
     // C23's map, click to jump. The composition root is the one place that
     // holds both the UI and the camera (§4), so it is where the two meet.
     onJumpTo: (x, y) => camera.setPosition(x, y),
+    // And the other direction: the four corners of what the world view can
+    // see, so the map can outline it. Unprojected here rather than in the
+    // panel because the transform belongs to the camera (§5), and taken as
+    // *corners* rather than as `visibleTileBounds` because that method returns
+    // the axis-aligned box a culler wants, which covers about twice the ground
+    // a player can see — see `MapPanelOptions.viewport`.
+    viewport: () => {
+      const { cssWidth, cssHeight } = surface.getSize();
+      if (cssWidth <= 0 || cssHeight <= 0) return null;
+      return [
+        camera.screenToWorld(0, 0),
+        camera.screenToWorld(cssWidth, 0),
+        camera.screenToWorld(cssWidth, cssHeight),
+        camera.screenToWorld(0, cssHeight),
+      ];
+    },
   });
   ui.mount();
 

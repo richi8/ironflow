@@ -46,6 +46,20 @@
  */
 export const MAP_CELL_TILES = 2;
 
+/**
+ * A point in tile space, fractional.
+ *
+ * Declared here rather than reused from `world/coordinates.ts` because §4's UI
+ * boundary lets `ui/**` import a view model and not the world: the map panel
+ * is handed the corners of what the camera can see, and this is the shape they
+ * arrive in. `TileCoord` is the same two numbers constrained to integers, and
+ * a viewport corner is not one.
+ */
+export interface MapPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
 /** One explored world chunk, downsampled. Both arrays are `cells * cells` long. */
 export interface MapChunkView {
   readonly cx: number;

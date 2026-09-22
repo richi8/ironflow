@@ -1227,6 +1227,14 @@ Two things about it are its own:
   lost the context — or a headless test — gets a blank panel that still turns a
   click into the right tile. Drawing nothing is a blank map; forgetting the
   placement would be a map the player cannot use.
+- **It is the one panel that keeps a lane while paused.** Everything it draws
+  is simulation state and cannot move while nothing ticks — except the outline
+  showing where the camera is looking, and the camera is a *view* control that
+  keeps working while paused (C07: "a paused game is one the player can still
+  pan around"). There is no camera event for the HUD's `pauseChanged` trick to
+  hang off, and an outline frozen halfway through a pan is worse than no
+  outline, so `update` runs a 5 Hz lane of its own for the map while the game
+  is stopped. That is the whole of the exception.
 
 **A view model carries only what exists.** `HudView` had no research progress
 from C07 to C22, because there was no research; a field that is always `null`
@@ -5328,8 +5336,11 @@ existing one would — and adds the underground belt as a second unlock on
 - `tests/unit/map-panel.dom.test.ts` — the panel through the real `GameUI`:
   both ways in, exclusivity against the other three panels, the empty state,
   the view growing as the player travels, names rather than colours, whole
-  cells, dots only on explored ground, the revision cache, and click-to-jump
-  landing on the tile under the pointer.
+  cells, dots only on explored ground, the revision cache, click-to-jump
+  landing on the tile under the pointer, and the view outline — a closed
+  four-sided path through the corners it is handed, nothing at all when it is
+  handed none, and one that keeps following the camera while the game is
+  paused.
 - `tests/integration/belt-underground-chest.test.ts` — §17's chain for this
   chunk, and the only one in that list that is a *comparison*: a buried line
   and a surface line of the same length, saturated for a minute, deliver the
@@ -5359,10 +5370,17 @@ existing one would — and adds the underground belt as a second unlock on
   C20, C21A and C22, and untouched again: three chunks in a row have declined
   it, which is starting to look like a decision that should be written down as
   one.
-- **The map does not draw the camera's viewport.** A player who jumps the
-  camera has no mark on the map saying where they just went. Cheap to add and
-  deliberately left out — the camera is the renderer's and the panel would need
-  a second injected reading beside `onJumpTo` for a rectangle C29 may move.
+- **The map outline is a quad, not a rectangle, and that needed saying.** The
+  panel draws where the camera is looking as a four-sided figure through the
+  four corners of the view, unprojected into tile space by the composition
+  root. It deliberately does **not** use `Camera.visibleTileBounds`, which is
+  the axis-aligned box a culler wants: a screen rectangle is a *rotated* one in
+  tile space, so its bounding box covers about twice the ground the player can
+  actually see, and a map that overstated the view by that much would send
+  someone looking for a machine they were never shown. Added after C23's first
+  pass, on the report's own "noticed, not fixed" entry — the outline is what
+  answers "where am I *looking*" once a click has jumped the camera away from
+  where the player is standing.
 
 ---
 
