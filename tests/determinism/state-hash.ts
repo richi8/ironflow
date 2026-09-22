@@ -166,6 +166,39 @@ export function hashState(simulation: Simulation): string {
 }
 
 /**
+ * The same state with the **clean world chunks left out**. C24's round trip.
+ *
+ * §6 R8 compares an uninterrupted run against a saved-and-reloaded one, and
+ * the two differ in exactly one respect that is not state: which *clean* world
+ * chunks happen to be resident in memory. A world chunk becomes resident the
+ * moment anything reads a tile in it and stays resident for ever; a save
+ * writes only the dirty ones, because a clean one is by construction identical
+ * to what the generator would produce (see `world/chunk.ts`). So a loaded
+ * world regenerates the ground the factory is still standing on and simply
+ * never re-creates the ground the player walked across an hour ago.
+ *
+ * Leaving them out is therefore not a weakening of the hash — it is §10's
+ * line between authoritative and derived, applied to the one place
+ * `canonicalState` deliberately crosses it. `canonicalState` keeps them
+ * because C19's "the same world however it was explored" test is *about*
+ * generated terrain, and a hash that dropped it would pass vacuously.
+ *
+ * Everything else is compared unchanged, including the dirty world chunks
+ * tile for tile: a mined-out patch that came back full is exactly the bug this
+ * is here to catch.
+ */
+export function canonicalSavedState(simulation: Simulation): Record<string, unknown> {
+  const state = canonicalState(simulation);
+  const chunks = state['world'] as readonly Record<string, unknown>[];
+  return { ...state, world: chunks.filter((chunk) => chunk['dirty'] === true) };
+}
+
+/** The hash the §6 R8 save round trip is checked with. See `canonicalSavedState`. */
+export function hashSavedState(simulation: Simulation): string {
+  return fnv1a(canonicalize(canonicalSavedState(simulation)));
+}
+
+/**
  * The same state with entity **ids removed and entities keyed by tile**.
  *
  * Build-order independence cannot be asked of `hashState`, and the reason is

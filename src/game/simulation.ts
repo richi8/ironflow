@@ -72,6 +72,23 @@ export interface SimulationOptions {
    * the player starts with.
    */
   readonly player?: PlayerState;
+  /**
+   * Where a loaded world resumes from. C24's `deserialize` passes all three;
+   * nothing else passes any of them.
+   *
+   * They are scalars rather than a restored `Simulation`, because the pieces
+   * that hold the rest of the state — the entity store, the player, the
+   * research — are built *by* this constructor from content it owns, and a
+   * loader that had to build them first would have to know how (§4: one place
+   * decides what a fresh world is made of). So the loader hands over the three
+   * counters no sub-object owns, and fills the sub-objects in afterwards
+   * through their own `restore`/`load` methods.
+   */
+  readonly tick?: number;
+  /** The RNG stream position (§6 R2). `Rng.fromState`, not a re-seed. */
+  readonly rngState?: number;
+  /** The next entity id (§6 R5). Handed straight to the `EntityStore`. */
+  readonly nextEntityId?: number;
 }
 
 export class Simulation {
@@ -268,14 +285,36 @@ export class Simulation {
    */
   readonly rng: Rng;
 
-  private tickCount = 0;
+  private tickCount: number;
+
+  /**
+   * Is a tick running right now? C24 task 5.
+   *
+   * §14 requires that a save is taken **between** ticks: a snapshot of a
+   * half-advanced tick has belts that have moved and inserters that have not,
+   * and it would load into a world no sequence of ticks could have produced.
+   * Pausing the loop around a save is C25's job — this is the half that can be
+   * enforced from here, so that a future caller who saves from inside a system
+   * finds out at the first attempt rather than from a corrupt file.
+   */
+  private ticking = false;
 
   constructor(options: SimulationOptions) {
     this.world = options.world;
     this.seed = toUint32(options.seed ?? 0);
-    this.rng = new Rng(this.seed);
+    // A resumed stream, not a re-seeded one: mulberry32's position is the
+    // whole of its state, so a save carries the word rather than a count of
+    // calls a loader would have to replay (§6 R2, `rng.ts`).
+    this.rng = options.rngState === undefined ? new Rng(this.seed) : Rng.fromState(options.rngState);
+    this.tickCount = wholeCount(options.tick ?? 0, 'tick');
     this.buildings = options.buildings ?? new BuildingRegistry(BUILDINGS);
-    this.entities = options.entities ?? new EntityStore({ footprintOf: this.buildings.footprintOf });
+    this.entities =
+      options.entities ??
+      new EntityStore(
+        options.nextEntityId === undefined
+          ? { footprintOf: this.buildings.footprintOf }
+          : { footprintOf: this.buildings.footprintOf, nextId: options.nextEntityId },
+      );
     this.items = options.items ?? new ItemRegistry(ITEMS);
     this.recipes = options.recipes ?? new RecipeRegistry(RECIPES, this.items);
     this.crafts = new CraftDurations(this.buildings, this.recipes);
@@ -387,6 +426,41 @@ export class Simulation {
   }
 
   /**
+   * Recompute every index that is derived rather than saved. C24 task 4, §10.
+   *
+   * §10's rule is "persist the left column only", and its consequence is that
+   * a loaded world is authoritative state plus one pass of rebuilding. This is
+   * that pass, and it is the *whole* of it — a system that grows a derived
+   * index of its own has to be named here or a save will load into a subtly
+   * wrong world.
+   *
+   * Three of the four indexes are not in the list, and each absence is a
+   * design rather than an omission:
+   *
+   * ```text
+   * occupancy grid   rebuilt by EntityStore.restore, which claims the tiles as
+   *                  it inserts — there is no moment when the store holds an
+   *                  entity that the index does not know about
+   * belt order       BeltSystem compares the store's structure revision with
+   *                  the one it last built from, so a restored store rebuilds
+   *                  it on the first tick without being asked (C13)
+   * rate averages    derived in the controller, which a loaded simulation does
+   *                  not have yet; a fresh one starts empty
+   * ```
+   *
+   * **Idempotent**, which §10 requires and the round-trip test exercises:
+   * calling it twice on a loaded world, or once on a world that never left
+   * memory, changes nothing. Both methods below rebuild from authoritative
+   * state rather than amending what they already hold.
+   */
+  rebuildDerived(): void {
+    // Power first, because a lab's research rate is a question about its
+    // network (C22), and the unlock rebuild below is read by every system.
+    this.power.rebuild();
+    this.researchSystem.rebuild();
+  }
+
+  /**
    * Would this placement be accepted? Read-only, and safe to call per frame.
    *
    * The ghost preview's whole source of truth (C06 task 7). It is a method on
@@ -458,6 +532,11 @@ export class Simulation {
     return this.tickCount;
   }
 
+  /** Is the simulation inside `tick()`? See the field. `save/` asks this. */
+  get isTicking(): boolean {
+    return this.ticking;
+  }
+
   /**
    * Advance the world by exactly one fixed timestep.
    *
@@ -482,6 +561,19 @@ export class Simulation {
    * half-removed entity.
    */
   tick(): void {
+    this.ticking = true;
+    try {
+      this.runPhases();
+    } finally {
+      // `finally`, so a system that throws leaves the flag correct: the
+      // alternative is a world that can never be saved again, reported as a
+      // save bug rather than as the system failure it is.
+      this.ticking = false;
+    }
+  }
+
+  /** The phases themselves. Split out only so `tick` can own the flag above. */
+  private runPhases(): void {
     this.tickCount += 1;
 
     // Phase 1 — commands. Drained fully, in queue order, capped per tick (§7).
@@ -615,4 +707,19 @@ export class Simulation {
         return 'not_implemented';
     }
   }
+}
+
+/**
+ * A restored counter that has to be a whole, non-negative number.
+ *
+ * A save with a fractional tick count would make every `%`-based decision in
+ * the game answer differently for ever, and a negative one would run the
+ * research queue's arithmetic backwards. Both are cheaper to refuse here than
+ * to diagnose in a world that has already loaded (§6 R3, R7).
+ */
+function wholeCount(value: number, field: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`Simulation: ${field} is ${String(value)}; it must be a whole number of at least 0.`);
+  }
+  return value;
 }

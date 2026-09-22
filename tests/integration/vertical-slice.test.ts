@@ -13,7 +13,9 @@ import { TPS } from '../../src/game/simulation-clock.js';
 import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, SOUTH, WEST } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
-import { World } from '../../src/game/world/world.js';
+import { World, type ChunkGenerator } from '../../src/game/world/world.js';
+import { deserialize, serialize } from '../../src/game/save/save-serializer.js';
+import { hashSavedState } from '../determinism/state-hash.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
 
 /**
@@ -72,11 +74,22 @@ const PLATES_PER_SECOND = TPS / SMELT_TICKS;
 
 /** Grass, with an iron patch under one miner and a coal patch under the other. */
 function oreWorld(amount: number): World {
+  return new World(oreGenerator(amount));
+}
+
+/**
+ * The same terrain as a reusable generator.
+ *
+ * Split out for C24's round trip: a save carries the seed and the deltas, so
+ * loading one has to be handed the generator that made the untouched ground —
+ * and the slice's ground comes from this closure rather than from C19's noise.
+ */
+function oreGenerator(amount: number): ChunkGenerator {
   const patches: readonly (readonly [{ x: number; y: number }, ResourceType])[] = [
     [IRON_MINER, ResourceType.Iron],
     [COAL_MINER, ResourceType.Coal],
   ];
-  return new World((cx, cy) => {
+  return (cx, cy) => {
     const chunk = createChunk(cx, cy);
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -92,7 +105,7 @@ function oreWorld(amount: number): World {
       }
     }
     return chunk;
-  });
+  };
 }
 
 interface Slice {
@@ -301,10 +314,32 @@ describe('iron patch -> miner -> belt -> inserter -> furnace -> inserter -> ches
     expect(snapshot(first)).toBe(snapshot(second));
   });
 
-  it.skip('survives a save round trip (§6 R8) — unskip in C24', () => {
+  it('survives a save round trip (§6 R8)', () => {
     // The chain's whole state — belt positions, buffers, progress ticks, the
-    // fuel that is part-burnt — has to come back byte-identical. Written now,
-    // because the fields C24 has to serialize are the ones being added here.
+    // fuel that is part-burnt — has to come back byte-identical. Written in
+    // C15, because the fields C24 has to serialize are the ones added there;
+    // unskipped in C24, which is the chunk that gave it something to call.
+    const uninterrupted = buildSlice();
+    run(uninterrupted.simulation, 4 * 60 * TPS);
+
+    const interrupted = buildSlice();
+    run(interrupted.simulation, 2 * 60 * TPS);
+
+    // Mid-everything at the save point, or the comparison below proves little.
+    expect(interrupted.furnace.fuelTicksRemaining).toBeGreaterThan(0);
+    expect(onBelts(interrupted.simulation)).toBeGreaterThan(0);
+
+    const loaded = deserialize(serialize(interrupted.simulation), {
+      worldGenerator: () => oreGenerator(20_000),
+    });
+    run(loaded, 2 * 60 * TPS);
+
+    expect(hashSavedState(loaded)).toBe(hashSavedState(uninterrupted.simulation));
+    // And the thing the slice is actually about: the plates are still there.
+    const restored = loaded.entities.at(CHEST.x, CHEST.y);
+    const chest = restored === undefined ? null : asChest(restored);
+    if (chest === null) throw new Error('the chest did not survive the load.');
+    expect(stored(chest, loaded.items.idOf('iron_plate'))).toBeGreaterThan(0);
   });
 });
 

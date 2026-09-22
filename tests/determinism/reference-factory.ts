@@ -117,10 +117,22 @@ interface Placement {
  * both, which is §8's intra-phase ordering rule holding at factory scale — and
  * it is the only thing that separates C18's build-order test from C13's, which
  * asked the same question of a single belt line.
+ *
+ * `cells` defaults to C18's 39 — 507 entities, the size its acceptance
+ * criterion names. C24 passes a larger number: §6 R8 is stated over a
+ * 5,000-entity factory and §12's reference factory is 20,000, and both want
+ * *this* factory rather than a second one, because a save test over a layout
+ * that exercised fewer systems would pass while a splitter quietly lost its
+ * cursor. The cells wrap into rows either way, so a bigger number is a taller
+ * factory and nothing else.
  */
-export function layReferenceFactory(simulation: Simulation, order: 'forwards' | 'backwards' = 'forwards'): void {
+export function layReferenceFactory(
+  simulation: Simulation,
+  order: 'forwards' | 'backwards' = 'forwards',
+  cells: number = CELL_COUNT,
+): void {
   const placements: Placement[] = [];
-  for (let cell = 0; cell < CELL_COUNT; cell++) {
+  for (let cell = 0; cell < cells; cell++) {
     const ox = (cell % CELLS_PER_ROW) * CELL_WIDTH;
     const oy = Math.floor(cell / CELLS_PER_ROW) * CELL_HEIGHT;
     addCell(simulation, placements, ox, oy);

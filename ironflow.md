@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C23 complete — the factory now has somewhere to go.** A radar turns 300 kW into map, the map panel draws what has been explored and jumps the camera to it, and the underground belt gets a line past whatever is in the way. Iron in the starting area is measured at a median 2.6 hours of a reference factory, which is the 2–4 band C23 asked for — no generator change was needed, and §15 now says so. Milestone C is done and every building §15 names exists. Next: C24 — save state model & serializer. |
+| **Status** | **C24 complete — a factory is now a document.** `game/save/` turns authoritative state into plain JSON and back: the seed plus per-world-chunk deltas, every entity verbatim, the player, the research and the explored set. §6 R8 holds on a 5,005-entity factory — save at tick 400, load, run to 800, same hash as an uninterrupted run — and C15's round-trip test is unskipped. §12's 20,007-entity reference factory serializes in ~9 ms to 0.15 MB gzipped, against budgets of 300 ms and 2 MB. Nothing stores it yet. Next: C25 — IndexedDB repository & autosave. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C24 — Save state model & serializer** |
+| **First action** | Chunk **C25 — IndexedDB repository & autosave** |
 
 ---
 
@@ -1340,6 +1340,27 @@ interface SaveFile {
 `version` is a plain integer, incremented on any breaking change to
 `SerializedGameState`. Migrations are pure functions `vN -> vN+1`, chained, each
 independently unit-tested against a stored fixture save (C27).
+
+**Implementation note (C24).** The shape above is real, in
+`game/save/save-format.ts`, and two things about what goes *inside* `state` are
+worth having here rather than only in C24's section.
+
+**Item ids are numbers with a mapping; recipe and technology ids are names.**
+The split is by how often a thing appears in the file. Items appear thousands
+of times — every belt slot, every buffer, every inventory row — so they stay
+numeric and the save carries the `string -> number` table it was written with.
+Recipes and technologies appear once per machine and once per queue entry, so
+they are written as their string ids and there is no table: both are dense
+indexes into content order with no reserved numbers, and a translation table
+for one field per machine would cost more than it saves. `EntityType` is the
+one id written raw with no mapping, because those numbers are promised never to
+move (`entities/entity-types.ts`).
+
+**A delta is written for every dirty world chunk, including an empty one.**
+`dirty` latches and decides what the *next* save writes, so it is not
+recoverable from the tiles: a world chunk mined and then restored to its
+generated amounts is still one the save has to carry. The loader sets the flag
+from the file rather than inferring it from the deltas it applied.
 
 ### Failure modes to handle explicitly
 
@@ -5439,6 +5460,166 @@ object and §14 decided the delta strategy in advance. That was the point.
 a regenerated world; size and time budgets; the structural purity assertion.
 
 **Out of scope.** Storage, files, UI.
+
+### What C24 shipped
+
+**Acceptance, one by one.**
+
+- §6 R8 round-trip on a 5,000-entity factory. *(Met. 385 cells of C18's
+  reference layout is 5,005 entities; the run is 800 ticks with a command
+  script straddling the save at 400, and the loaded world's hash equals the
+  uninterrupted one's. A second test then runs both worlds forward together for
+  300 ticks and compares every tick, because a load that rebuilt the power
+  networks wrongly would match at the instant of the load and diverge after
+  it.)*
+- The reference factory serializes in < 300 ms and to < 2 MB gzipped. *(Met,
+  with two orders of magnitude to spare: 20,007 entities, 9,234 of them belts
+  carrying 9,234 items, over a 41×41 explored map, serialize in about 9 ms to
+  0.15 MB gzipped. The test asserts the budgets rather than the measurements —
+  see its header for why this one asserts where `tests/bench/` does not.)*
+- Deserializing a save whose world chunks were never regenerated produces
+  identical terrain. *(Met. A world chunk twenty chunks from the factory is
+  absent from both the live world and the loaded one until a test asks for it,
+  and then comes back tile for tile identical — which is the whole of §14's
+  seed-plus-deltas bargain.)*
+- No class instance, `Map`, `Set`, `undefined`-valued key or cycle in the
+  output. *(Met, and with the validator that already existed:
+  `assertSerializable` from `entities/entity.ts` is run over a whole save. A
+  second test round-trips the save through `JSON.parse(JSON.stringify(...))`
+  and asserts the result is unchanged **and** loads to the same hash, which is
+  the property that actually matters — `structuredClone` and `JSON` must agree,
+  and a save file is the JSON one.)*
+
+**Decisions.**
+
+- **Two id vocabularies in one file, split by how often they appear.** Item ids
+  stay numeric and the save carries the string→number mapping, because items
+  appear thousands of times in a save — every belt slot, every buffer, every
+  inventory row — and a table of forty strings is much smaller than forty
+  thousand copies of them. Recipes and technologies are written as **string
+  ids**, because they appear once per machine and once per queue entry, where a
+  translation table would cost more than it saves. That is the split
+  `registries/recipe-registry.ts` wrote down in C15, extended to technologies
+  for the same reason: a `TechnologyId` is a dense index into content order, so
+  reordering `data/technologies.ts` would silently re-grant the wrong node.
+  `EntityType` alone is written raw, because those numbers are promised never
+  to move.
+- **A delta is written for every dirty world chunk, even an empty one.**
+  `dirty` latches and decides what the *next* save writes (§14), so it cannot
+  be re-derived from the tiles: a world chunk mined and then restored to its
+  generated amounts is still one the save has to carry. The loader therefore
+  calls `World.markDirty` unconditionally rather than inferring the flag from
+  the deltas it just applied.
+- **Deltas are applied through `World`'s ordinary accessors**, not into the
+  typed arrays. The same range checks a running game gets apply to a loaded
+  one, and `dirty` and `revision` move together because `world.ts` keeps them
+  in one place. The cost is that the resource type and the remaining amount —
+  stored apart, because mining changes only the amount — have to be merged back
+  into one `setResource` call per tile, which is a two-pointer walk over two
+  ascending index lists.
+- **Entities are deep-copied in both directions.** A spread would hand C25's
+  asynchronous writer the same `items` array the belt system is still pushing
+  onto, and the file would land somewhere between two ticks. `clonePlain`
+  handles exactly the shapes C05 allows an entity to be, deliberately *not*
+  `structuredClone` — which would happily clone the `Map` that `entity.ts`
+  spends a function refusing, and carry it into a save.
+- **`serialize` refuses to run inside a tick.** That is the enforceable half of
+  task 5; pausing the loop around a save is C25's. `Simulation.tick` now sets a
+  flag in a `try`/`finally` and `serialize` throws on it, so a future caller who
+  saves from inside a system finds out at the first attempt rather than from a
+  corrupt file.
+
+**Deviations.**
+
+- **`itemIdMap` is a `string -> number` record, not `readonly string[]`.** The
+  plan's array is indexed by numeric id, and numeric ids are *sparse*: a
+  deleted item's number stays reserved for ever (`item-registry.ts`), so the
+  array would carry holes, which `JSON.stringify` writes as `null`. The record
+  is the shape `ItemRegistry.idMapping()` already produces and
+  `ItemRegistryOptions.assignedIds` already consumes, with a validator that
+  already refuses duplicates and non-integers — one shape, one door, no holes.
+- **`SerializedGameState` has no version field, and `save-format.ts` defines
+  the wrapper that does.** §14 puts `version` on `SaveFile`, so the file also
+  carries `SaveFile`, `SaveMetadata`, `SAVE_VERSION` and `SAVE_FORMAT` — types
+  and two constants, no logic. Without them the format would have no version
+  anywhere and C27 would have nothing to migrate against. C25 and C26 fill the
+  wrapper in; C24 only says what it is.
+- **`deserialize` takes a `worldGenerator` override.** The plan's signature is
+  `deserialize(state)`, which pins the loader to `createWorldGenerator` — and
+  two callers cannot live with that. C27 has to pin an *old* generator to an
+  old save, which §14 says is a choice a migration makes rather than has made
+  for it; and every test world here is built from a fixed pattern rather than
+  from C19's noise, so without the override a save test would also be a test of
+  the octaves. Passing it skips the generator-version check, because a caller
+  supplying its own generator has already answered that question.
+- **Six existing classes gained one restore method each.** `World.pristineChunk`
+  and `World.markDirty`; `EntityStore.restore`, which inserts entities with the
+  ids they were saved with rather than allocating new ones (§6 R5) and refuses
+  a store that is not empty; `ContentsInventory.load`, which refills in place so
+  the dozen holders of a `SlotInventory` are not left looking at the world
+  before the load; `PlayerState.load`; and three scalar options plus
+  `rebuildDerived()` on `Simulation`. The alternative — a loader that built the
+  entity store, the player and the research itself — would put a second copy of
+  "what a fresh world is made of" outside `Simulation`.
+- **The determinism harness gained a second hash, and `hashState` is
+  unchanged.** §6 R8 compares an uninterrupted run against a reloaded one, and
+  the two differ in exactly one thing that is not state: which **clean** world
+  chunks happen to be resident. A world chunk exists from the moment anything
+  reads a tile in it and stays for ever; a save writes only the dirty ones,
+  because a clean one is by construction what the generator produces. So the
+  round trip uses `hashSavedState`, which filters the clean ones out.
+  `canonicalState` keeps them, because C19's "the same world however it was
+  explored" test is *about* generated terrain and would pass vacuously without
+  them.
+
+**Tests.**
+
+- `tests/determinism/save-round-trip.test.ts` — §6 R8 itself, its
+  not-vacuous twin (a furnace that forgets its part-burnt coal must fail it),
+  the counters no sub-object owns, the reloaded world staying in step for 300
+  ticks, the seed-plus-deltas properties (untouched terrain regenerated, mined
+  ground restored tile for tile, the explored set kept, a resident clean world
+  chunk never written), the structural purity assertion, JSON equivalence,
+  entity id order, byte-stability across two calls, the no-aliasing property,
+  the in-tick refusal, and `rebuildDerived` being idempotent on both a loaded
+  and a live world.
+- `tests/unit/save-serializer.test.ts` — the smaller questions a whole-factory
+  hash cannot point at: which ids are written as names, a save surviving a
+  reordered `data/items.ts`, the delta's exact contents and parallel-array
+  shape, an amount that changed without its type, an exhausted tile, a dirty
+  world chunk with nothing in it, the player's subtile position and craft
+  queue, and ten ways a save can say something impossible — a foreign
+  generator, an unknown recipe or technology, a tile index out of range,
+  mismatched delta arrays, two entities on one tile, an id above the saved next
+  id, an unsorted entity list, a fractional player position and a negative
+  tick.
+- `tests/determinism/save-budget.test.ts` — §12's two numbers, plus a check
+  that the factory being measured really does have belt items and world deltas
+  in it.
+- `tests/integration/vertical-slice.test.ts` — C15's skipped round trip,
+  unskipped and filled in: four simulated minutes against two-plus-save-plus-two.
+- `tests/determinism/reference-factory.ts` gained a cell count, so C18's
+  factory is also C24's 5,005-entity one and §12's 20,007-entity one.
+
+**Noticed, not fixed.**
+
+- **The command queue is not serialized.** §7 caps the drain per tick, so a
+  burst of more than 1,024 commands leaves the remainder waiting — and a save
+  taken in that window loses them. Saving between ticks makes the window a real
+  one rather than a theoretical one. It is not in the plan's
+  `SerializedGameState` and it is not in §10's table, which is arguably the
+  omission: the queue is authoritative in the same sense the craft queue is.
+  Cheap to add when C25 wires up a real autosave; deliberately not added here
+  ahead of a caller.
+- **The save is not validated on load beyond what the restore methods check.**
+  `deserialize` refuses a foreign generator, an unknown recipe or technology,
+  a malformed delta and an impossible entity list, and `PlayerState.load`,
+  `ExploredChunks.restore` and the inventory's `restore` each refuse their own
+  nonsense. That is the last line, not the first: C26 owns full validation of
+  an imported file, and the shape of it — a `save-validator.ts` beside the
+  format — is already in §4's tree.
+- **`rotate` is still in §7's command union with no implementation.** Four
+  chunks in a row have now declined it.
 
 ---
 

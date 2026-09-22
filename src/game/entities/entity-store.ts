@@ -206,6 +206,81 @@ export class EntityStore {
     return entity;
   }
 
+  /**
+   * Put a saved world's entities back, keeping the ids they were saved with.
+   * C24 task 2's half of the load.
+   *
+   * Not `create` in a loop, and the difference is §6 R5: `create` allocates an
+   * id from the counter, so replaying a save through it would renumber every
+   * entity — and every stored reference to one (an underground belt's `link`,
+   * a future circuit's target) would point at whatever now happens to hold
+   * that number. The counter is restored through `EntityStoreOptions.nextId`
+   * and the ids arrive with the entities.
+   *
+   * Everything `create` checks is checked here too, plus the two things only a
+   * load can get wrong: that the ids ascend strictly — the dense array's whole
+   * invariant, and what §6 R4 means by "id-ordered" — and that none of them
+   * has reached the counter, which would let the next placement collide with a
+   * building that already exists.
+   *
+   * Refuses to run on a store that is not empty. A partially-restored store is
+   * a world with two factories in it, and there is no honest way back from
+   * one; `deserialize` builds a fresh `Simulation` for exactly this reason.
+   */
+  restore(entities: readonly Entity[]): void {
+    if (this.entities.length > 0) {
+      throw new Error('EntityStore.restore: this store already holds entities.');
+    }
+
+    let previous = 0;
+    for (const entity of entities) {
+      const { id, type, x, y, rotation } = entity;
+
+      if (!isEntityId(id)) {
+        throw new RangeError(`EntityStore.restore: ${id} is not an entity id.`);
+      }
+      if (id <= previous) {
+        throw new RangeError(`EntityStore.restore: entity #${id} follows #${previous}; ids must ascend.`);
+      }
+      if (id >= this.nextEntityId) {
+        throw new RangeError(
+          `EntityStore.restore: entity #${id} is at or above the saved next id ${this.nextEntityId}.`,
+        );
+      }
+      previous = id;
+
+      if (!isEntityType(type)) {
+        throw new RangeError(`EntityStore.restore: ${type} is not an EntityType.`);
+      }
+      if (!isRotation(rotation)) {
+        throw new RangeError(`EntityStore.restore: ${rotation} is not a Rotation.`);
+      }
+      assertSerializable(entity, `${entityTypeName(type)} entity #${id}`);
+
+      const footprint = this.lookupFootprint(type);
+      assertPlaceable(x, y, footprint, rotation);
+      forEachFootprintTile(x, y, footprint, rotation, (tileX, tileY) => {
+        const occupant = this.occupancy.get(tileKey(tileX, tileY));
+        if (occupant !== undefined) {
+          throw new Error(
+            `EntityStore.restore: entity #${id} stands on (${tileX}, ${tileY}), already held by #${occupant}.`,
+          );
+        }
+      });
+
+      this.entities.push(entity);
+      this.byId.set(id, entity);
+      this.bucket(type).push(entity);
+      forEachFootprintTile(x, y, footprint, rotation, (tileX, tileY) => {
+        this.occupancy.set(tileKey(tileX, tileY), id);
+      });
+    }
+
+    // Once, not per entity: the counter says "the set of entities changed",
+    // and a load is one such change however many buildings arrived in it.
+    this.revision += 1;
+  }
+
   get(id: EntityId): Entity | undefined {
     return this.byId.get(id);
   }

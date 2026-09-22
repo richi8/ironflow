@@ -143,6 +143,46 @@ export class World {
     return this.chunks.get(chunkKey(cx, cy));
   }
 
+  /**
+   * What the generator would produce for `(cx, cy)`, without storing it. C24.
+   *
+   * §14 saves the seed and the deltas, so the serializer has to answer "how
+   * does this world chunk differ from the one the generator would make?" — and
+   * the only thing that knows how to make that world chunk is the generator
+   * this world was constructed with. Handing the generator to the serializer
+   * instead would put a second reference to it in the composition root, and a
+   * save written against a *different* generator than the world is running on
+   * is the one bug this whole file cannot survive.
+   *
+   * The result is deliberately **not** cached and **not** inserted: it is a
+   * throwaway reference copy, and a world chunk that exists only because
+   * something asked what it used to look like would change `chunkCount` — and
+   * therefore what the next save writes — by the act of saving.
+   */
+  pristineChunk(cx: number, cy: number): WorldChunk {
+    const created = this.generate(cx, cy);
+    if (created.cx !== cx || created.cy !== cy) {
+      throw new Error(
+        `World: generator returned world chunk (${created.cx}, ${created.cy}) when asked for (${cx}, ${cy}).`,
+      );
+    }
+    return created;
+  }
+
+  /**
+   * Record that a world chunk diverges from generator output, without saying
+   * how. C24's loader only.
+   *
+   * `dirty` is authoritative in the sense that matters — it decides what the
+   * *next* save writes (§14) — and it latches, so it cannot be re-derived from
+   * the tiles: a world chunk mined and then restored to its generated amounts
+   * is still one the save has to carry. The loader therefore sets it from the
+   * save rather than inferring it from the deltas it applies.
+   */
+  markDirty(cx: number, cy: number): void {
+    markChanged(this.getChunk(cx, cy));
+  }
+
   getTile(x: number, y: number): TileType {
     const chunk = this.getChunk(toChunkCoord(x), toChunkCoord(y));
     return at(chunk.terrain, localIndex(toLocalCoord(x), toLocalCoord(y)));

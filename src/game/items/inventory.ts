@@ -205,6 +205,25 @@ abstract class ContentsInventory implements Inventory {
   }
 
   /**
+   * Replace the contents with a saved set. C24's load.
+   *
+   * In place rather than by construction, because the container may not be the
+   * thing that owns its array: the player's bag is reached through
+   * `BuildMaterials` and through a dozen view models that hold the
+   * `SlotInventory` itself, so swapping the object would leave every one of
+   * them looking at the world before the load. The static `fromJSON`s are for
+   * a container being *made*; this is for one that already exists.
+   *
+   * Cleared first and refilled through `add`, so a saved stack that no longer
+   * fits — a chest whose definition shrank between versions — is a throw here
+   * rather than a quietly-halved pile a player has to notice for themselves.
+   */
+  load(serialized: SerializedInventory): void {
+    this.contents.length = 0;
+    restore(this, serialized, `${this.kind}.load`);
+  }
+
+  /**
    * A copy, so a caller holding one cannot watch the container change under it
    * — and, for a borrowed array, cannot reach the entity's own field.
    */

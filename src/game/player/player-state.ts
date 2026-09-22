@@ -38,7 +38,7 @@
 
 import { SlotInventory, type SerializedInventory, type StackSizeLookup } from '../items/inventory.js';
 import { TPS } from '../simulation-clock.js';
-import { NORTH, type Rotation, type TileCoord } from '../world/coordinates.js';
+import { NORTH, isRotation, type Rotation, type TileCoord } from '../world/coordinates.js';
 
 /* -------------------------------------------------------------------------- *
  * Units
@@ -364,6 +364,60 @@ export class PlayerState {
     return this.squaredSubtileDistanceTo(x, y) <= limit * limit;
   }
 
+  /**
+   * Replace this player with a saved one. C24's load.
+   *
+   * The mirror of `toJSON`, field for field, and it validates every one of
+   * them for the reason `ExploredChunks.restore` does: this is a door
+   * untrusted data comes through, and a fractional `subX` would put the player
+   * permanently between two tiles in a way nothing else in the game can
+   * produce or recover from. C26 validates an *imported* save in full before
+   * it reaches here; these are the invariants that must hold even for a save
+   * this build wrote itself.
+   *
+   * `crafts` arrives with numeric recipe ids, exactly as `toJSON` writes them:
+   * the translation to and from the string ids a save file carries belongs to
+   * `save/save-serializer.ts`, which is the only thing here that has a recipe
+   * registry to translate with.
+   */
+  load(saved: SerializedPlayer): void {
+    this.subX = whole(saved.subX, 'subX');
+    this.subY = whole(saved.subY, 'subY');
+
+    if (!isRotation(saved.facing)) {
+      throw new RangeError(`PlayerState.load: facing ${saved.facing} is not a Rotation.`);
+    }
+    this.facing = saved.facing;
+    this.setMoveIntent(saved.moveX, saved.moveY);
+
+    // Both or neither: a player mining a column with no row is a target the
+    // rest of this class cannot express, and `miningTarget` would hide it.
+    if ((saved.miningX === null) !== (saved.miningY === null)) {
+      throw new RangeError('PlayerState.load: a mining target needs both coordinates or neither.');
+    }
+    this.miningX = saved.miningX === null ? null : whole(saved.miningX, 'miningX');
+    this.miningY = saved.miningY === null ? null : whole(saved.miningY, 'miningY');
+    this.miningTicks = whole(saved.miningTicks, 'miningTicks');
+    if (this.miningTicks < 0) {
+      throw new RangeError(`PlayerState.load: miningTicks is ${this.miningTicks}; ticks never run backwards.`);
+    }
+
+    this.inventory.load(saved.inventory);
+
+    this.crafts.length = 0;
+    for (const order of saved.crafts) {
+      if (!Number.isInteger(order.remaining) || order.remaining < 1) {
+        throw new RangeError(`PlayerState.load: a craft order makes ${order.remaining}; it must be a whole number above 0.`);
+      }
+      if (!Number.isInteger(order.progressTicks) || order.progressTicks < 0) {
+        throw new RangeError(`PlayerState.load: a craft order is ${order.progressTicks} ticks in, which is not a count.`);
+      }
+      // Copied, for `toJSON`'s reason in reverse: the array a save was read
+      // from must not become the queue a system then edits.
+      this.crafts.push({ recipe: order.recipe, remaining: order.remaining, progressTicks: order.progressTicks });
+    }
+  }
+
   toJSON(): SerializedPlayer {
     return {
       subX: this.subX,
@@ -384,6 +438,16 @@ export class PlayerState {
       })),
     };
   }
+}
+
+/** A saved field that has to be a whole number, or a throw naming it. */
+function whole(value: number, field: string): number {
+  if (!Number.isInteger(value)) {
+    throw new RangeError(`PlayerState.load: ${field} is ${String(value)}; it must be a whole number (§6 R3, R7).`);
+  }
+  // `0 - v` never yields `-0`, and a saved `-0` would survive as a different
+  // value than the `0` JSON writes it as (§6 R7).
+  return value === 0 ? 0 : value;
 }
 
 /** The sign of a number as a movement component, with no `-0` (§6 R7). */
