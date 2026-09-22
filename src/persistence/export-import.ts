@@ -33,10 +33,14 @@
  * the gzip magic would be right almost always and wrong for the one file
  * whose first two JSON bytes matched.
  *
- * The version appears twice — once here and once inside the document — and a
- * disagreement between them is refused. They can only differ if somebody
- * edited one of them, and a file that lies about its own version is exactly
- * what a validator exists for.
+ * The version appears twice — once here and once inside the document — and
+ * the two copies do different jobs. The header's is a **label**: it is what a
+ * person reads in a text editor, and it is what refuses a file from a future
+ * build before a byte is inflated. The document's is **authoritative**: it is
+ * what C27's migrator reads and what decides which steps run. They are
+ * deliberately not cross-checked, because after a migration they no longer
+ * agree by design — a v1 file decodes to a v3 save — and a header edited to
+ * lie about a document it does not control changes nothing that matters.
  *
  * ## Why this file may touch the DOM
  *
@@ -132,13 +136,11 @@ export async function decodeSaveFile(bytes: Uint8Array): Promise<SaveFile> {
   // streams take a `BufferSource`, and a subarray of somebody else's array is
   // a view they may still be writing into.
   const payload = new Uint8Array(bytes.subarray(newline + 1));
+  // What comes back is at the *current* schema version, whatever the file
+  // said: `decodeSave` migrates (C27). So the header's version is not
+  // compared with it — see the file header on what the header's copy is for.
   const file = await decodeSave({ bytes: payload, compressed: encoding === 'gzip' });
 
-  // The version in plain sight and the version inside have to agree; see the
-  // file header on why a disagreement is refused rather than resolved.
-  if (file.version !== claimed) {
-    throw new SaveError('corrupt', `That file says it is version ${claimed} and the save inside it says ${file.version}.`);
-  }
   if (file.format !== SAVE_FORMAT) {
     throw new SaveError('corrupt', `That file is not an ${SAVE_FORMAT} document.`);
   }

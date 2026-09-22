@@ -30,6 +30,7 @@
  */
 
 import { SAVE_FORMAT, SAVE_VERSION, type SaveFile } from '../game/save/save-format.js';
+import { SaveMigrationError, migrateSave } from '../game/save/save-migrator.js';
 import { SaveValidationError, validateSaveFile } from '../game/save/save-validator.js';
 
 import { SaveError, asSaveError } from './save-repository.js';
@@ -86,9 +87,21 @@ export async function encodeSave(file: SaveFile): Promise<EncodedSave> {
  * The two header checks are not C26's validator and do not pretend to be: they
  * are the difference between "this is not one of ours" and "this is one of
  * ours from the future", which are different messages to the player and
- * different answers from C27. C26's validator runs *after* them, on every
- * save this build reads — stored as much as imported, because "we wrote it"
- * is a claim about provenance that a half-finished write can falsify.
+ * different answers from C27. What follows them is the rest of the door, in
+ * the only order that works:
+ *
+ * ```text
+ *   header  ->  migrate (C27)  ->  validate (C26)  ->  SaveFile
+ *   is this     bring an old        judge it by the
+ *   ours?       schema forward      current schema
+ * ```
+ *
+ * Migration before validation because the validator knows one schema, the
+ * current one, and an honest v1 save in a v3 build would fail every rule it
+ * has. Validation after migration because nothing this build did not construct
+ * itself is believed — including what a migration produced. Both run on every
+ * save this build reads, stored as much as imported, because "we wrote it" is
+ * a claim about provenance that a half-finished write can falsify.
  */
 export async function decodeSave(encoded: EncodedSave): Promise<SaveFile> {
   const raw = encoded.compressed ? await inflate(encoded.bytes) : encoded.bytes;
@@ -120,10 +133,26 @@ export async function decodeSave(encoded: EncodedSave): Promise<SaveFile> {
     throw new SaveError('corrupt', 'Save has no state or no metadata.');
   }
 
+  let current: unknown;
+  try {
+    // C27. A no-op for a save at the current version, which is every save
+    // this build has written so far.
+    current = migrateSave(parsed);
+  } catch (cause) {
+    if (cause instanceof SaveMigrationError) {
+      // A save from the future is `unsupported`; one this build has no step
+      // for is `corrupt`. The two read differently to a player: one says
+      // update the game, the other says this file cannot be opened.
+      const code = cause.from !== null && cause.from > SAVE_VERSION ? 'unsupported' : 'corrupt';
+      throw new SaveError(code, cause.message, { cause });
+    }
+    throw asSaveError(cause, 'corrupt');
+  }
+
   try {
     // Field by field, into a fresh object (C26 task 4). What comes back is
     // never the parsed document, so nothing unvalidated can ride along in it.
-    return validateSaveFile(parsed);
+    return validateSaveFile(current);
   } catch (cause) {
     if (cause instanceof SaveValidationError) throw new SaveError('corrupt', cause.message, { cause });
     throw asSaveError(cause, 'corrupt');

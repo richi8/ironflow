@@ -14,6 +14,7 @@
     "bench": "vitest bench --run --reporter=verbose",
     "bench:baseline": "IRONFLOW_BENCH_BASELINE=1 vitest bench --run --reporter=verbose",
     "minimap": "node --experimental-transform-types --disable-warning=ExperimentalWarning --import ./tools/ts-imports.mjs tools/minimap.ts",
+    "save:fixture": "node --experimental-transform-types --disable-warning=ExperimentalWarning --import ./tools/ts-imports.mjs tools/make-save-fixture.ts",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint && npm run test"
   },

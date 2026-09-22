@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C26 complete — a factory now leaves the browser.** `game/save/save-validator.ts` reads an untrusted save field by field and rebuilds it, so nothing that was parsed ever reaches the game; `persistence/export-import.ts` wraps it in an `IRONFLOW-SAVE v1 gzip` line and hands it to a download, a file picker or a drop on the window. The validator is wired into `decodeSave`, so a stored save gets the same distrust as an imported one — 19 ms on §12's 20,020-entity factory. A thousand randomly corrupted saves produce a listed refusal or a world that loads, and nothing else. Next: C27 — save migrations. |
+| **Status** | **C27 complete — an old save has somewhere to go.** `game/save/save-migrator.ts` chains pure `vN → vN+1` steps and runs *before* C26's validator, because the validator knows one schema and an old file was written under another. The chain is empty — the format has had one version — and that is now enforced rather than assumed: `tests/fixtures/saves/v1.json` is a committed save of a factory mid-run, `npm run save:fixture` writes the next one and refuses to overwrite an old one, and the suite fails the day `SAVE_VERSION` moves without a step and a fixture. Next: C28 — performance instrumentation. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C27 — Save migrations** |
+| **First action** | Chunk **C28 — Performance instrumentation** |
 
 ---
 
@@ -1445,6 +1445,21 @@ is the same code: the validator is called from `decodeSave`, so a stored save
 is distrusted exactly as far as an imported one. And *keeping* a corrupt blob
 became something a player can act on — `SaveRepository.loadRaw` reads a slot
 without understanding it, which is what lets C26 export one.
+
+**Implementation note (C27).** The sentence above about migrations — "pure
+functions `vN -> vN+1`, chained, each independently unit-tested against a
+stored fixture save" — is real, in `game/save/save-migrator.ts`, and it runs
+**before** the validator. One door, one order:
+
+```text
+  bytes -> header -> migrate (C27) -> validate (C26) -> deserialize (C24)
+```
+
+Migration first because the validator knows one schema and an old file was
+written under another; validation after because nothing this build did not
+construct itself is believed, a migration's output included. The chain is
+empty while the format has one version, and `assertMigrationChain` plus the
+committed fixtures are what make that a checked fact rather than an assumption.
 
 ---
 ---
@@ -6011,8 +6026,10 @@ Task 1 asks for "a magic header and the schema version in plain sight"; the
 encoding token is there for `save-codec.ts`'s reason — a flag is stored, never
 sniffed, because the gzip magic is right almost always and wrong for the file
 whose first two JSON bytes matched. The version appears twice, in the header
-and inside the document, and a disagreement is refused: the two can only differ
-if somebody edited one of them.
+and inside the document. *(C27 changed what the second copy is for: after a
+migration the two correctly disagree — a v1 file decodes to a v3 save — so the
+header's version is a label and an early refusal of a file from the future,
+and the document's is what the migrator acts on. See C27's notes.)*
 
 **`SaveRepository.loadRaw` is a fifth method C25 needed and did not have.**
 §14 says a corrupt save is kept "for export rather than deleting it", and a
@@ -6070,6 +6087,70 @@ the same number to the file before reading it at all.
 future-version refusal.
 
 **Out of scope.** Downgrade migrations.
+
+### What implementing it decided
+
+**Migration runs before validation, and both run on every save.** The order is
+forced: `save-validator.ts` knows exactly one schema — the current one — so a
+v1 document in a v3 build would fail every rule it has. The door in
+`save-codec.ts` is now `header → migrate → validate → SaveFile`, which makes
+the rule every migration is written under: **it is handed untrusted data and
+must not assume its shape**. Nothing it produces is trusted either, because
+the validator judges the result.
+
+**The chain sets the version; a migration does not.** Each step's output
+version is `from + 1` by definition. A migration that had to remember would
+eventually be one that forgot, and a document whose version is one behind its
+shape would stay invisible until the *next* migration ran on it.
+
+**`MIGRATIONS` is empty, and that is checked rather than assumed.**
+`assertMigrationChain` refuses a gap, a duplicate, a step that skips a version,
+a chain that runs past this build **and** one that stops short of it — so a
+`SAVE_VERSION` bumped without a step fails the first test that migrates
+anything. `save-fixtures.test.ts` says the same thing from the other end: one
+committed fixture per version, `MIGRATIONS.length === SAVE_VERSION - 1`.
+
+**The fixture is committed JSON, not a committed `.ifsave`.** A player's file
+is gzipped bytes, and gzipped bytes in git are a diff nobody can read — while
+what a migration acts on is the *document*, and the envelope around it is C26's
+and already tested. The pretty-printed JSON is four kilobytes, reviewable, and
+byte-stable across regeneration because nothing in the generator reads a clock.
+
+**`npm run save:fixture` refuses to overwrite.** A regenerated v1 is this
+build's idea of v1, not the thing any player's save was written by — which is
+precisely what the file exists to not be. `--force` is there for the case where
+the fixture was wrong on the day it was made.
+
+**The fixture is a factory that is running, and the tool insists on it.** Every
+command goes through `Simulation.commands` and a rejected one stops the tool,
+because a fixture quietly missing the furnace it was written to contain is the
+one failure its own tests cannot see. The site is *searched for* rather than
+hard-coded — the nearest ore with buildable ground around it — so a worldgen
+change fails the tool with "there was nowhere to put one" rather than silently
+building a miner in a lake. Two details are deliberate: the inserter feeds off
+a **chest**, not off the belt, because a belt hands its front item onward the
+moment there is room and an arm beside a moving line rarely finds anything to
+take; and the tool ticks on until a belt is actually carrying something, so the
+file contains §9's `pos` at all.
+
+**The `.ifsave` header's version became a label.** C26 cross-checked the header
+against the document and refused a disagreement. After a migration the two
+*correctly* disagree — a v1 file decodes to a v3 save — so the check is gone.
+The header's copy is what a person reads in a text editor and what refuses a
+file from a future build before a byte is inflated; the document's copy is what
+the migrator acts on. C26's note in `export-import.ts` was rewritten to say so.
+
+**No rewrite helpers were written.** §19 rule 10 forbids an abstraction for a
+hypothetical feature, and helpers for renaming an item id have no caller until
+an item is renamed. What C27 task 3 gets instead is the *decision procedure*,
+written where the next author will be standing — `save/migrations/index.ts`
+holds the four-step recipe, the two halves of removing an item (strip its uses,
+**and** leave its number in the table, or the next item inherits the old one's
+stock), and the pin-or-bake choice for a `generatorVersion` change.
+
+**The fixture test is the worldgen tripwire.** It loads the fixture with the
+generator this build ships rather than a test one, so the day `GENERATOR_VERSION`
+changes it fails — which is exactly when task 3's second case has to be decided.
 
 ---
 
