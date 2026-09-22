@@ -1,15 +1,26 @@
 import './styles/main.css';
 
 import { DebugOverlay } from './debug/debug-overlay.js';
+import type { CommandSink } from './game/commands/command-processor.js';
 import { GameController } from './game/game-controller.js';
 import { Game } from './game/game.js';
+import type { SerializedGameState } from './game/save/save-format.js';
+import { deserialize, serialize } from './game/save/save-serializer.js';
 import { Simulation } from './game/simulation.js';
+import { TPS } from './game/simulation-clock.js';
 import { ResourceType, resourceName } from './game/world/resource.js';
 import { createStartingWorld, WORLD_SPAWN } from './game/world/starting-area.js';
 import { toChunkCoord, toLocalCoord, localIndex } from './game/world/chunk.js';
 import type { World } from './game/world/world.js';
 import { InputManager } from './input/input-manager.js';
 import type { InputAction } from './input/keybindings.js';
+import { Autosave, AUTOSAVE_IDS } from './persistence/autosave.js';
+import { IndexedDbSaveRepository } from './persistence/indexeddb-save-repository.js';
+import { MemorySaveRepository } from './persistence/memory-save-repository.js';
+import { SaveController, type SaveSessionState, type SaveSnapshot } from './persistence/save-controller.js';
+import { SaveError, saveErrorMessage, type SaveRepository, type SaveSlot } from './persistence/save-repository.js';
+import { SaveService } from './persistence/save-service.js';
+import { TabLock } from './persistence/tab-lock.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
@@ -24,6 +35,7 @@ import {
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
+import { SAVE_ROWS, type SaveMenuView, type SaveSlotRow } from './ui/save-menu.js';
 import { GameUI } from './ui/ui.js';
 
 /**
@@ -41,6 +53,24 @@ import { GameUI } from './ui/ui.js';
  * (the same reasoning that retired C04's `reject` row). What is left is wiring,
  * plus the one translation §4 will not let the controller do — turning a
  * building's content id into a sprite id for the ghost.
+ *
+ * ## C25 made it asynchronous, and made the world replaceable
+ *
+ * Two things changed here and nowhere else.
+ *
+ * `bootstrap` now **awaits storage before it builds a world**. If there is a
+ * save, generating a fresh map first would be a second of worldgen thrown away
+ * and a visible flash of a world the player never played — so the database
+ * opens first, the newest slot is read, and only a browser with no save
+ * reaches `newSimulation()`.
+ *
+ * And `simulation` is a `let`. Loading a save replaces it, because
+ * `deserialize` builds a fresh `Simulation` rather than mutating one (C24), so
+ * everything downstream has to reach it through this binding, through
+ * `Game.simulation`, or through a closure over it. The two places that would
+ * otherwise have held their own reference were each given one indirection:
+ * `InputManager` takes a `CommandSink` that forwards, and `GameController`
+ * reads `game.simulation` instead of a field. See `applyLoadedState`.
  */
 
 function requireElement<T extends Element>(selector: string): T {
@@ -67,7 +97,45 @@ function describeOre(world: World, x: number, y: number): string {
   return `${resourceName(type)} ${chunk.resourceAmount[index] ?? 0}`;
 }
 
-/** What the player starts carrying. See the note at the assignment below. */
+/**
+ * What the player starts with (C10, retuned in C20).
+ *
+ * Every chunk up to C19 grew this list, because a building the player could
+ * not make was a building they had to be given: C06 handed out fifty of
+ * everything, and C13 through C17 each added their own with a paragraph of
+ * arithmetic behind it. C20's building recipes end that. A starting stock is
+ * now a decision about **the first five minutes** and nothing else, so it
+ * shrank by about three quarters.
+ *
+ * What it buys, and why each number is the number:
+ *
+ * ```text
+ * 2 miner      one on iron, one on coal — the smallest factory that runs
+ *              itself, and one short of the copper the assembler wants
+ * 40 belt      twenty tiles each way; enough to reach ore that is not
+ *              underfoot, not enough to cross the map (C13)
+ * 6 inserter   two per furnace and two spare: ore in, plates out
+ * 2 furnace    §15 says a miner feeds 1.6 of them, so two is one miner's
+ *              worth and the ratio is visible in the first thing built
+ * 1 assembler  the machine that makes everything else, including more of
+ *              itself. One, so the second one is earned
+ * 4 chest      somewhere to put plates, and the answer to a full bag
+ * ```
+ *
+ * **No splitter.** It is the one building here whose recipe needs a circuit,
+ * and C17's layout puzzle is worth more when it arrives as something the
+ * player built than as something they woke up holding.
+ *
+ * The whole kit is worth about 90 iron plates and 20 copper, which at one
+ * miner and two furnaces is roughly five minutes of production — so it reads
+ * as a head start rather than as a finished factory. All of these are
+ * **balance numbers**; the acceptance they are tuned against is C20's "first
+ * automated plate within 10 minutes", measured in
+ * `tests/balance/first-factory.test.ts`.
+ *
+ * It is granted in `newSimulation` and nowhere else, so that loading a save
+ * does not hand it out a second time (C25).
+ */
 const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
   miner: 2,
   belt: 40,
@@ -109,27 +177,158 @@ function describePlayerState(view: PlayerView): string {
  */
 const WORLD_SEED = 0x1f0f10;
 
-function bootstrap(): void {
-  const canvas = requireElement<HTMLCanvasElement>('#game');
-  const uiRoot = requireElement<HTMLElement>('#ui');
-
-  const surface = new CanvasSurface(canvas);
-  const overlay = new DebugOverlay(uiRoot);
+/**
+ * A brand-new world, with the player standing in it holding the starter kit.
+ *
+ * Lifted out of `bootstrap` in C25 because a session now starts in one of two
+ * ways, and the other one — a save — must not run a line of this: the starting
+ * materials are a decision about the first five minutes, and handing them out
+ * again on every load would be an unlimited supply of belts.
+ */
+function newSimulation(): Simulation {
   // C19: a generated world, validated before the player is put in it. The
   // returned seed is the one that passed, which is not necessarily WORLD_SEED
   // — see `starting-area.ts`. Validation has already generated the world
   // chunks around spawn; everything beyond them is still empty until something
   // asks about a tile (see World.getChunk).
   const started = createStartingWorld(WORLD_SEED);
-  const world: World = started.world;
   // The simulation builds its own registry from `data/buildings.ts` and hands
-  // the entity store the footprint lookup that comes with it (C05, C06).
-  // The seed is chosen here because §4 makes the composition root the place
+  // the entity store the footprint lookup that comes with it (C05, C06). The
+  // seed is chosen here because §4 makes the composition root the place
   // decisions are wired; it is authoritative state from C18 (§6 R2, §10) and
-  // becomes a *player* decision at C25's new-game dialog, at which point this
+  // becomes a *player* decision at a new-game dialog, at which point this
   // constant is what that dialog replaces.
-  const simulation = new Simulation({ world, seed: started.seed });
+  const simulation = new Simulation({ world: started.world, seed: started.seed });
   simulation.player.setTilePosition(WORLD_SPAWN.x, WORLD_SPAWN.y);
+  for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
+    simulation.inventory.add(buildingId, count);
+  }
+  return simulation;
+}
+
+/**
+ * Storage, or the best substitute available. See §14's first failure row.
+ *
+ * > IndexedDB unavailable (private mode, blocked) — detect at startup, tell
+ * > the player clearly, keep the game playable with export/import only. Never
+ * > crash, never silently lose a factory.
+ *
+ * The substitute is `MemorySaveRepository`, which is the test double doing a
+ * second job: with it the save menu still works for as long as the tab lives,
+ * so a factory can still be saved and — from C26 — written out to a file. The
+ * warning is the other half, and it is a standing line in the save menu rather
+ * than a toast, because it is true for the whole session rather than for four
+ * seconds of it.
+ */
+async function openStorage(): Promise<{ repository: SaveRepository; warning: string | null }> {
+  try {
+    return { repository: await IndexedDbSaveRepository.open(), warning: null };
+  } catch (cause) {
+    console.warn('IronFlow: IndexedDB is unavailable; saves will not survive this tab.', cause);
+    return {
+      repository: new MemorySaveRepository(),
+      warning: saveErrorMessage(cause instanceof SaveError ? cause : new SaveError('unavailable', 'No IndexedDB.')),
+    };
+  }
+}
+
+/** What an autosave slot is called in the list. */
+function autosaveName(id: string): string {
+  const index = AUTOSAVE_IDS.indexOf(id);
+  return index < 0 ? id : `Autosave ${index + 1}`;
+}
+
+/** One stored slot, as the save menu reads it. */
+function slotRow(slot: SaveSlot, currentId: string | null): SaveSlotRow {
+  return {
+    id: slot.id,
+    name: slot.name,
+    kind: slot.kind,
+    savedAt: slot.updatedAt,
+    // Ticks are the simulation's unit and seconds are the player's. §6 R3
+    // keeps that conversion out of `game/`; this is the far side of it.
+    playtimeSeconds: slot.playtimeTicks / TPS,
+    bytes: slot.bytes,
+    current: slot.id === currentId,
+  };
+}
+
+/** The save session as the panel's view model — frozen, like every other (§13). */
+function saveMenuView(state: SaveSessionState): SaveMenuView {
+  return Object.freeze({
+    slots: Object.freeze(state.slots.slice(0, SAVE_ROWS).map((slot) => slotRow(slot, state.currentId))),
+    hidden: Math.max(0, state.slots.length - SAVE_ROWS),
+    status: state.status,
+    tone: state.tone,
+    canWrite: state.canWrite,
+    busy: state.busy,
+    offerTakeOver: state.offerTakeOver,
+  });
+}
+
+async function bootstrap(): Promise<void> {
+  const canvas = requireElement<HTMLCanvasElement>('#game');
+  const uiRoot = requireElement<HTMLElement>('#ui');
+
+  const surface = new CanvasSurface(canvas);
+  const overlay = new DebugOverlay(uiRoot);
+
+  /**
+   * Is the UI built yet?
+   *
+   * Declared **before** anything asynchronous, which is the whole of why it is
+   * up here: the tab lock settles on a timer that can fire during the `await`s
+   * below, and a resumed session publishes its slot before the panels exist.
+   * Both reach `publishSaves`, and a `let` read before its declaration is a
+   * `ReferenceError` rather than an `undefined` — inside a timer, where it
+   * would be invisible.
+   */
+  let wired = false;
+
+  /** Was the game running when the save menu opened? §8's modal pause. */
+  let pausedByMenu = false;
+
+  /* ------------------------------------------------------------------ *
+   * Storage, before there is a world (C25).
+   *
+   * The order is the point: whether a world has to be *generated* depends on
+   * whether one is already stored. A fresh map takes about a second of
+   * worldgen, and throwing it away a moment later is both that second and a
+   * visible flash of somewhere the player has never been.
+   * ------------------------------------------------------------------ */
+  const storage = await openStorage();
+  // The lock settles a moment after the tab opens (see `tab-lock.ts`), so the
+  // menu has to be told when it does — that is the difference between "SAVE is
+  // greyed out" and "SAVE is greyed out and nobody said why".
+  const lock = new TabLock({ onChange: () => publishSaves() });
+  const service = new SaveService({ repository: storage.repository, lock });
+
+  let bootWarning = storage.warning;
+  let bootSlots: readonly SaveSlot[] = [];
+  let resumed: { readonly id: string; readonly simulation: Simulation } | null = null;
+  try {
+    bootSlots = await service.list();
+    const newest = bootSlots[0];
+    if (newest !== undefined) {
+      const file = await service.read(newest.id);
+      resumed = { id: newest.id, simulation: deserialize(file.state) };
+    }
+  } catch (cause) {
+    // §14: a corrupt or unreadable save is refused and **kept**, never
+    // deleted — it is still there to be exported (C26) — and the game starts
+    // rather than failing to start, which is the difference between a lost
+    // factory and a lost afternoon.
+    console.warn('IronFlow: the most recent save could not be opened.', cause);
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    bootWarning = `Your most recent save could not be opened, so a new world was started. It has been kept, not deleted. (${detail})`;
+  }
+
+  /**
+   * The world. A `let`, because loading a save replaces it — see the header.
+   */
+  let simulation: Simulation = resumed?.simulation ?? newSimulation();
+  /** Where this world came from. The debug overlay's `world` row says so. */
+  let origin = resumed === null ? 'new' : 'loaded';
   const scheduler = new BrowserFrameScheduler();
 
   const camera = new Camera({ x: WORLD_SPAWN.x, y: WORLD_SPAWN.y });
@@ -142,46 +341,6 @@ function bootstrap(): void {
   };
   applySize();
   surface.onResize(applySize);
-
-  /**
-   * What the player starts with (C10, retuned in C20).
-   *
-   * Every chunk up to C19 grew this list, because a building the player could
-   * not make was a building they had to be given: C06 handed out fifty of
-   * everything, and C13 through C17 each added their own with a paragraph of
-   * arithmetic behind it. C20's building recipes end that. A starting stock is
-   * now a decision about **the first five minutes** and nothing else, so it
-   * shrank by about three quarters.
-   *
-   * What it buys, and why each number is the number:
-   *
-   * ```text
-   * 2 miner      one on iron, one on coal — the smallest factory that runs
-   *              itself, and one short of the copper the assembler wants
-   * 40 belt      twenty tiles each way; enough to reach ore that is not
-   *              underfoot, not enough to cross the map (C13)
-   * 6 inserter   two per furnace and two spare: ore in, plates out
-   * 2 furnace    §15 says a miner feeds 1.6 of them, so two is one miner's
-   *              worth and the ratio is visible in the first thing built
-   * 1 assembler  the machine that makes everything else, including more of
-   *              itself. One, so the second one is earned
-   * 4 chest      somewhere to put plates, and the answer to a full bag
-   * ```
-   *
-   * **No splitter.** It is the one building here whose recipe needs a circuit,
-   * and C17's layout puzzle is worth more when it arrives as something the
-   * player built than as something they woke up holding.
-   *
-   * The whole kit is worth about 90 iron plates and 20 copper, which at one
-   * miner and two furnaces is roughly five minutes of production — so it reads
-   * as a head start rather than as a finished factory. All of these are
-   * **balance numbers**; the acceptance they are tuned against is C20's "first
-   * automated plate within 10 minutes", measured in
-   * `tests/balance/first-factory.test.ts`.
-   */
-  for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
-    simulation.inventory.add(buildingId, count);
-  }
 
   /**
    * The renderer's view of the entity store, rebuilt at the top of every frame.
@@ -223,13 +382,22 @@ function bootstrap(): void {
    * rather than as a comment asking people to be careful. `Camera` and
    * `ScenePicker` satisfy theirs structurally; neither knows this layer exists.
    * ------------------------------------------------------------------ */
+  /**
+   * The queue, forwarded rather than handed over (C25).
+   *
+   * `simulation` is replaced when a save is loaded, and an input layer holding
+   * the old `CommandProcessor` would go on enqueueing into a world nobody is
+   * playing — silently, because a queue nothing drains never complains.
+   */
+  const commandSink: CommandSink = { enqueue: (command) => simulation.commands.enqueue(command) };
+
   const picker = new ScenePicker(camera, () => renderEntities);
   const input: InputManager = new InputManager({
     canvas,
     keyTarget: document,
     camera,
     picker,
-    commands: simulation.commands,
+    commands: commandSink,
     // Copy-settings (C20 task 5). Deferred through a closure because the
     // controller is built *from* this manager — it is the cursor — so the two
     // cannot both be constructed first. It is only ever called from a click,
@@ -267,6 +435,10 @@ function bootstrap(): void {
     }
     if (action === 'ui.toggleMap') {
       ui.toggleMap();
+      return;
+    }
+    if (action === 'ui.toggleSaveMenu') {
+      ui.toggleSaveMenu();
       return;
     }
     if (action === 'ui.toggleAltMode') {
@@ -372,6 +544,11 @@ function bootstrap(): void {
     // and only then does the controller hand anything to the UI.
     controller.pump();
     ui.update(elapsedMs);
+    // C25 task 4. Driven from the frame rather than from a timer, so "every
+    // three minutes" is three minutes of *play* — see `autosave.ts` — and so
+    // the snapshot it takes is between ticks by construction: the loop has
+    // finished stepping by the time `render` is called.
+    autosave.update(elapsedMs);
 
     const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
     const stats = renderer.getStats();
@@ -385,7 +562,7 @@ function bootstrap(): void {
         size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
         // C19: the seed is the first thing to check when a map looks wrong,
         // and it is not necessarily the one `WORLD_SEED` asked for.
-        world: `seed ${started.seed} (${started.attempts} tried), ${world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
+        world: `seed ${simulation.seed} (${origin}), ${simulation.world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
         build:
           held === null
             ? '— (1-9 or B to select, R rotates)'
@@ -399,7 +576,7 @@ function bootstrap(): void {
         // after C12 because it is about the *world*, not about a machine —
         // the inspector answers for buildings and has nothing to say about a
         // bare ore tile.
-        ore: hover === null ? '—' : describeOre(world, hover.x, hover.y),
+        ore: hover === null ? '—' : describeOre(simulation.world, hover.x, hover.y),
         // C10's readout: where the player is between tiles, which way they
         // face and how far into the current lump they are. An inventory panel
         // is where the bag becomes player-facing; the subtile arithmetic is
@@ -415,6 +592,103 @@ function bootstrap(): void {
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
   const controller: GameController = new GameController({ game, cursor: input });
+
+  /* ------------------------------------------------------------------ *
+   * Saving and loading (C25).
+   *
+   * Three objects and four closures. `SaveController` owns the *flow* — what
+   * happens between a click and a message — and everything it cannot do
+   * itself is one of the closures below, because each is a thing only the
+   * layer that owns the loop can promise.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * A snapshot, taken between ticks (§14, C24 task 5).
+   *
+   * Pausing is belt and braces rather than the mechanism: this runs either
+   * from a DOM event or from the tail of `render`, and a tick cannot be
+   * half-finished in either, since the loop is synchronous. The pause is what
+   * makes the *guarantee* independent of where the caller happens to be, and
+   * `serialize` throws rather than writing a half-advanced tick if it is not.
+   *
+   * Nothing is awaited inside it. The bytes go out afterwards — task 4's
+   * "serialize between ticks; write asynchronously" — so the frame pays for
+   * the snapshot (about 9 ms on §12's 20,007-entity factory) and nothing else.
+   */
+  function captureSave(): SaveSnapshot {
+    const wasPaused = game.isPaused();
+    game.setPaused(true);
+    try {
+      return { state: serialize(simulation), playtimeTicks: simulation.getTick() };
+    } finally {
+      game.setPaused(wasPaused);
+    }
+  }
+
+  /** Point the camera at the player, for a world that has just appeared. */
+  function centreOnPlayer(): void {
+    const player = controller.getPlayerView();
+    camera.setPosition(player.x, player.y);
+  }
+
+  /**
+   * Play a loaded world. The other half of `captureSave`.
+   *
+   * Everything that held the old world is re-pointed here, and the list is
+   * deliberately short — one binding, one field, one cache — because C24 made
+   * `deserialize` build a fresh `Simulation` rather than mutate one, and
+   * §4 made everything else reach the simulation through the controller.
+   *
+   * It throws rather than reporting: a save that will not deserialize has
+   * changed nothing, so the caller can say so and the player keeps playing the
+   * factory they were in.
+   */
+  function applyLoadedState(state: SerializedGameState): void {
+    const loaded = deserialize(state);
+    simulation = loaded;
+    game.replaceSimulation(loaded);
+    controller.reload();
+    // The terrain cache is keyed by world chunk and revision, and a loaded
+    // world starts both again from where the old one did — see
+    // `TerrainLayer.invalidate`.
+    renderer.invalidate();
+    renderEntities = describeEntities(loaded.entities, loaded.buildings, renderSeconds);
+    centreOnPlayer();
+    origin = 'loaded';
+  }
+
+  const autosave = new Autosave({
+    write: async (id) => {
+      const snapshot = captureSave();
+      await service.write(id, {
+        name: autosaveName(id),
+        kind: 'auto',
+        state: snapshot.state,
+        playtimeTicks: snapshot.playtimeTicks,
+      });
+      saves.noteAutosave();
+    },
+    onError: (error) => saves.noteAutosaveFailed(error),
+  });
+  autosave.prime(bootSlots);
+
+  const saves = new SaveController({
+    service,
+    autosave,
+    capture: captureSave,
+    apply: applyLoadedState,
+    onChange: (state) => {
+      if (wired) ui.setSaveMenuView(saveMenuView(state));
+    },
+    warning: bootWarning,
+  });
+  if (resumed !== null) saves.setCurrentId(resumed.id);
+
+  /** Push the current save state at the menu. See `TabLock`'s `onChange`. */
+  function publishSaves(): void {
+    if (wired) ui.setSaveMenuView(saveMenuView(saves.getState()));
+  }
+
   const ui = new GameUI({
     root: uiRoot,
     controller,
@@ -437,13 +711,45 @@ function bootstrap(): void {
         camera.screenToWorld(0, cssHeight),
       ];
     },
+    // C25 task 7. §4 forbids `ui/**` from importing `persistence/**`, so the
+    // panel names an id and a string and this is where that becomes a write.
+    saves: {
+      onSave: (name) => void saves.saveNew(name),
+      onOverwrite: (id, name) => void saves.overwrite(id, name),
+      onLoad: (id) => void saves.load(id),
+      onDelete: (id) => void saves.remove(id),
+      onRename: (id, name) => void saves.rename(id, name),
+      onTakeOver: () => saves.takeOver(),
+      // §8: "pause the loop outright when a modal save/load dialog is open."
+      // Remembered rather than toggled, so closing the menu does not start a
+      // game the player had deliberately paused before opening it.
+      onVisibility: (open) => {
+        if (open) {
+          pausedByMenu = !game.isPaused();
+          if (pausedByMenu) controller.setPaused(true);
+          void saves.refresh();
+        } else if (pausedByMenu) {
+          pausedByMenu = false;
+          controller.setPaused(false);
+        }
+      },
+    },
   });
   ui.mount();
+  wired = true;
+  centreOnPlayer();
+  publishSaves();
 
   // §8: the game does not run in a background tab. Time away costs nothing and
   // produces nothing, and resyncing on return avoids a pointless catch-up lurch.
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      // §14: autosave on the way out. The snapshot is taken synchronously,
+      // before the loop stops, so what is written is the world as it was left;
+      // the bytes go out afterwards, which a tab being closed may not finish —
+      // which is why this is insurance on top of the three-minute timer and
+      // not instead of it.
+      void autosave.trigger();
       game.stop();
     } else {
       // start() already rebases the clock, so no gap is credited on return.
@@ -454,4 +760,4 @@ function bootstrap(): void {
   game.start();
 }
 
-bootstrap();
+void bootstrap();

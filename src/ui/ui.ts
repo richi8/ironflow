@@ -38,6 +38,12 @@
  * The map (C23) is the one panel that keeps a lane **while paused**, because
  * the outline it draws follows the camera and the camera keeps moving. See
  * `update`.
+ *
+ * The save menu (C25) is on no lane at all. What it shows changes only when
+ * something was saved, loaded or deleted, and every one of those is something
+ * this UI asked for — so the composition root pushes a new view when one
+ * finishes, and §8's "pause the loop outright when a modal save/load dialog is
+ * open" means there are no lanes running behind it anyway.
  */
 
 import type { GameController } from '../game/game-controller.js';
@@ -50,6 +56,7 @@ import { MapPanel } from './map-panel.js';
 import { InventoryPanel } from './inventory.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
 import { ResearchPanel } from './research-panel.js';
+import { SaveMenu, type SaveMenuView } from './save-menu.js';
 import { Toolbar } from './toolbar.js';
 
 /** §13's HUD rate: counters, power, research. */
@@ -82,6 +89,35 @@ export interface GameUIOptions {
    * `MapPanelOptions.viewport`. Omitted, the map simply draws no outline.
    */
   readonly viewport?: () => readonly MapPoint[] | null;
+  /**
+   * Storage, as five verbs and a lock (C25 task 7).
+   *
+   * Injected for `onJumpTo`'s reason, one layer further out: §4 forbids
+   * `ui/**` from importing `persistence/**`, so the panel names an id and a
+   * string and the composition root decides what that means. Omitted — a test
+   * that mounts the UI without a database — the menu is drawn and its buttons
+   * do nothing, which is what they would do with no storage behind them.
+   */
+  readonly saves?: SaveBridge;
+}
+
+/** What the save menu asks the composition root to do (C25). */
+export interface SaveBridge {
+  readonly onSave: (name: string) => void;
+  readonly onOverwrite: (id: string, name: string) => void;
+  readonly onLoad: (id: string) => void;
+  readonly onDelete: (id: string) => void;
+  readonly onRename: (id: string, name: string) => void;
+  readonly onTakeOver: () => void;
+  /**
+   * The panel opened or closed.
+   *
+   * §8: "pause the loop outright when a modal save/load dialog is open." The
+   * UI cannot pause the loop — that is the controller's — and it should not
+   * decide to, because whether a panel is modal is a property of what is
+   * behind it. So it reports, and the composition root decides.
+   */
+  readonly onVisibility: (open: boolean) => void;
 }
 
 export class GameUI {
@@ -94,6 +130,8 @@ export class GameUI {
   private readonly inventory: InventoryPanel;
   private readonly research: ResearchPanel;
   private readonly map: MapPanel;
+  private readonly saveMenu: SaveMenu;
+  private readonly saves: SaveBridge | null;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -108,6 +146,7 @@ export class GameUI {
   constructor(options: GameUIOptions) {
     this.root = options.root;
     this.controller = options.controller;
+    this.saves = options.saves ?? null;
 
     this.hud = new Hud({
       onTogglePause: () => this.controller.togglePause(),
@@ -126,6 +165,7 @@ export class GameUI {
       onToggleInventory: () => this.toggleInventory(),
       onToggleResearch: () => this.toggleResearch(),
       onToggleMap: () => this.toggleMap(),
+      onToggleSaveMenu: () => this.toggleSaveMenu(),
     });
     this.buildMenu = new BuildMenu({
       onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
@@ -164,6 +204,17 @@ export class GameUI {
       viewport: () => options.viewport?.() ?? null,
       onClose: () => this.toggleMap(),
     });
+    // The same arrangement every panel uses, with the verbs wired to whatever
+    // the composition root gave us — or to nothing, when it gave us nothing.
+    this.saveMenu = new SaveMenu({
+      onSave: (name) => this.saves?.onSave(name),
+      onOverwrite: (id, name) => this.saves?.onOverwrite(id, name),
+      onLoad: (id) => this.saves?.onLoad(id),
+      onDelete: (id) => this.saves?.onDelete(id),
+      onRename: (id, name) => this.saves?.onRename(id, name),
+      onTakeOver: () => this.saves?.onTakeOver(),
+      onClose: () => this.toggleSaveMenu(),
+    });
     this.research = new ResearchPanel({
       // The same arrangement every other panel uses: the panel names a
       // technology, the controller builds the command, the simulation decides.
@@ -185,6 +236,7 @@ export class GameUI {
     this.inventory.mount(this.root, this.controller.getInventoryView());
     this.research.mount(this.root, this.controller.getResearchView());
     this.map.mount(this.root);
+    this.saveMenu.mount(this.root);
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
@@ -298,6 +350,7 @@ export class GameUI {
     // of" — so opening one puts the other away rather than stacking them.
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
+    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     return open;
   }
 
@@ -307,6 +360,7 @@ export class GameUI {
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.research.isOpen()) this.setResearchOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
+    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     return open;
   }
 
@@ -316,7 +370,33 @@ export class GameUI {
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
+    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     return open;
+  }
+
+  /**
+   * Push a new save list into the menu (C25).
+   *
+   * Called by the composition root after anything that changes what storage
+   * holds. There is no lane behind this: see the header.
+   */
+  setSaveMenuView(view: SaveMenuView): void {
+    this.saveMenu.update(view);
+  }
+
+  /** Open or close the save menu. Returns the new state (C25). */
+  toggleSaveMenu(): boolean {
+    const open = this.setSaveMenuOpen(!this.saveMenu.isOpen());
+    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
+    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (open && this.research.isOpen()) this.setResearchOpen(false);
+    if (open && this.map.isOpen()) this.setMapOpen(false);
+    return open;
+  }
+
+  /** Is the save menu on screen? For the composition root and the tests. */
+  isSaveMenuOpen(): boolean {
+    return this.saveMenu.isOpen();
   }
 
   /** Open or close the map. Returns the new state (C23). */
@@ -328,6 +408,7 @@ export class GameUI {
     if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.research.isOpen()) this.setResearchOpen(false);
+    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     return open;
   }
 
@@ -350,6 +431,7 @@ export class GameUI {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.saveMenu.destroy();
     this.map.destroy();
     this.research.destroy();
     this.inventory.destroy();
@@ -417,6 +499,21 @@ export class GameUI {
   private refreshMap(): void {
     if (!this.map.isOpen()) return;
     this.map.update(this.controller.getMapView());
+  }
+
+  /**
+   * Show or hide the save menu, telling the composition root either way.
+   *
+   * The report is §8's: a save dialog is the one panel the game is expected to
+   * stop behind, and stopping it is a decision only the layer that owns the
+   * loop can make.
+   */
+  private setSaveMenuOpen(open: boolean): boolean {
+    if (this.saveMenu.isOpen() === open) return open;
+    this.saveMenu.setOpen(open);
+    this.toolbar.setSaveMenuOpen(open);
+    this.saves?.onVisibility(open);
+    return open;
   }
 
   /** Read a fresh snapshot of the selected machine, or close the panel. */

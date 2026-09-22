@@ -115,6 +115,16 @@ export type InputAction =
    * with the key in between.
    */
   | 'ui.toggleAltMode'
+  /**
+   * Open and close the save menu (C25).
+   *
+   * `F2`, beside `F3`'s debug overlay and for the same reason: the function
+   * row is nowhere near the hand that is building, so a save menu cannot open
+   * mid-drag — and `F2` is one of the few function keys no browser claims.
+   * The letter keys are not free any more, and the letter a save menu would
+   * want (`S`) is the key that walks the player south.
+   */
+  | 'ui.toggleSaveMenu'
   /** Hold the simulation still while the world keeps being drawn (C07, §8). */
   | 'game.togglePause'
   | 'debug.toggleOverlay';
@@ -163,6 +173,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   AltLeft: 'ui.toggleAltMode',
   AltRight: 'ui.toggleAltMode',
   KeyV: 'ui.toggleAltMode',
+  F2: 'ui.toggleSaveMenu',
   KeyP: 'game.togglePause',
   Pause: 'game.togglePause',
   Digit1: 'build.slot1',

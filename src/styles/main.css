@@ -1186,3 +1186,183 @@ body {
   color: var(--if-text-dim);
   text-align: center;
 }
+
+/* -----------------------------------------------------------------------------
+ * The save menu (C25 task 7).
+ *
+ * The ninth panel, in the same fixed box the bag, the tech tree and the map
+ * use, because they are all "the thing the player stopped playing to read".
+ * The list is a grid so the five columns line up down the page — a save list
+ * whose timestamps do not align is a save list nobody scans.
+ * -------------------------------------------------------------------------- */
+
+.if-saves {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(620px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.if-saves__new {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.if-saves__name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+}
+
+.if-saves__name:focus {
+  border-color: var(--if-accent);
+  outline: none;
+}
+
+.if-saves__list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.if-save-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr auto auto auto auto;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 2px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.if-save-row:hover {
+  background: var(--if-panel-high);
+}
+
+.if-save-row.is-selected {
+  border-color: var(--if-accent);
+}
+
+.if-save-row.is-auto .if-save-row__name {
+  color: var(--if-text-muted);
+}
+
+/* The slot this session is playing. A dot rather than a word, because the
+   name column is the one that has to stay readable at a glance. */
+.if-save-row.is-current .if-save-row__name::before {
+  content: '● ';
+  color: var(--if-accent);
+}
+
+.if-save-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.if-save-row__kind,
+.if-save-row__when,
+.if-save-row__playtime,
+.if-save-row__size {
+  color: var(--if-text-dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.if-saves__more {
+  flex: none;
+  padding: 6px 2px;
+  color: var(--if-text-dim);
+  font-size: 10px;
+}
+
+.if-saves__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--if-stroke);
+}
+
+.if-saves__action {
+  padding: 6px 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: var(--if-bg);
+  color: var(--if-text);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.if-saves__action:hover:not(:disabled) {
+  border-color: var(--if-accent);
+  color: var(--if-accent-high);
+}
+
+.if-saves__action:disabled {
+  color: var(--if-text-dim);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.if-saves__action.is-primary {
+  border-color: var(--if-accent-dim);
+  color: var(--if-accent-high);
+}
+
+.if-saves__action.is-danger:hover:not(:disabled) {
+  border-color: var(--if-danger);
+  color: var(--if-danger);
+}
+
+/* An armed DELETE is filled, not merely outlined: the second click is the one
+   that cannot be taken back, and it should not look like the first. */
+.if-saves__action.is-armed {
+  border-color: var(--if-danger);
+  background: color-mix(in srgb, var(--if-danger) 30%, var(--if-bg));
+  color: var(--if-text);
+}
+
+.if-saves__status {
+  flex: none;
+  min-height: 16px;
+  padding-top: 8px;
+  color: var(--if-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.if-saves__status.is-warn {
+  color: var(--if-warn);
+}
+
+.if-saves__status.is-error {
+  color: var(--if-danger);
+}

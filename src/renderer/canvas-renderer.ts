@@ -121,6 +121,12 @@ export class CanvasRenderer implements Renderer {
     this.overlay.draw(ctx, state, camera);
   }
 
+  /** Forget everything cached about the world. The composition root calls it
+   * when a save is loaded and the `World` underneath the renderer changes. */
+  invalidate(): void {
+    this.terrain.invalidate();
+  }
+
   destroy(): void {
     this.terrain.destroy();
   }

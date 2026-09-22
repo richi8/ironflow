@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C24 complete — a factory is now a document.** `game/save/` turns authoritative state into plain JSON and back: the seed plus per-world-chunk deltas, every entity verbatim, the player, the research and the explored set. §6 R8 holds on a 5,005-entity factory — save at tick 400, load, run to 800, same hash as an uninterrupted run — and C15's round-trip test is unskipped. §12's 20,007-entity reference factory serializes in ~9 ms to 0.15 MB gzipped, against budgets of 300 ms and 2 MB. Nothing stores it yet. Next: C25 — IndexedDB repository & autosave. |
+| **Status** | **C25 complete — a factory now survives the browser.** `persistence/` puts C24's document in IndexedDB: two object stores so a listing never touches a save body, gzip through `CompressionStream` with an uncompressed fallback and a flag, a three-slot autosave rotation on a three-minute play clock, a `BroadcastChannel` lock so a second tab cannot interleave writes, and a ninth panel to save, load, rename and delete from. Every row of §14's failure table has a specific message and a test; a quota failure leaves the stored factory untouched, because both puts share one transaction. `bootstrap` is asynchronous and resumes the newest save, so `main.ts` is finally covered by a test of its own. Next: C26 — export / import & validation. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C25 — IndexedDB repository & autosave** |
+| **First action** | Chunk **C26 — Export / import & validation** |
 
 ---
 
@@ -278,9 +278,14 @@ src/
     research-panel.ts  save-menu.ts  notifications.ts  toolbar.ts
 
   persistence/
-    save-repository.ts
+    save-repository.ts         # the interface, SaveSlot, SaveError
     indexeddb-save-repository.ts
-    memory-save-repository.ts  # test double
+    memory-save-repository.ts  # test double, and the no-IndexedDB fallback
+    save-codec.ts              # gzip + JSON, with the flag (C25)
+    save-service.ts            # the SaveFile wrapper, ids, the lock (C25)
+    save-controller.ts         # the save menu's flow, headless (C25)
+    tab-lock.ts                # BroadcastChannel, one writer (C25)
+    autosave.ts                # three slots, three minutes (C25)
     export-import.ts
 
   platform/                    # browser adapters behind interfaces game/ defines
@@ -1095,7 +1100,8 @@ GameUI
  +-- Inspector      selected entity: status, progress, contents, rate
  +-- InventoryPanel player inventory
  +-- ResearchPanel  tech tree, current research, queue
- +-- SaveMenu       list, save, load, delete, export, import
+ +-- MapPanel      the explored world, and where the camera is looking
+ +-- SaveMenu      list, save, load, delete, export, import
  +-- Notifications  transient toasts, including command rejections
 ```
 
@@ -1235,6 +1241,27 @@ Two things about it are its own:
   hang off, and an outline frozen halfway through a pan is worse than no
   outline, so `update` runs a 5 Hz lane of its own for the map while the game
   is stopped. That is the whole of the exception.
+
+**Implementation note (C25).** `SaveMenu` is the **ninth** panel, and the
+first one whose length is not decided by a content table: a player may keep
+any number of saves. §13's "build the DOM once" is therefore honoured as a
+**cap** — `SAVE_ROWS` rows made in `mount()` and never created or destroyed,
+with a line saying how many more exist — rather than as a pool sized by
+`data/`. A save browser that pages is C26's problem at the earliest.
+
+Three other things about it are its own:
+
+- **One selected row and one set of verbs**, rather than four buttons on every
+  row. The obvious layout is how a player deletes the save they meant to load.
+- **`DELETE` is two clicks and not a modal.** A `confirm()` blocks the frame
+  loop the game is drawing from, and §8 already asks for a pause behind this
+  panel. The arming expires after five seconds and is dropped when the panel
+  closes, so a player who walks away does not return to a live delete under
+  the cursor.
+- **It is on no lane at all.** What it shows changes only when something was
+  saved, loaded or deleted, and every one of those is something this UI asked
+  for — so the composition root pushes a new view when one finishes. §8's
+  modal pause means there are no lanes running behind it anyway.
 
 **A view model carries only what exists.** `HudView` had no research progress
 from C07 to C22, because there was no research; a field that is always `null`
@@ -1376,6 +1403,40 @@ occur in the wild:
 | Imported file from a stranger | Full validation (C26). Never trust imported data. |
 | Two tabs open on the same save | Detect via a BroadcastChannel lock; the second tab opens read-only or prompts. Do not let two tabs interleave writes. |
 | Autosave | Every 3 minutes and on `visibilitychange` to hidden, into a rotating set of 3 autosave slots, never overwriting a manual save. |
+
+**Implementation note (C25).** Every row above is implemented and tested; what
+follows is what implementing them decided.
+
+- **One transaction covers both object stores**, which is what turns the quota
+  row from a hope into a guarantee: a refused body put aborts the transaction,
+  the metadata put rolls back with it, and what is on disk is exactly the save
+  that was there before. Two transactions would leave a slot advertising a
+  playtime whose factory no longer exists.
+- **A corrupt blob is refused and kept**, and the slot stays in the listing —
+  which is what makes C26's export of it possible. Nothing in `persistence/`
+  ever deletes something it could not read.
+- **The no-IndexedDB fallback is `MemorySaveRepository`**, the test double
+  doing a second job. With it the save menu still works for as long as the tab
+  lives, so a factory can still be saved and exported, and the warning is a
+  standing line in the menu rather than a toast — it is true for the whole
+  session rather than for four seconds of it.
+- **The compression flag is stored, never sniffed.** A save written where
+  `CompressionStream` is missing is read where it exists; the gzip magic would
+  be right almost always and wrong for the save whose first two JSON bytes
+  matched.
+- **Autosave counts the renderer's milliseconds, not the wall clock**, so §8's
+  "the game does not run in a background tab" makes "every three minutes"
+  three minutes *of play*. The rotation is primed from the listing at startup
+  and starts at the oldest slot, so a reload overwrites the stalest copy
+  rather than the one written just before the crash.
+- **The thumbnail stays `null`.** A data URL of the canvas is tens of
+  kilobytes per slot against a whole factory's 150 kB, it cannot be produced
+  from `game/` at all, and an age, a playtime and a size read better in a list.
+- **The tab lock has three states, not two.** `BroadcastChannel` delivery is
+  asynchronous, so a tab cannot know at construction whether it is alone;
+  `pending` is the honest answer until one has had a chance to answer, and
+  simultaneous claims are broken by id rather than by timing (§6 R6's
+  reasoning, one layer out).
 
 ---
 ---
@@ -5666,6 +5727,193 @@ unavailability failure paths with a mocked IDB; autosave rotation; the multi-tab
 lock.
 
 **Out of scope.** Cloud sync, save sharing, a save browser with screenshots.
+
+### What C25 shipped
+
+**Acceptance, one by one.**
+
+- A factory survives a full browser restart, bit-for-bit. *(Met.
+  `tests/integration/save-restart.test.ts` runs a factory, saves it through
+  the real repository into a fake IndexedDB, closes the connection, opens a
+  **second** repository over the same backing store, and loads: the hash
+  matches. A second test then runs both worlds forward together for 200 ticks
+  and compares every tick, because a load that rebuilt the belt order wrongly
+  would match at the instant of the load and diverge after it.)*
+- With IndexedDB blocked, the game starts, warns clearly, and remains playable.
+  *(Met, and it is the **default** path under test: jsdom has no `indexedDB`,
+  so `tests/unit/bootstrap-saves.dom.test.ts` starts the real `main.ts` with
+  storage unavailable, reads the warning off the save menu, and then saves,
+  loads and deletes against the in-memory repository the fallback installed.)*
+- A simulated `QuotaExceededError` does not destroy the existing save. *(Met,
+  and the mechanism is the guarantee rather than a hope: the metadata put and
+  the body put share **one transaction**, so a refusal aborts both and what is
+  on disk is the previous save. The fake IndexedDB rolls back on abort, which
+  is the one behaviour it implements for this reason.)*
+- Autosave never blocks a frame for more than 300 ms. *(Met. What a frame
+  actually pays is the synchronous prologue — `serialize` then
+  `JSON.stringify` — because gzip and the transaction are behind the first
+  `await`. Measured over the 5,005-entity factory in the restart test; §12's
+  20,007-entity one is `save-budget.test.ts`'s.)*
+- Listing 50 saves takes < 50 ms and does not deserialize any state. *(Met,
+  and it is a property of the schema rather than of a cache: the listing reads
+  the `metadata` store and `MemorySaveRepository` counts body reads so the
+  test can assert zero.)*
+
+**Decisions.**
+
+- **`list()` returns `SaveSlot`, not `SaveMetadata`.** Task 2 says the listing
+  must not deserialize save blobs, which makes it the *only* thing the save
+  menu sees — so a row the player can click has to carry the id `load()`
+  wants. `SaveSlot` is `SaveMetadata` plus the three facts that belong to
+  storage rather than to the file: the key, whether it is an autosave, and how
+  many bytes it took.
+- **The compression flag is stored, never sniffed.** A save written on a
+  browser without `CompressionStream` is read on one that has it. The gzip
+  magic would be right almost always, and wrong for the save whose first two
+  JSON bytes happened to match. One boolean per slot removes the question, and
+  the restart test stages exactly that crossing.
+- **The decompression cap lives in the codec, not in C26's validator.** C26
+  task 5 owns the bomb, but the function that *allocates the memory* is here,
+  and a validator that runs after the allocation is a validator that runs
+  after the tab has died. `transform` reads chunk by chunk so the running
+  total can be checked while it grows. C26 still owns content validation.
+- **A tab starts `pending`, not `primary`.** `BroadcastChannel` delivery is
+  asynchronous, so a tab cannot know at construction whether it is alone.
+  Optimistic-primary would let both tabs write in the first few milliseconds;
+  pessimistic-secondary would stop the ordinary single-tab case from ever
+  saving. `pending` is the honest answer to a question that has not come back,
+  `ready()` waits for it, and simultaneous claims are broken by **id** — §6
+  R6's reasoning one layer out, resolve by identity rather than by who was
+  noticed first.
+- **Autosave counts frames, not wall time.** §8 stops the loop in a background
+  tab, so a `setInterval` would fire against a simulation that is not
+  advancing and write three identical copies of the same tick. Counting the
+  renderer's own milliseconds makes "every three minutes" three minutes *of
+  play*, which is what a player means by it. `prime` starts the rotation at
+  the oldest slot so a reload overwrites the stalest copy rather than the one
+  written thirty seconds before the crash.
+- **The advance happens on success only.** A slot that failed is retried
+  rather than skipped past; three failures in a row would otherwise leave
+  three stale autosaves and no way to tell which is which.
+- **Saving is refused for an autosave slot, in both directions.** §14's
+  rotation never overwrites a manual save; `OVERWRITE` is greyed for an `auto-`
+  row for the same reason facing the other way — a manual save dropped into the
+  rotation is gone within nine minutes, and the player was told it was saved.
+- **`DELETE` is two clicks, not a modal.** A `confirm()` blocks the frame loop
+  the game draws from, and §8 already has one thing it wants a pause for. The
+  arming expires after five seconds and is dropped when the panel closes, so a
+  player who walks away does not come back to a live delete under the cursor.
+- **No thumbnail.** §14 lists one as optional and task 2 leaves the decision
+  here. A data URL of the canvas is tens of kilobytes per slot against a whole
+  factory's 150 kB, it cannot be produced from `game/` at all, and the list
+  reads perfectly well with an age, a playtime and a size.
+
+**Deviations.**
+
+- **`bootstrap` is asynchronous, and resumes the newest save.** The plan does
+  not say when a save is loaded; doing it only from the menu would mean every
+  session starts by generating a world the player is about to throw away —
+  about a second of worldgen and a visible flash of somewhere they have never
+  been. So storage opens *first*, the newest slot is read, and
+  `newSimulation()` runs only when there is nothing to resume. A save that
+  will not open leaves the game starting a new world with the reason standing
+  in the save menu, and the blob kept rather than deleted (§14).
+- **`Simulation` became replaceable, which took three one-line changes.**
+  `deserialize` builds a fresh `Simulation` (C24), so loading has to re-point
+  whatever held the old one. `Game.simulation` is now a getter over a mutable
+  field with `replaceSimulation`; `GameController` reads `game.simulation`
+  rather than a field it copied in its constructor, and gained `reload()` to
+  drop the four caches keyed to a world that no longer exists; and
+  `InputManager` is handed a forwarding `CommandSink` instead of the queue
+  itself. The alternative — tearing down and rebuilding the object graph — would
+  have thrown away the canvas, the camera and every panel to change one field.
+- **`TerrainLayer` gained `invalidate()`.** Its cache is keyed by
+  `(cx, cy, zoom bucket, revision)`, and a loaded world restarts three of those
+  four from where the old one did — a world chunk nobody has mined has revision
+  0 in *every* world. Without it a loaded save is drawn on the terrain of the
+  save it replaced until something happens to change a tile.
+- **There is a `SaveController` between the panel and the repository, and it
+  is not in §4's tree.** §4 lists `save-repository.ts`,
+  `indexeddb-save-repository.ts`, `memory-save-repository.ts` and
+  `export-import.ts`; the flow — freeze, snapshot, write, refresh, and say
+  something useful when any of it fails — belongs to none of them, and §4 also
+  says the composition root is where logic must *not* accumulate. It is
+  headless and knows nothing about `Simulation` or the DOM, which is what lets
+  every row of §14's failure table be a test. `save-service.ts` beside it is
+  the thinner half: the `SaveFile` wrapper, the id, and the lock check.
+- **`SaveMenu` is the ninth panel and §13's diagram lists it eighth.** The
+  diagram predates `MapPanel`, which C23 already noted. It is also the first
+  panel whose length is not decided by a content table, so §13's "build the
+  DOM once" is honoured as a **cap**: `SAVE_ROWS` rows built in `mount()`, and
+  a line saying how many more exist. A save browser that pages is C26's
+  problem at the earliest.
+- **`ui.toggleSaveMenu` is bound to `F2`.** The letter keys are gone, and the
+  letter a save menu would want is the one that walks the player south. `F2`
+  sits beside `F3`'s debug overlay, is claimed by no browser, and cannot be hit
+  mid-drag.
+- **A tenth icon.** §11 names eight and C07 added `play` as the pause button's
+  other face; `save` is a genuinely new one, because §11's list was written
+  before there was anything to store.
+
+**Tests.**
+
+- `tests/unit/save-repository.test.ts` — the contract, run twice with
+  `describe.each` against both implementations, which is what makes every
+  headless test elsewhere mean something about the browser. Plus the failure
+  paths: no database, a database that errors, a blocked upgrade, a quota that
+  leaves the previous save and an unrelated save intact, a corrupt blob that
+  is refused and **kept**, and a closed repository.
+- `tests/fixtures/fake-indexeddb.ts` — a small real IndexedDB rather than a
+  mock: stores that hold what is put in them, transactions that complete on a
+  microtask, rollback on abort, and a backing store that survives `close()` so
+  a second `open` is a second session against the same disk.
+- `tests/unit/save-codec.test.ts` — gzip used and flagged, the fallback
+  readable, a save crossing between the two, the header and version refusals,
+  and a real decompression bomb refused mid-inflate.
+- `tests/unit/tab-lock.test.ts` — one writer whatever the order, the tie
+  broken by id, the hand-over, the release when the writer closes, and traffic
+  that is not ours ignored.
+- `tests/unit/autosave.test.ts` — the interval counted in frames, the rotation
+  across a reload, a manual slot never named however it is spelt, a failed
+  slot retried rather than skipped, and the re-entry guard that stops one
+  writer per frame each holding a serialized world.
+- `tests/unit/save-controller.test.ts` — every sentence §14's table ends in,
+  including a quota that keeps the old save listed, a save that decodes and
+  then will not open leaving the running game alone, and the second tab being
+  refused visibly.
+- `tests/unit/save-menu.dom.test.ts` — the pool built once under a
+  `MutationObserver`, the two-click delete and its expiry, the verbs greyed
+  while another tab holds the lock, and the panel inert when the UI was
+  mounted without storage.
+- `tests/integration/save-restart.test.ts` — the acceptance criteria end to
+  end: the restart, the 200 ticks in step afterwards, the uncompressed save
+  read by a session with gzip, the rotation against a real repository, the
+  frame cost, and the quota.
+- `tests/unit/bootstrap-saves.dom.test.ts` — **`main.ts` itself**, started for
+  real with `requestAnimationFrame` stubbed to a callback that never fires. It
+  exists because C25 is what made the composition root asynchronous and gave
+  it a binding that is replaced rather than fixed; it caught a temporal dead
+  zone on the resume path that no test underneath it could see.
+
+**Noticed, not fixed.**
+
+- **The command queue is still not serialized.** C24 noticed it and left it
+  for "when C25 wires up a real autosave". It is still not worth it: §7 caps
+  the drain at 1,024 per tick, and a save is taken between ticks from a frame
+  or a DOM event, so the window is a burst of more than 1,024 commands in a
+  single tick — a held build-drag at a rate no pointer produces. When it
+  becomes real it is one array in `SerializedGameState`.
+- **A loaded save re-points the world but not the session's toasts.**
+  `GameController.reload()` drops the alert log and the rejection list, which
+  is right, but a toast already on screen belongs to the world the player just
+  left and stays until it expires. Four seconds of a message about a machine
+  that no longer exists.
+- **The lock does not survive a crashed tab.** A tab killed without running
+  `close()` never posts `release`, so the next tab stays `secondary` until the
+  player takes over. A heartbeat would fix it and would be a timer running for
+  the whole session to solve a case the `TAKE OVER` button already solves.
+- **`rotate` is still in §7's command union with no implementation.** Five
+  chunks in a row have now declined it.
 
 ---
 

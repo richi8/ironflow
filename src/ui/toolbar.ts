@@ -31,6 +31,8 @@ export interface ToolbarOptions {
   readonly onToggleResearch: () => void;
   /** Open or close the map (C23). */
   readonly onToggleMap: () => void;
+  /** Open or close the save menu (C25). */
+  readonly onToggleSaveMenu: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -43,6 +45,7 @@ export class Toolbar {
   private readonly bagButton = document.createElement('button');
   private readonly techButton = document.createElement('button');
   private readonly mapButton = document.createElement('button');
+  private readonly saveButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -86,6 +89,16 @@ export class Toolbar {
     this.mapButton.title = 'Open the map (M)';
     this.mapButton.addEventListener('click', this.handleMap);
     this.root.append(this.mapButton);
+
+    // The fifth, and the one a player needs to be able to find without having
+    // read a keybinding list — which is the whole argument for the four above
+    // it, and it applies hardest to the panel that keeps their factory.
+    this.saveButton.type = 'button';
+    this.saveButton.className = 'if-toolbar__menu';
+    this.saveButton.textContent = 'SAVE';
+    this.saveButton.title = 'Open the save menu (F2)';
+    this.saveButton.addEventListener('click', this.handleSave);
+    this.root.append(this.saveButton);
 
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
@@ -132,11 +145,17 @@ export class Toolbar {
     this.mapButton.setAttribute('aria-pressed', String(open));
   }
 
+  setSaveMenuOpen(open: boolean): void {
+    this.saveButton.classList.toggle('is-active', open);
+    this.saveButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.menuButton.removeEventListener('click', this.handleMenu);
     this.bagButton.removeEventListener('click', this.handleBag);
     this.techButton.removeEventListener('click', this.handleTech);
     this.mapButton.removeEventListener('click', this.handleMap);
+    this.saveButton.removeEventListener('click', this.handleSave);
     for (const slot of this.slots) slot.button.removeEventListener('click', this.handleSlot);
     this.root.remove();
     this.slots.length = 0;
@@ -156,6 +175,10 @@ export class Toolbar {
 
   private readonly handleBag = (): void => {
     this.options.onToggleInventory();
+  };
+
+  private readonly handleSave = (): void => {
+    this.options.onToggleSaveMenu();
   };
 
   /**

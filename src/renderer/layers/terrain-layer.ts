@@ -307,6 +307,19 @@ export class TerrainLayer {
     return { cached: this.cache.size, pixels: this.cache.pixels, built: this.built, direct: this.direct };
   }
 
+  /**
+   * Drop every cached bitmap (C25).
+   *
+   * Loading a save replaces the `World`, and a cache entry is keyed by
+   * `(cx, cy, zoom bucket, revision)` — three of which the new world reuses
+   * from tile one. A world chunk that has never been mined has revision 0 in
+   * every world, so without this a loaded save would be drawn on the terrain
+   * of the one it replaced until something happened to change a tile.
+   */
+  invalidate(): void {
+    this.cache.clear();
+  }
+
   destroy(): void {
     this.cache.clear();
   }

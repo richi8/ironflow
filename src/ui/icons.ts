@@ -25,7 +25,8 @@ export type IconName =
   | 'alert'
   | 'map'
   | 'pause'
-  | 'play';
+  | 'play'
+  | 'save';
 
 /**
  * One path per icon, on a 16×16 grid, `evenodd` so a hole is a hole.
@@ -33,7 +34,10 @@ export type IconName =
  * `play` is a ninth, and it is the pause button's other face rather than a new
  * icon: a control that toggles has to show what the next press will do, and a
  * pause glyph that stays put while the game is stopped is the classic "is it
- * paused or not?" button. §11's eight are all above it.
+ * paused or not?" button. §11's eight are all above it. `save` is a tenth and
+ * is a genuinely new one — §11's list was written before there was anything to
+ * store — drawn as the disk every player still reads as "save" decades after
+ * the last one was sold.
  */
 const PATHS: Readonly<Record<IconName, string>> = Object.freeze({
   /** An ore chunk, as on the reference sheet's resource nodes. */
@@ -52,6 +56,8 @@ const PATHS: Readonly<Record<IconName, string>> = Object.freeze({
   map: 'M5.5 1.6 10.5 3.4 15 1.6v11.2l-4.5 1.8-5-1.8L1 14.6V3.4Zm-1 2v8.8l1-.4V3.2Zm3 .3v8.8l1 .4V3.5Z',
   pause: 'M4 3h3v10H4Zm5 0h3v10H9Z',
   play: 'M4 2.5 13 8l-9 5.5Z',
+  /** A disk: the shutter above, the label below (C25). */
+  save: 'M2 2h9.5L14 4.5V14H2Zm2 2v3.5h6V4Zm1 6v4h6v-4Zm2-5.5h2V7H7Z',
 });
 
 /**

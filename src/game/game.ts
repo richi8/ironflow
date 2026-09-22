@@ -20,15 +20,41 @@ export interface GameOptions {
 }
 
 export class Game {
-  readonly simulation: Simulation;
+  private current: Simulation;
   private readonly loop: GameLoop;
 
   constructor(options: GameOptions) {
-    this.simulation = options.simulation;
+    this.current = options.simulation;
     this.loop = new GameLoop(options.scheduler, {
-      tick: () => this.simulation.tick(),
+      // A closure rather than a bound method, which is what lets `load`
+      // replace the world without the loop noticing.
+      tick: () => this.current.tick(),
       render: options.render,
     });
+  }
+
+  /** The world being simulated right now. */
+  get simulation(): Simulation {
+    return this.current;
+  }
+
+  /**
+   * Play a different world — what loading a save is, from here (C25).
+   *
+   * `deserialize` builds a **fresh** `Simulation` rather than mutating one
+   * (C24), because a half-applied load is a factory with two of everything.
+   * That leaves exactly one question for this layer: who is holding the old
+   * object. The answer is this field and `GameController`, which reads it
+   * back through here — so a load is one assignment rather than a graph walk,
+   * and nothing downstream can be left pointing at the world before the load.
+   *
+   * The clock is rebased on the way out: the read, the decode and the
+   * deserialize are wall-clock time the player did not play, and crediting it
+   * would run a burst of catch-up ticks on a factory that has just appeared.
+   */
+  replaceSimulation(simulation: Simulation): void {
+    this.current = simulation;
+    this.loop.resync();
   }
 
   start(): void {

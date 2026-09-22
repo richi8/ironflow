@@ -184,7 +184,6 @@ type Listener = (event: GameEvent) => void;
 
 export class GameController {
   private readonly game: Game;
-  private readonly simulation: Simulation;
   private readonly cursor: Cursor;
   private readonly listeners = new Map<GameEventType, Set<Listener>>();
 
@@ -230,10 +229,53 @@ export class GameController {
 
   constructor(options: GameControllerOptions) {
     this.game = options.game;
-    this.simulation = options.game.simulation;
     this.cursor = options.cursor ?? new DetachedCursor();
     this.menuSignature = this.buildMenuSignature();
     this.lastSelection = this.cursor.selectedEntityId;
+  }
+
+  /**
+   * The world, read through `Game` rather than held.
+   *
+   * Held, from C07 to C24, because there was only ever one. C25's load
+   * replaces it — `deserialize` returns a fresh `Simulation` rather than
+   * mutating the old one — and a controller with its own reference would go
+   * on answering every view from the factory the player just left.
+   */
+  private get simulation(): Simulation {
+    return this.game.simulation;
+  }
+
+  /**
+   * The world was replaced. Throw away everything derived from the old one (C25).
+   *
+   * Four caches and a selection, all of them keyed to a world that no longer
+   * exists: the build-menu signature (so the toolbar repaints against the
+   * loaded inventory rather than comparing it to the previous world's), the
+   * map's downsampled world chunks (whose `revision` numbers restart), the
+   * production rate window (measuring a machine that is gone), and the entity
+   * the player had selected — ids are not reused *within* a world (§6 R5), but
+   * a different world will hand the same number to something else entirely.
+   *
+   * The three events are what put the UI back in step on the frame of the
+   * load rather than on the next beat of a 5 Hz lane — and while paused,
+   * which is exactly what a game behind an open save menu is (§8).
+   */
+  reload(): void {
+    this.mapChunks.clear();
+    this.rate.reset();
+    this.alerts = 0;
+    this.cursor.setSelectedEntity(null);
+    this.lastSelection = null;
+    this.cursor.setBuildTool(null);
+    this.menuSignature = this.buildMenuSignature();
+    // Drop what the old world recorded and never got to say; the toasts that
+    // belong to it are about machines that no longer exist.
+    this.simulation.commands.takeRejections();
+    this.simulation.alerts.take();
+    this.emit({ type: 'buildMenuChanged' });
+    this.emit({ type: 'selectionChanged', entityId: null });
+    this.emit({ type: 'pauseChanged', paused: this.game.isPaused() });
   }
 
   /* ---------------------------------------------------------------- *
