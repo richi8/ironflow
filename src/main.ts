@@ -149,16 +149,6 @@ const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
 /** The alt-mode overlay, off. Shared and frozen: every frame the key is not on. */
 const NO_ANNOTATIONS: readonly MachineAnnotation[] = Object.freeze([]);
 
-/** Fraction of the viewport the player may roam before the camera follows. */
-const FOLLOW_DEADZONE = 0.5;
-
-/** How far `value` is outside `[min, max]`, signed. Zero when it is inside. */
-function overflow(value: number, min: number, max: number): number {
-  if (value < min) return value - min;
-  if (value > max) return value - max;
-  return 0;
-}
-
 /** The player, for the debug overlay. See the row it fills in. */
 function describePlayerState(view: PlayerView): string {
   const where = `${view.x.toFixed(2)},${view.y.toFixed(2)} r${view.facing} ${view.activity}`;
@@ -478,28 +468,49 @@ async function bootstrap(): Promise<void> {
   }
 
   /**
-   * Keep the player on screen by nudging the camera when they leave a deadzone.
+   * Centre the view on the player, every time they move.
    *
-   * Presentation only — it pans the camera, which is not simulation state (§6)
-   * — and deliberately not a follow-cam: inside the box the camera does not
-   * move at all, so the arrow keys still put the view where the player wants it
-   * and looking around does not fight with walking. It exists because C10 is
-   * the chunk that lets the player walk out of the viewport, and a game where
-   * the character can be lost off-screen with no way to find them is not one
-   * the acceptance criteria can be checked in.
+   * Presentation only — it moves the camera, which is not simulation state
+   * (§6). C10 shipped this as a **deadzone**: a box half the viewport across,
+   * inside which the camera did not move at all. That was replaced on request
+   * with what the genre actually does — the character stays in the middle and
+   * the world slides under them — because a deadzone makes the view lurch when
+   * the player crosses an edge they cannot see, and a factory is a thing you
+   * walk around continuously rather than room by room.
+   *
+   * ## Why it re-centres on *movement* rather than every frame
+   *
+   * Centring unconditionally would make the camera unpannable: a drag, an
+   * arrow-key pan or the map panel's jump-to would be undone on the next
+   * frame, and three real features would quietly stop working. Re-centring
+   * only when the player's position has actually changed keeps all of them
+   * while the player is standing still — which is when someone looking around
+   * *is* standing still — and hands the view straight back to the player the
+   * moment they take a step. That is also the literal request: the camera
+   * moves with every character move.
+   *
+   * Comparing positions rather than watching for a `movePlayer` command is
+   * deliberate. The player can also be moved by something that is not a
+   * command — a load, a respawn, a teleport a later chunk invents — and a
+   * camera that tracked the *input* instead of the *position* would be left
+   * behind by all three.
    */
   function followPlayer(tileX: number, tileY: number): void {
-    const { cssWidth, cssHeight } = surface.getSize();
-    if (cssWidth <= 0 || cssHeight <= 0) return;
-
-    const screen = camera.worldToScreen(tileX, tileY);
-    const marginX = (cssWidth * (1 - FOLLOW_DEADZONE)) / 2;
-    const marginY = (cssHeight * (1 - FOLLOW_DEADZONE)) / 2;
-
-    const overX = overflow(screen.x, marginX, cssWidth - marginX);
-    const overY = overflow(screen.y, marginY, cssHeight - marginY);
-    if (overX !== 0 || overY !== 0) camera.pan(0 - overX, 0 - overY);
+    if (tileX === followedX && tileY === followedY) return;
+    followedX = tileX;
+    followedY = tileY;
+    camera.setPosition(tileX, tileY);
   }
+
+  /**
+   * Where the player was when the camera last centred on them.
+   *
+   * `NaN` until the first frame, which is what makes that frame centre: `NaN`
+   * is not equal to itself, so no position can match it and the comparison
+   * above needs no "have we started yet" flag beside it.
+   */
+  let followedX = Number.NaN;
+  let followedY = Number.NaN;
 
   let lastFrameUs = scheduler.now();
 

@@ -2866,14 +2866,30 @@ rate in ticks; build-range validation; frame-rate independence of movement.
   sends the walk vector **when it changes**, and the simulation steps once per
   tick. That is the same intent and it is the version that is actually
   frame-rate independent.
-- **A follow camera was added, which is not in the task list.** A 50% deadzone,
-  in the composition root, panning only when the player leaves it. C10 is the
-  chunk that first lets the player walk out of the viewport, and a game where
-  the character can be lost off-screen with no way to find them is not one the
-  acceptance criteria can be checked in. It is presentation only — it pans the
-  camera, which §6 already permits to smooth against wall-clock time — and it
-  is deliberately not a follow-cam: inside the box the camera does not move, so
-  the arrow keys still put the view where the player wants it.
+- **A follow camera was added, which is not in the task list.** In the
+  composition root, because C10 is the chunk that first lets the player walk
+  out of the viewport, and a game where the character can be lost off-screen
+  with no way to find them is not one the acceptance criteria can be checked
+  in. It is presentation only — it moves the camera, which §6 already permits
+  to smooth against wall-clock time.
+
+  **C10 shipped it as a 50% deadzone; it is now a centred follow (changed
+  2026-09-22, on request).** The deadzone panned only when the player left a
+  box half the viewport across, which kept a manual pan alive but made the view
+  lurch each time the player crossed an edge they could not see. The
+  replacement centres on the player **every time their position changes**: the
+  character stays in the middle and the world slides under them, which is what
+  the genre does and what a factory — walked around continuously rather than
+  room by room — wants.
+
+  Re-centring on *movement* rather than every frame is the whole of the design.
+  Centring unconditionally would make the camera unpannable, and three existing
+  features would quietly stop working: the middle-drag, the arrow-key pan and
+  C23's map jump-to. Tying it to a change in position instead hands the view to
+  the player while they stand still — which is when someone looking around is
+  standing still — and takes it back the moment they step. It watches the
+  position rather than the `movePlayer` command, so a load, a respawn or any
+  later teleport moves the camera too.
 - **C06's "fifty of everything" starting stock is gone**, as `main.ts` predicted.
   The player now starts with 5 miners and 10 chests at tile (6, 6), which is on
   grass and within build range of the playground's iron patch but a walk away
