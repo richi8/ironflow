@@ -1081,6 +1081,40 @@ C29  atlas-backed sprites
 "future-proofing" abstraction the plan permits, because it is one interface with
 two real implementations, not speculation.
 
+### Asset spec (write art to these numbers)
+
+Added 2026-09-22, after C27A and C27B moved the camera. Until then the camera
+lived only in three constants in `sprite-atlas.ts`, which is fine while the
+renderer is the only thing that has to agree with them and useless the moment
+anyone draws a sprite. Every one of these is a number the shipped placeholders
+already obey, so a real asset dropped in beside one lines up or visibly does
+not.
+
+| | |
+|---|---|
+| **Tile** | 48 x 48 px at zoom 1. Square, axis-aligned, no foreshortening. |
+| **Zoom range** | 0.25x to 4x. Author at **2x** (96 px per tile) and let the renderer downscale; upscaling a cached bitmap is what makes terrain look soft (see the terrain layer's zoom buckets). |
+| **Ground** | Drawn as if from straight above. A floor tile is a square and fills its 48 px exactly. |
+| **Entities** | Drawn as if from a camera pitched ~63° above the horizontal: a vertical height of one tile is drawn **0.45 tiles up the screen**. Orthographic — no perspective convergence, no vanishing point, and the same sprite at every position on screen. |
+| **Bulk** | The `<rise>` field of a building's sprite id, in those units. One bulk = 21.6 px of screen rise at zoom 1. Chest 1, miner and furnace 2, generator and lab 3. |
+| **Anchor** | The centre of the footprint's **ground** face. A sprite grows upward and never sideways from there. |
+| **Silhouette** | Exactly as wide as the footprint, at any height. This is load-bearing: the picker tests a footprint swept up the screen, so a sprite wider than its tiles is pickable where it is not drawn and drawn where it cannot be picked. |
+| **Light** | High, from the north-west. Top faces lightest, near (south) faces about two thirds as bright, outlines dark. |
+| **Shadow** | Cast south-east, offset **0.42 px per px of lift** on both axes, at 28% opacity of the deep background colour. One slant for every sprite in the game: two objects of the same height with different shadows read as being lit by different suns. |
+| **Depth** | Everything is sorted by its **southern** row, then by layer. A sprite that reaches further north than its own lift will be overlapped by things it should stand in front of. |
+| **Palette** | The tokens above, and only those. `renderer/palette.ts` mirrors this stylesheet and a test fails on any disagreement. |
+
+**The ground and the entities are deliberately inconsistent** — 90° for the
+floor, ~63° for everything on it. That is not an approximation to be fixed; it
+is the genre's own cheat, and it is what lets a footprint stay a rectangle (so
+a screen direction is a tile direction, and a click lands on the tile under the
+cursor) while a machine still looks like an object rather than a floor plan.
+
+The reference sheet predates all of this and is drawn in isometric. Its
+palette, outline weight, silhouette language and icon set are canonical; its
+camera angle is not.
+
+
 ### HUD icon set
 
 The reference sheet defines eight: **resource, building, power, research,
@@ -6547,7 +6581,10 @@ test unchanged — the tests are the contract.
 
 **Art pass tasks.**
 1. Produce or commission sprites for the asset list in
-   `ironflow_visual_reference.png`; pack into an atlas with a JSON descriptor.
+   `ironflow_visual_reference.png`, **to §11's asset spec** — tile size, camera
+   pitch, bulk, anchor, silhouette rule, light and shadow slant are all numbers
+   now, and a sprite drawn against different ones is wasted work that only
+   shows up when it is dropped in. Pack into an atlas with a JSON descriptor.
 2. `ImageAtlas implements SpriteAtlas` — swap it in at the composition root.
    No renderer code changes.
 3. Animation: belt item flow, inserter pick-and-place, miner extraction, and the
