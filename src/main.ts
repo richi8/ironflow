@@ -36,6 +36,7 @@ import {
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
+import { spriteLift } from './renderer/sprite-atlas.js';
 import { SAVE_ROWS, type SaveMenuView, type SaveSlotRow } from './ui/save-menu.js';
 import { GameUI } from './ui/ui.js';
 
@@ -454,16 +455,20 @@ async function bootstrap(): Promise<void> {
   function currentGhost(): GhostView | null {
     const placement = controller.getPlacementView();
     if (placement === null) return null;
+    // The same translation `describeEntities` makes for a placed building, so
+    // a belt ghost points the way the belt will actually run (C13).
+    const ghostSprite = buildingSprite(simulation.buildings.get(placement.buildingId), placement.rotation);
     return {
       x: placement.x,
       y: placement.y,
       width: placement.width,
       height: placement.height,
-      // The same translation `describeEntities` makes for a placed building,
-      // so a belt ghost points the way the belt will actually run (C13).
-      sprite: buildingSprite(simulation.buildings.get(placement.buildingId), placement.rotation),
+      sprite: ghostSprite,
       valid: placement.valid,
       resourceTiles: placement.resourceTiles,
+      // The ore count floats above the preview, which stands up like the
+      // building it previews — see `MachineAnnotation.lift`.
+      lift: spriteLift(ghostSprite),
     };
   }
 

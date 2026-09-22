@@ -148,6 +148,12 @@ export interface GhostView {
    * rate for an hour and nothing on screen says so until it does.
    */
   readonly resourceTiles: number | null;
+  /**
+   * How far the ghost's own sprite rises, in world pixels at zoom 1. Same job
+   * as `MachineAnnotation.lift`: the ore-count label sits above the preview,
+   * which stands up.
+   */
+  readonly lift: number;
 }
 
 /**
@@ -179,6 +185,17 @@ export interface MachineAnnotation {
   readonly sprite: SpriteId;
   /** How many are in there, for a container. Null for a machine. */
   readonly count: number | null;
+  /**
+   * How far the machine under this badge rises, in world pixels at zoom 1.
+   *
+   * The badge floats above the machine, and since C27B "above the machine" is
+   * higher than "above the footprint" by exactly this. It travels on the view
+   * rather than being looked up in the overlay layer because the *machine's*
+   * sprite is not in this shape — `sprite` here is the item being made — and
+   * the alternative is passing the building's sprite id along just to measure
+   * it. See `spriteLift`.
+   */
+  readonly lift: number;
 }
 
 /**

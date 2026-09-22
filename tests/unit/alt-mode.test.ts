@@ -11,7 +11,8 @@ import { EAST, NORTH } from '../../src/game/world/coordinates.js';
 import { CHUNK_AREA, createChunk } from '../../src/game/world/chunk.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
-import { describeAnnotations } from '../../src/renderer/entity-view.js';
+import { buildingSprite, describeAnnotations } from '../../src/renderer/entity-view.js';
+import { spriteLift } from '../../src/renderer/sprite-atlas.js';
 
 /**
  * The alt-mode overlay. See ironflow.md C20 task 5.
@@ -103,5 +104,27 @@ describe('describeAnnotations', () => {
     simulation.entities.create(assembler);
 
     expect(annotate(simulation)[0]).toMatchObject({ x: 2, y: 3, width: 3, height: 3 });
+  });
+
+  /**
+   * C27B gave machines height, and for one commit the badges were drawn at the
+   * footprint's top edge — which is *inside* the sprite once it stands up, so
+   * every badge landed across the machine's own two-letter code. The overlay
+   * clears it by this number, and it has to be the machine's rather than the
+   * badge item's: the badge is a picture of a gear, and the thing it must
+   * clear is the assembler.
+   */
+  it('carries how far the machine it labels rises, so the badge clears it', () => {
+    const simulation = new Simulation({ world: world() });
+    const assembler = newMachine(EntityType.Assembler, 2, 3, NORTH);
+    assembler.recipe = simulation.recipes.get('make_gear').recipeId;
+    simulation.entities.create(assembler);
+
+    const annotation = annotate(simulation)[0];
+    const machine = buildingSprite(simulation.buildings.get('assembler'), NORTH);
+    expect(annotation?.lift).toBe(spriteLift(machine));
+    expect(annotation?.lift).toBeGreaterThan(0);
+    // Not the badge's own sprite, which is a flat item and lifts nothing.
+    expect(spriteLift(annotation?.sprite ?? '')).toBe(0);
   });
 });

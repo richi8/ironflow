@@ -59,6 +59,7 @@ import {
   inserterSprite,
   itemSprite,
   playerSprite,
+  spriteLift,
   splitterSprite,
   undergroundSprite,
   type SpriteId,
@@ -442,6 +443,8 @@ export function describeAnnotations(
       height: extent.height,
       sprite: itemSprite(badge.itemId),
       count: badge.count,
+      // Measured from the machine's own sprite, which is the one standing up.
+      lift: spriteLift(spriteFor(entity, definition, buildings, store, 0)),
     });
   });
 

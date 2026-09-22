@@ -159,7 +159,9 @@ export class OverlayLayer {
       annotation.x + annotation.width * 0.5,
       annotation.y + annotation.height * 0.5,
     );
-    const top = centre.y - annotation.height * TILE_HALF_HEIGHT * camera.zoom;
+    // Above the footprint's top edge *and* above whatever stands on it, so a
+    // badge never lands on the machine it labels (C27B).
+    const top = centre.y - (annotation.height * TILE_HALF_HEIGHT + annotation.lift) * camera.zoom;
     const y = top - BADGE_OFFSET;
 
     const label = annotation.count === null ? '' : String(annotation.count);
@@ -319,7 +321,8 @@ export class OverlayLayer {
     ghost: GhostView,
     covered: number,
   ): void {
-    const north = camera.worldToScreen(ghost.x + ghost.width * 0.5, ghost.y);
+    const anchor = camera.worldToScreen(ghost.x + ghost.width * 0.5, ghost.y);
+    const north = { x: anchor.x, y: anchor.y - ghost.lift * camera.zoom };
     const text = `${covered}/${ghost.width * ghost.height} ore`;
 
     ctx.font = `${GHOST_LABEL_SIZE}px ${FONT_STACK}`;

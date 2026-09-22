@@ -376,6 +376,22 @@ const DEFAULT_CATEGORY_COLOR: ColorToken = 'panel-high';
 const DEFAULT_ITEM_COLOR: ColorToken = 'text-muted';
 
 /**
+ * How far the sprite `id` rises above its ground face, in world pixels at
+ * zoom 1. Zero for anything flat.
+ *
+ * The overlay layer needs this and may not work it out: a badge floats above
+ * the machine it labels, and since C27B the machine stands up. Asking the
+ * *atlas* was considered and rejected in C03 — `SpriteAtlas` is the interface
+ * C29 swaps wholesale, and a height query on it is a second thing the image
+ * implementation would have to answer. A function beside the descriptor is
+ * neither: it reads the id that is already the contract between the two.
+ */
+export function spriteLift(id: SpriteId): number {
+  const sprite = describeSprite(id);
+  return sprite.kind === 'machine' ? sprite.bulk * RISE_UNIT : 0;
+}
+
+/**
  * Resolve a sprite id, memoised.
  *
  * The parse is a handful of `split`s, but it sits on a path that runs once per

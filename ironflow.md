@@ -6442,6 +6442,21 @@ it had. Everything else C27A did — the square grid, the depth axis, the
 shadows, the belt and terrain drawing, `game/**` untouched — survived this
 chunk unchanged.
 
+**The overlays had to be told about the height (fixed the same day).** Giving
+sprites a lift moved them out from under their own labels: alt-mode badges and
+the ghost's ore count anchor above the footprint's top edge, which is *inside*
+a machine once it stands up, so every badge landed across the two-letter code
+it was meant to float above. Found by running alt mode rather than by a test,
+because nothing tests drawing.
+
+The fix is a `lift` on `MachineAnnotation` and `GhostView`, filled in by the
+view layer from the *machine's* sprite — not the badge's, which is a flat item
+picture. The two alternatives were both worse: a height query on `SpriteAtlas`
+puts a second method on the interface C29 has to reimplement, and a fixed
+clearance above the footprint is wrong for a chest and a lab at the same time.
+`spriteLift` sits beside `describeSprite` instead, reading the id that is
+already the contract between content and the atlas.
+
 ---
 
 # Milestone E — Scale & polish
