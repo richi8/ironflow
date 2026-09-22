@@ -5,7 +5,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C27A complete — the world is drawn top-down.** The renderer was isometric from C01 to C27 and is now an orthogonal square grid, the way Factorio draws its factory. `renderer/projection.ts` became a scale, the extruded prism became a plated square with a shadow, the inserter's arm sweeps in the ground plane, the depth axis is `y`, and `picker.ts` lost its ray sweep — §5 hazards 1 and 2 no longer exist. `game/**` did not change by a line, which is what the §5 boundary test was bought for. Next: C28 — performance instrumentation. |
+| **Status** | **C27B complete — the world is drawn on a square grid under a raised camera.** The renderer was isometric from C01 to C27. C27A made the grid square — `projection.ts` is a scale, a footprint is a rectangle, `W` walks north — and C27B put the camera back on its tilt, so a machine shows its top face, its near face and a shadow, the inserter's arm lifts, and §5 hazards 1 and 2 are live again with the picker's sweep on one axis. Two projection changes, and `game/**` did not change by a line either time: that is what the §5 boundary test was bought for. Next: C28 — performance instrumentation. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | Chunk **C28 — Performance instrumentation** |
@@ -344,14 +344,14 @@ and `HTMLCanvasElement` undefined. It must pass at every commit.
 
 ## §5 The projection contract
 
-**Decided: the simulation is projection-agnostic; the renderer is top-down.**
+**Decided: the simulation is projection-agnostic; the renderer draws a square
+grid under a raised camera.**
 
-The first half has been true since C01 and is the part that matters. The
-second half was *isometric* from C01 to C27, which is how most of this section
-came to be written; C27A replaced it with an orthogonal top-down view, the way
-Factorio draws its factory. Both halves of that history are kept below, because
-the reversal is the best evidence the contract works: the renderer changed
-projection and `game/` did not change at all.
+The first half has been true since C01 and is the part that matters. The second
+half was *isometric* from C01 to C27; C27A made the grid square and C27B put
+the camera back on a tilt, which together are the view the genre uses. That
+history is kept below, because the reversal is the best evidence the contract
+works: the renderer changed projection twice and `game/` did not change at all.
 
 ```text
 SIMULATION            integer tile coordinates only
@@ -360,9 +360,16 @@ SIMULATION            integer tile coordinates only
                           |
                           | projection.ts  <-- the only bridge
                           v
-RENDERER              screen pixels, square tiles, depth-sorted by row
+RENDERER              square tiles seen from above; entities seen from a
+                      camera tilted down at them — top face, near face and
+                      a shadow. Depth-sorted by row.
 INPUT                 screenToTile() inverse of the same transform
 ```
+
+The ground and the entities are therefore **not one projection**, deliberately
+(C27B). `projection.ts` maps tile space to the ground plane and nothing else; a
+sprite's height is how it is drawn, not where its tile is, and no part of it
+reaches this file.
 
 ### The transform
 
@@ -403,12 +410,14 @@ by the shipped code and pinned by tests:
   `screenToWorld` result. `Math.floor` is not projection arithmetic, and keeping
   it out preserves "exactly these two functions" literally.
 
-**Implementation note (C04, retired by C27A).** Hazard 2 below was implemented
-in `renderer/picker.ts`, as a ray swept up the screen by the sprite's height.
-There is no height any more, so the sweep is gone and the picker is a
-rectangle test. It still exists, and still lives in the renderer, because
-"which entity is under this pixel" is not the same question as "which tile is
-under this pixel" while multi-tile buildings and layered sprites do.
+**Implementation note (C04).** Hazard 2 below is implemented in
+`renderer/picker.ts`, as a ray swept up the screen by the sprite's lift.
+`Camera.screenToTile` still answers with the ground tile and is still the right
+answer for cull bounds and for terrain; `ScenePicker` is the one to ask
+whenever the answer has to match what the player can see. It lives in the
+renderer because the answer depends on how tall a sprite is drawn and §4
+forbids `input/**` from knowing that. (C27A deleted the sweep for one chunk,
+when nothing was drawn standing up; C27B restored it on one axis.)
 
 The rule itself is enforced rather than merely stated:
 `tests/unit/projection-boundary.test.ts` scans every file under `src/` except
@@ -436,28 +445,30 @@ depth = y * LARGE + layerBias * SMALL + entityId
   to array order.
 
 Multi-tile buildings sort by their **southern** row and are drawn with their
-footprint's centre at the projected centre of that footprint.
+footprint's centre at the projected centre of that footprint, rising up the
+screen from there.
 
 ### Known hazards (see also §16 risk register)
 
-The first two were isometric hazards and C27A retired them; they are kept with
-their outcome written in, because the reasoning is what a future projection
-change would have to redo.
+All three are live. C27A briefly retired the first two by drawing everything
+flat; C27B brought back the height and them with it, in a milder form — a lift
+runs straight up the screen now rather than along a diagonal, so a tall sprite
+covers the rows *north* of it and never a column beside it.
 
-1. ~~**Tall sprites overlapping.**~~ Nothing is drawn standing up any more, so
-   nothing occludes anything. The ghost preview and the hover highlight are
-   still drawn in the overlay layer, after everything, because an overlay that
-   sorts with the world can still be hidden by a shadow or an inserter arm.
-2. ~~**Picking a tile under a tall building.**~~ A sprite covers its footprint
-   and nothing else, so the entity under a pixel always stands on the tile
-   under that same pixel. `tests/unit/entity-picking.test.ts` pins that the two
-   answers agree, which is the regression test for a projection that ever grows
-   a vertical component again.
+1. **Tall sprites overlapping.** A three-bulk generator occludes the rows
+   behind it. This is correct behaviour for a raised camera, but the ghost
+   preview and the hover highlight must still be visible — draw both in the
+   overlay layer, after everything.
+2. **Picking a tile under a tall building.** `screenToTile` returns the
+   *ground* tile. Entity picking must additionally sweep the sprite's lift and
+   prefer the nearest surface — the largest `s`, which is the one furthest
+   south. Implemented in `renderer/picker.ts`; one axis since C27A, because a
+   square grid unprojects "up the screen" to due south.
 3. **Zoom and fractional pixels.** Round the final translate to whole device
    pixels before drawing terrain, or seams appear between world-chunk bitmaps.
-   Keep the camera position itself fractional. Still live: the seam is an
-   antialiasing artefact of adjacent fills and a rounding artefact of the blit,
-   and neither cares what shape the tiles are.
+   Keep the camera position itself fractional. The seam is an antialiasing
+   artefact of adjacent fills and a rounding artefact of the blit, and neither
+   cares what shape the tiles are.
 
 ### What this does *not* mean
 
@@ -954,10 +965,11 @@ Both reference images in this repository are canonical. Read them before C03.
 `ironflow_visual_reference.png` specifies: **clean, readable, stylized;
 contrast / functional / modern**, 2D sci-fi. It also enumerates the v1 asset
 list and the eight HUD icons. Treat it as the art spec — with one correction
-it cannot make for itself: the sheet is drawn in isometric, and C27A made the
-renderer top-down. The *style* is what is canonical about it — the palette, the
-weight of the outlines, the silhouettes, the icon set. The camera angle is not,
-and C29 draws that asset list from above.
+it cannot make for itself: the sheet is drawn in isometric, and the renderer's
+camera is tilted but not turned (C27A, C27B). The *style* is what is canonical
+about it — the palette, the weight of the outlines, the silhouettes, the icon
+set. The camera angle is not, and C29 draws that asset list front-on from
+above, the way the genre does.
 
 ### Design tokens
 
@@ -1050,9 +1062,11 @@ Do not let art block mechanics.
 ```text
 C03  procedurally drawn placeholders
      - terrain: flat-shaded tiles from the token palette
-     - buildings: a plated square — shadow, body, inset, 2-letter code
-       (an extruded prism until C27A, which is where the shadow came from:
-        a machine's "bulk" is now how far it throws one)
+     - buildings: a box seen from a raised camera — shadow, near face,
+       top face, inset, 2-letter code. `<rise>` in the sprite id is a
+       machine's "bulk": how tall it stands and how far it throws its
+       shadow (an isometric three-face prism until C27A; flat for the
+       length of that chunk; a tilted two-face box since C27B)
      - belts: directional chevrons; inserters: a line + a dot
      Everything is drawn by code. Zero image assets.
         |
@@ -6321,6 +6335,90 @@ back.
 
 ---
 
+## C27B — The raised camera
+
+**Goal.** Match the view the genre actually uses. The ground is seen from
+directly above on a square grid; entities are seen from a camera tilted down at
+them, so a machine shows its top and its near face and casts a shadow.
+
+**Depends on.** C27A, which this corrects.
+
+**What C27A got right and wrong.** Right: the *grid*. Factorio's tiles are
+squares, not diamonds — a footprint is a rectangle, a screen direction is a
+tile direction, `W` walks north. That is the projection, and it stays exactly
+as C27A left it. Wrong: it read "top-down grid" as "top-down everything" and
+flattened the entities too, which is a different game's look — the one where
+you are looking straight down a well at the roofs of things.
+
+```text
+ground      drawn from directly above     square tiles, no foreshortening
+entities    drawn from a tilted camera    top face + near face + shadow
+```
+
+Those two are not one consistent projection and are not meant to be. It is the
+same cheat the genre has always used, and the reason it works is that the
+inconsistency is invisible: the eye reads the grid as the floor and the sprites
+as objects standing on it.
+
+**Tasks.**
+1. `RISE_UNIT` comes back to `sprite-atlas.ts`, at 0.45 of a tile per unit of
+   bulk — a chest stands half a tile, a generator one and a third. Bulk keeps
+   the shadow it gained in C27A *and* gets its height back; the sprite-id
+   grammar still does not change.
+2. A machine is drawn as a near face and a top face — two quads, where the
+   isometric prism needed three. A camera that is tilted but not turned sees a
+   box's top and the side facing it; the east and west walls are edge-on, so
+   the silhouette is a rectangle exactly as wide as the footprint.
+3. The inserter's arm lifts again: `cos` along the facing, `sin` up the screen.
+   Items ride above their belt, the player stands up, and everything that is
+   lifted casts its shadow at one shared slant.
+4. `picker.ts` gets its ray back, on one axis: the lift is straight up the
+   screen, and a square grid unprojects that to due south. §5 hazards 1 and 2
+   are live again, so the tests that pinned them come back too.
+5. Cull margin back to three tiles.
+
+**Acceptance.**
+- A machine's silhouette is exactly its footprint's width, at every bulk.
+- Hovering highlights the tile under the cursor at every zoom, including over
+  a tall building — the C04 criterion, restored.
+- `game/**` is untouched, again.
+- The whole suite passes.
+
+**Out of scope.** Art, still. The placeholders stay placeholders until C29 —
+which now has a camera angle to draw its asset list from.
+
+### What implementing it decided
+
+**The projection did not move, and that is the point.** This chunk changed
+`sprite-atlas.ts`, `picker.ts` and one constant in `canvas-renderer.ts`.
+`projection.ts`, `camera.ts`, the terrain layer, the depth key, the input layer
+and every one of C27A's own justifications for a square grid stood — because
+the grid was never the thing that was wrong. Height is a property of how a
+sprite is drawn, not of how tile space maps to pixels, and it turns out §5's
+boundary is drawn in exactly the right place to make that distinction cheap.
+
+**Two faces, not three.** The pre-C27A prism drew a left wall, a right wall and
+a top, because an isometric camera is turned as well as tilted. This one is
+only tilted, so a box shows its top and its near face and nothing else. One
+fewer path per machine, and a silhouette that is still exactly as wide as the
+footprint — which is what keeps "click the tile you can see" true to the left
+and right of a tall building, and is now its own test.
+
+**The picker's ray lost an axis.** The old sweep ran along the `(1, 1)` tile
+diagonal, because that is where an isometric lift points. A square grid
+unprojects "up the screen" to due south, so `RISE_STEP.x` is zero and the `x`
+half of the test collapses into the flat case the belt already used. The
+arithmetic is still derived from `screenToTile` rather than written down, so a
+future projection that lifts diagonally would still be picked correctly.
+
+**Deleting the ray in C27A was the one real mistake, and it cost nothing.** It
+came back in twenty minutes from its own git history, with better comments than
+it had. Everything else C27A did — the square grid, the depth axis, the
+shadows, the belt and terrain drawing, `game/**` untouched — survived this
+chunk unchanged.
+
+---
+
 # Milestone E — Scale & polish
 
 > **Result:** the reference factory in §12 runs at 60 fps and the game looks like
@@ -7189,8 +7287,8 @@ by eye against the acceptance criteria.
 | # | Risk | Likelihood | Impact | Mitigation | Chunk |
 |---|---|---|---|---|---|
 | 1 | Belt simulation becomes the bottleneck | High | High | Readable version first; belt-network path pre-designed; benchmarks from C28 | C13, C29 |
-| 2 | ~~Depth sorting breaks with tall multi-tile buildings~~ | High | Medium | Explicit depth key with entity-id tie-break; overlays drawn last. **Closed by C27A**: nothing is drawn standing up, so nothing occludes anything | C03, C27A |
-| 3 | ~~Mouse picking feels imprecise~~ | Medium | High | Ground-tile transform plus entity hit test, tested round-trip. **Closed by C27A**: a sprite covers its footprint and nothing else | C04, C27A |
+| 2 | Depth sorting breaks with tall multi-tile buildings | High | Medium | Explicit depth key with entity-id tie-break; overlays drawn last. Eased by C27A: the depth axis is `y`, so a lift runs along it rather than across it | C03, C27B |
+| 3 | Mouse picking feels imprecise | Medium | High | Ground-tile transform plus a one-axis sprite sweep, tested round-trip at three zooms | C04, C27B |
 | 4 | Determinism drifts silently | High | High | Contract in §6; lint rules from C00; hash tests from C18; round-trip from C24 | C18, C24 |
 | 5 | Save files balloon | Medium | Medium | World-delta strategy decided up front (§14); size budget asserted | C24 |
 | 6 | Canvas 2D fill rate at zoom-out | Medium | Medium | Terrain world-chunk caching from C03, not retrofitted | C03 |

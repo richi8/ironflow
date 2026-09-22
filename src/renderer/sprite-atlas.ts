@@ -104,17 +104,33 @@ export const TILE_HALF_WIDTH = EAST_STEP.x / 2;
 export const TILE_HALF_HEIGHT = SOUTH_STEP.y / 2;
 
 /**
- * How far one unit of bulk throws a shadow, as a fraction of a tile.
+ * How far one unit of bulk lifts a sprite up the screen, in world pixels at
+ * zoom 1. See C27B.
  *
- * The replacement for the pre-C27A `RISE_UNIT`, and a smaller idea than the
- * one it replaces: nothing is drawn standing up any more, so a machine's bulk
- * buys it a longer shadow and a deeper inset rather than three visible faces.
- * At bulk 3 — the generator, the lab — that is a fifth of a tile, which reads
- * as heavy next to a chest's 1 without overhanging the tile behind it.
+ * The ground is drawn from directly above and entities are drawn from a camera
+ * tilted down at them — which is not one consistent projection, and is exactly
+ * what the genre does. A tile stays square, so a footprint stays a rectangle
+ * and a screen direction stays a tile direction (C27A's whole point); a machine
+ * standing on it shows its top and its near face, so it reads as a thing in the
+ * world rather than as paint on the floor.
+ *
+ * Nine tenths of a tile at bulk 2 — the furnace, the miner — and one and a
+ * third at bulk 3. Tall enough to see the face, short enough that a machine
+ * hides little of the row behind it.
  */
-const SHADOW_PER_BULK = 0.06;
+export const RISE_UNIT = TILE_HALF_HEIGHT * 0.9;
 
-/** The light comes from the north-west, so every shadow falls south-east. */
+/**
+ * How far a shadow slides per pixel of lift.
+ *
+ * The light is high and to the north-west, so a shadow falls south-east and is
+ * shorter than the thing casting it. One number for every sprite in the game:
+ * two objects of the same height with different shadows read as being lit by
+ * different suns, which is the kind of wrongness a player feels without being
+ * able to name.
+ */
+const SHADOW_SLANT = 0.42;
+
 const SHADOW_ALPHA = 0.28;
 
 /**
@@ -538,6 +554,8 @@ function isColorToken(token: string): token is ColorToken {
  */
 const BODY_TONE = 1;
 const INSET_TONE = 1.22;
+/** The near face, turned away from the light and so darker than the top. */
+const FACE_TONE = 0.66;
 const OUTLINE_TONE = 0.4;
 
 /** Below this many pixels a two-letter code is a smudge, so it is skipped. */
@@ -668,24 +686,41 @@ const MACHINE_INSET = 0.16;
  * so a 3x3 assembler does not get a border three times as wide as a chest's.
  */
 function drawMachine(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: number, machine: Machine): void {
-  const drop = machine.bulk * SHADOW_PER_BULK * TILE_HALF_WIDTH * 2 * zoom;
-  dropShadow(ctx, sx + drop, sy + drop, machine.width, machine.height, zoom);
+  const lift = machine.bulk * RISE_UNIT * zoom;
+  const halfHeight = SOUTH_STEP.y * zoom * machine.height * 0.5;
+
+  dropShadow(ctx, sx + lift * SHADOW_SLANT, sy + lift * SHADOW_SLANT, machine.width, machine.height, zoom);
 
   const outline = shade(machine.fill, OUTLINE_TONE);
   ctx.lineWidth = 1;
   ctx.lineJoin = 'round';
 
-  groundFacePath(ctx, sx, sy, machine.width, machine.height, zoom);
+  // The near face, then the top. Two paths, not six: a camera that is tilted
+  // but not turned sees a box's top and the side facing it, and nothing else —
+  // the east and west walls are edge-on. That is one fewer face than the
+  // pre-C27A isometric prism needed, and it is why a machine's silhouette is
+  // still a rectangle and still exactly as wide as its footprint.
+  const halfWidth = EAST_STEP.x * zoom * machine.width * 0.5;
+  const faceTop = sy + halfHeight - lift;
+  ctx.beginPath();
+  ctx.moveTo(sx - halfWidth, faceTop);
+  ctx.lineTo(sx + halfWidth, faceTop);
+  ctx.lineTo(sx + halfWidth, sy + halfHeight);
+  ctx.lineTo(sx - halfWidth, sy + halfHeight);
+  ctx.closePath();
+  paint(ctx, shade(machine.fill, FACE_TONE), outline);
+
+  groundFacePath(ctx, sx, sy - lift, machine.width, machine.height, zoom);
   paint(ctx, shade(machine.fill, BODY_TONE), outline);
 
   const insetWidth = machine.width - MACHINE_INSET * 2;
   const insetHeight = machine.height - MACHINE_INSET * 2;
   if (insetWidth > 0 && insetHeight > 0) {
-    groundFacePath(ctx, sx, sy, insetWidth, insetHeight, zoom);
+    groundFacePath(ctx, sx, sy - lift, insetWidth, insetHeight, zoom);
     paint(ctx, shade(machine.fill, INSET_TONE), outline);
   }
 
-  drawCode(ctx, machine.code, sx, sy, zoom * Math.min(machine.width, machine.height));
+  drawCode(ctx, machine.code, sx, sy - lift, zoom * Math.min(machine.width, machine.height));
 }
 
 /**
@@ -961,14 +996,15 @@ function drawSplitter(
   drawLane(ctx, sx, sy, zoom, rotation, phase, SPLITTER_LANE_OFFSET);
 }
 
-/** The inserter's base, as a fraction of a tile. */
+/** The inserter's base, as a fraction of a tile, and its bulk. */
 const INSERTER_BASE_SIZE = 0.46;
+const INSERTER_BASE_BULK = 0.45;
 
 /** How far the hand reaches from the base, in tiles, at each end of the sweep. */
 const INSERTER_ARM_REACH = 0.52;
 
-/** How far the hand swings to the side at the middle of the sweep, in tiles. */
-const INSERTER_ARM_BOW = 0.3;
+/** How high the arm carries the hand at the middle of the sweep, in bulk units. */
+const INSERTER_ARM_LIFT = 0.9;
 
 /** The hand, and the item in it, as a fraction of a tile. */
 const INSERTER_HAND_SIZE = 0.2;
@@ -983,12 +1019,12 @@ const INSERTER_HAND_SIZE = 0.2;
  * puts the hand over the source at one end, over the destination at the other,
  * and clear of the base in between.
  *
- * C27A turned that half turn on its side and made it honest. `cos` still runs
- * along the facing axis, but `sin` now runs **sideways in the ground plane**
- * rather than up the screen — which is what the machine actually does: the arm
- * pivots about a vertical axis and its hand traces a semicircle over the
- * ground. The old version was drawing that semicircle edge-on because iso had
- * no way to show it flat, and the new one simply shows it.
+ * `cos` runs along the facing axis and `sin` up the screen, so the hand sits
+ * over the source at one end, over the destination at the other, and is raised
+ * above the machine in between. C27A briefly swung it sideways in the ground
+ * plane instead, which is what a top-down camera would show and is not what
+ * this one is: the camera is tilted (C27B), so height is visible and an arm
+ * that lifts reads as lifting.
  *
  * The rotation is the *facing*, which is the destination side: `swing` 0 is
  * therefore behind the base and `INSERTER_SWING_STEPS` is in front of it.
@@ -1004,31 +1040,31 @@ function drawInserter(
 ): void {
   const fill = color('blue');
   const forward = DIRECTION_OFFSETS[rotation];
-  const sideways = DIRECTION_OFFSETS[(rotation + 1) % 4];
-  if (forward === undefined || sideways === undefined) return;
+  if (forward === undefined) return;
 
   const fx = (forward.x * EAST_STEP.x + forward.y * SOUTH_STEP.x) * zoom;
   const fy = (forward.x * EAST_STEP.y + forward.y * SOUTH_STEP.y) * zoom;
-  const gx = (sideways.x * EAST_STEP.x + sideways.y * SOUTH_STEP.x) * zoom;
-  const gy = (sideways.x * EAST_STEP.y + sideways.y * SOUTH_STEP.y) * zoom;
 
-  // The base: a small plate rather than a machine, so it casts no shadow of
-  // its own. An inserter stands between two buildings and a shadow there reads
-  // as a gap in the line.
-  groundFacePath(ctx, sx, sy, INSERTER_BASE_SIZE, INSERTER_BASE_SIZE, zoom);
-  ctx.lineWidth = 1;
-  ctx.lineJoin = 'round';
-  paint(ctx, shade(fill, BODY_TONE), shade(fill, OUTLINE_TONE));
+  // The base: a short box, drawn through the same function every machine uses
+  // so its face and its light match theirs. No code on it — it is half a tile
+  // across and a two-letter label there is a smudge.
+  drawMachine(ctx, sx, sy, zoom, {
+    fill,
+    code: '',
+    width: INSERTER_BASE_SIZE,
+    height: INSERTER_BASE_SIZE,
+    bulk: INSERTER_BASE_BULK,
+  });
 
   // π at the source end, 0 at the destination end.
   const angle = Math.PI * (1 - swing / INSERTER_SWING_STEPS);
   const along = Math.cos(angle) * INSERTER_ARM_REACH;
-  const across = Math.sin(angle) * INSERTER_ARM_BOW;
-  const handX = sx + fx * along + gx * across;
-  const handY = sy + fy * along + gy * across;
+  const shoulderY = sy - INSERTER_BASE_BULK * RISE_UNIT * zoom;
+  const handX = sx + fx * along;
+  const handY = shoulderY + fy * along - Math.sin(angle) * INSERTER_ARM_LIFT * RISE_UNIT * zoom;
 
   ctx.beginPath();
-  ctx.moveTo(sx, sy);
+  ctx.moveTo(sx, shoulderY);
   ctx.lineTo(handX, handY);
   ctx.strokeStyle = color(holding ? 'accent' : 'blue-high');
   ctx.lineWidth = Math.max(1, 2 * zoom);
@@ -1049,11 +1085,11 @@ function drawInserter(
 /** How much of a tile one item covers. Four of these fit along a tile (§9). */
 export const ITEM_TILE_SIZE = 0.3;
 
-/** How far a lump of ore throws its shadow, in tiles. */
-const ITEM_BULK = 0.035;
+/** How high a lump of ore rides above the belt under it, in bulk units. */
+const ITEM_BULK = 0.22;
 
 /** A plate lies flat on the belt; a lump of ore sits proud of it. */
-const PLATE_BULK = 0.012;
+const PLATE_BULK = 0.07;
 
 /**
  * One item: a small square sitting on whatever it is riding.
@@ -1071,13 +1107,13 @@ function drawItem(
   fill: string,
   flat: boolean,
 ): void {
-  const drop = (flat ? PLATE_BULK : ITEM_BULK) * TILE_HALF_WIDTH * 2 * zoom;
+  const lift = (flat ? PLATE_BULK : ITEM_BULK) * RISE_UNIT * zoom;
 
   // A shadow on the surface below, so an item reads as being *on* the belt
   // rather than as a stain in it.
-  dropShadow(ctx, sx + drop, sy + drop, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
+  dropShadow(ctx, sx + lift * SHADOW_SLANT, sy + lift * SHADOW_SLANT, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
 
-  groundFacePath(ctx, sx, sy, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
+  groundFacePath(ctx, sx, sy - lift, ITEM_TILE_SIZE, ITEM_TILE_SIZE, zoom);
   ctx.fillStyle = shade(fill, flat ? BODY_TONE : LUMP_TOP_TONE);
   ctx.fill();
   ctx.strokeStyle = shade(fill, OUTLINE_TONE);
@@ -1086,16 +1122,16 @@ function drawItem(
 }
 
 /** The figure's radius, as a fraction of a tile. Comfortably inside one. */
-const PLAYER_RADIUS = 0.21;
+const PLAYER_RADIUS = 0.19;
 
-/** How far the figure throws its shadow, in tiles. It stands off the ground. */
-const PLAYER_BULK = 0.05;
+/** How tall the figure stands, in bulk units. Shorter than a chest. */
+const PLAYER_BULK = 0.8;
 
-/** How much smaller the figure reads while mining. */
-const PLAYER_WORK_SCALE = 0.82;
+/** How much shorter the figure stands while mining. */
+const PLAYER_WORK_SCALE = 0.72;
 
 /** How far the nose sticks out past the body, as a multiple of the radius. */
-const PLAYER_NOSE = 1.55;
+const PLAYER_NOSE = 1.5;
 
 /** Colour per activity, so "walking" and "mining" are told apart at a glance. */
 const PLAYER_TONE: Readonly<Record<PlayerActivity, ColorToken>> = Object.freeze({
@@ -1114,10 +1150,11 @@ const PLAYER_TONE: Readonly<Record<PlayerActivity, ColorToken>> = Object.freeze(
  * are working, and where they are standing, because that last one is what the
  * build-range circle is drawn around.
  *
- * Seen from above there is no head to draw over a body — they are the same
- * disc — so C27A spent the head on the nose instead: it is now a wedge rather
- * than a line, because facing is the one thing about this sprite the player
- * reads every second and a one-pixel line at zoom 0.5 is not a readout.
+ * The figure stands up, like everything else the tilted camera sees (C27B):
+ * a shadow on the tile, a body, and a head over it. What C27A's flat version
+ * got right and this keeps is the nose — a wedge on the ground rather than a
+ * line, because facing is the one thing about this sprite the player reads
+ * every second and a one-pixel line at zoom 0.5 is not a readout.
  */
 function drawPlayer(
   ctx: CanvasRenderingContext2D,
@@ -1129,19 +1166,18 @@ function drawPlayer(
 ): void {
   const fill = color(PLAYER_TONE[activity]);
   const outline = shade(fill, OUTLINE_TONE);
-  const tile = TILE_HALF_WIDTH * 2 * zoom;
+  const radius = PLAYER_RADIUS * TILE_HALF_WIDTH * 2 * zoom;
 
-  // Mining crouches: the same figure, smaller, which reads at any zoom and
+  // Mining crouches: the same figure, shorter, which reads at any zoom and
   // needs no second sprite.
-  const radius = PLAYER_RADIUS * tile * (activity === 'work' ? PLAYER_WORK_SCALE : 1);
-  const drop = PLAYER_BULK * tile;
+  const lift = PLAYER_BULK * RISE_UNIT * zoom * (activity === 'work' ? PLAYER_WORK_SCALE : 1);
 
-  // A shadow on the ground, so the figure reads as standing on the tile rather
-  // than as a mark painted on it.
+  // A shadow on the tile, so the figure reads as standing on it rather than as
+  // a mark painted on it.
   const previousAlpha = ctx.globalAlpha;
   ctx.globalAlpha = previousAlpha * SHADOW_ALPHA;
   ctx.beginPath();
-  ctx.arc(sx + drop, sy + drop, radius, 0, Math.PI * 2);
+  ctx.ellipse(sx + lift * SHADOW_SLANT, sy + lift * SHADOW_SLANT, radius, radius * 0.7, 0, 0, Math.PI * 2);
   ctx.fillStyle = color('bg-deep');
   ctx.fill();
   ctx.globalAlpha = previousAlpha;
@@ -1161,18 +1197,27 @@ function drawPlayer(
   const nx = fx / length;
   const ny = fy / length;
 
-  // The nose first, so the body's outline crosses it and the two read as one
-  // figure rather than as a disc with a spike stuck to it.
+  // The nose sits on the ground and points where they walk, drawn first so the
+  // body stands in front of it rather than beside it.
   ctx.beginPath();
-  ctx.moveTo(sx + nx * radius * PLAYER_NOSE, sy + ny * radius * PLAYER_NOSE);
-  ctx.lineTo(sx - ny * radius * 0.7, sy + nx * radius * 0.7);
-  ctx.lineTo(sx + ny * radius * 0.7, sy - nx * radius * 0.7);
+  ctx.moveTo(sx + nx * radius * PLAYER_NOSE, sy + ny * radius * PLAYER_NOSE * 0.7);
+  ctx.lineTo(sx - ny * radius * 0.7, sy + nx * radius * 0.5);
+  ctx.lineTo(sx + ny * radius * 0.7, sy - nx * radius * 0.5);
   ctx.closePath();
-  paint(ctx, shade(fill, INSET_TONE), outline);
+  paint(ctx, shade(fill, FACE_TONE), outline);
+
+  // The body: a rounded column standing on the tile, then a head over it.
+  ctx.beginPath();
+  ctx.moveTo(sx - radius * 0.72, sy);
+  ctx.lineTo(sx - radius * 0.72, sy - lift);
+  ctx.lineTo(sx + radius * 0.72, sy - lift);
+  ctx.lineTo(sx + radius * 0.72, sy);
+  ctx.closePath();
+  paint(ctx, shade(fill, BODY_TONE), outline);
 
   ctx.beginPath();
-  ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-  paint(ctx, shade(fill, BODY_TONE), outline);
+  ctx.arc(sx, sy - lift, radius * 0.78, 0, Math.PI * 2);
+  paint(ctx, shade(fill, INSET_TONE), outline);
 }
 
 function drawMissing(ctx: CanvasRenderingContext2D, sx: number, sy: number, zoom: number): void {

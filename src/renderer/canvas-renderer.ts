@@ -26,12 +26,17 @@ import { ProceduralAtlas, type SpriteAtlas } from './sprite-atlas.js';
 /**
  * Cull margin, in tiles, for whatever a sprite draws outside its footprint.
  *
- * C03 task 6 asks for "a margin equal to the tallest sprite", and until C27A
- * that was four — §5 hazard 1's three-tile power plant plus slack, because a
- * building standing just off the bottom of the screen still showed its roof on
- * it. Nothing stands up any more, so the only thing that reaches past a
- * footprint is its shadow, which is a fifth of a tile at the heaviest. One
- * tile is that plus most of a tile of slack.
+ * C03 task 6 asks for "a margin equal to the tallest sprite". A machine stands
+ * up the screen by `bulk * RISE_UNIT`, which at the heaviest — bulk 3, the
+ * generator and the lab — is about one and a third tiles, and its shadow
+ * reaches half a tile further south. Three tiles is that plus slack, and
+ * padding all four sides rather than only the near ones costs a handful of
+ * world chunks at the edge of a rectangle that is already conservative.
+ *
+ * It was four before C27A and one during it, when nothing was drawn standing
+ * up. C27B put the height back and this with it, a tile smaller: a square grid
+ * of 48px tiles makes the same building a shorter fraction of the screen than
+ * a 2:1 diamond did.
  *
  * Asking the atlas for a real per-sprite extent was the alternative. It would
  * mean a method on `SpriteAtlas` that only the culler uses, on an interface
@@ -39,7 +44,7 @@ import { ProceduralAtlas, type SpriteAtlas } from './sprite-atlas.js';
  * answer from it is an invisible sprite, which is much harder to notice than a
  * few extra tiles of work.
  */
-export const SPRITE_OVERHANG_TILES = 1;
+export const SPRITE_OVERHANG_TILES = 3;
 
 /** Grow an inclusive rectangle by `margin` tiles on every side. */
 export function padBounds(bounds: TileBounds, margin: number): TileBounds {
