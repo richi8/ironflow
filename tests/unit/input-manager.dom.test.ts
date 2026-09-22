@@ -56,12 +56,11 @@ class FakeCamera implements CameraControl {
   /**
    * A stand-in for the projection (C10 task 2).
    *
-   * The real camera unprojects, which rotates screen directions 45 degrees
-   * into tile space. This one is deliberately the identity: what these tests
-   * check is that WASD becomes exactly one command when the direction changes,
-   * not what the projection does to it — that belongs to the projection's own
-   * tests, and baking a rotation in here would make every expectation below a
-   * puzzle.
+   * Deliberately the identity, and kept as a double even though C27A made the
+   * real one the identity too: what these tests check is that WASD becomes
+   * exactly one command when the direction changes, not what the projection
+   * does to it. The one test that does care uses `ProjectedCamera` below, and
+   * it is what would fail if a projection with a rotation ever came back.
    */
   screenDirectionToWorld(dxPx: number, dyPx: number): { x: number; y: number } {
     return { x: dxPx, y: dyPx };
@@ -718,7 +717,7 @@ describe('walking', () => {
     expect(walkCommands()).toEqual([{ dx: 0, dy: 0 }]);
   });
 
-  it('turns screen directions into the nearest of the eight tile directions', () => {
+  it('turns screen directions into tile directions', () => {
     mount();
     input.detach();
     input = new InputManager({
@@ -730,18 +729,22 @@ describe('walking', () => {
     });
     input.attach();
 
+    // Since C27A this is the identity, and that is the point of the chunk:
+    // screen up *is* north, so W walks north. It is still routed through the
+    // camera rather than hard-coded, because §4 forbids the input layer from
+    // knowing the projection — the day one arrives that is not the identity,
+    // this test is what says so.
     const cases: [readonly string[], { dx: number; dy: number }][] = [
-      // Screen up is the tile diagonal toward the top of the diamond...
-      [['KeyW'], { dx: -1, dy: -1 }],
-      [['KeyS'], { dx: 1, dy: 1 }],
-      [['KeyD'], { dx: 1, dy: -1 }],
-      [['KeyA'], { dx: -1, dy: 1 }],
-      // ...and two keys together are a cardinal tile direction, which is the
-      // half that a naive sign test gets wrong.
-      [['KeyW', 'KeyD'], { dx: 0, dy: -1 }],
-      [['KeyW', 'KeyA'], { dx: -1, dy: 0 }],
-      [['KeyS', 'KeyD'], { dx: 1, dy: 0 }],
-      [['KeyS', 'KeyA'], { dx: 0, dy: 1 }],
+      [['KeyW'], { dx: 0, dy: -1 }],
+      [['KeyS'], { dx: 0, dy: 1 }],
+      [['KeyD'], { dx: 1, dy: 0 }],
+      [['KeyA'], { dx: -1, dy: 0 }],
+      // Two keys together are a diagonal, which is the half that a naive sign
+      // test on an unprojected vector gets wrong.
+      [['KeyW', 'KeyD'], { dx: 1, dy: -1 }],
+      [['KeyW', 'KeyA'], { dx: -1, dy: -1 }],
+      [['KeyS', 'KeyD'], { dx: 1, dy: 1 }],
+      [['KeyS', 'KeyA'], { dx: -1, dy: 1 }],
     ];
 
     for (const [keys, expected] of cases) {

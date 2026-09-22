@@ -248,8 +248,8 @@ const MAX_CACHE_PIXELS = 32_000_000;
 /**
  * Above this a world chunk's bitmap is not worth building.
  *
- * At zoom 2 a world chunk is 4096x2048, and a 1080p viewport holds a quarter of
- * one — the cache would spend 32 MB to avoid drawing the ~250 tiles that are
+ * At zoom 2 a world chunk is 3072 square, and a 1080p viewport holds a fifth of
+ * one — the cache would spend 36 MB to avoid drawing the ~200 tiles that are
  * actually on screen. Direct drawing is cheap at high zoom for exactly the
  * reason caching is necessary at low zoom: visible tile count scales with
  * `1 / zoom^2`.
@@ -266,6 +266,11 @@ const MAX_BUILDS_PER_FRAME = 8;
  * chunk by half a line width, and blit positions are snapped to whole device
  * pixels (§5 hazard 3), which can move a bitmap by up to half a pixel relative
  * to its neighbour. Two pixels of slack absorbs both.
+ *
+ * C27A did not make this unnecessary, although it is tempting to think a
+ * square grid would: the seam is an antialiasing artefact of adjacent fills
+ * and a rounding artefact of the blit, and neither cares what shape the tiles
+ * are.
  */
 const SURFACE_PAD = 2;
 
@@ -376,10 +381,12 @@ export class TerrainLayer {
 
     const tileX0 = chunk.cx * CHUNK_SIZE;
     const tileY0 = chunk.cy * CHUNK_SIZE;
-    // The bitmap's top-left corner in world-pixel space: the world chunk's
-    // west-most vertex supplies x, its north-most vertex supplies y.
-    const originX = tileToScreen(tileX0, tileY0 + CHUNK_SIZE).x;
-    const originY = tileToScreen(tileX0, tileY0).y;
+    // The bitmap's top-left corner in world-pixel space, which since C27A is
+    // simply the world chunk's north-west tile: the projection is a scale, so
+    // the block of tiles and the block of pixels have the same corners.
+    const origin = tileToScreen(tileX0, tileY0);
+    const originX = origin.x;
+    const originY = origin.y;
 
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -417,8 +424,9 @@ export class TerrainLayer {
   ): void {
     const tileX0 = chunk.cx * CHUNK_SIZE;
     const tileY0 = chunk.cy * CHUNK_SIZE;
-    const left = camera.worldToScreen(tileX0, tileY0 + CHUNK_SIZE).x;
-    const top = camera.worldToScreen(tileX0, tileY0).y;
+    const corner = camera.worldToScreen(tileX0, tileY0);
+    const left = corner.x;
+    const top = corner.y;
 
     const pad = SURFACE_PAD * relativeScale;
     const x = snapToDevicePixel(left - pad, dpr);

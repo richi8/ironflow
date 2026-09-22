@@ -1,6 +1,6 @@
 # IronFlow
 
-A seeded, replayable 2D isometric factory-automation game for the browser.
+A seeded, replayable 2D top-down factory-automation game for the browser.
 Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 The full plan lives in [`ironflow.md`](./ironflow.md). Read Part I before

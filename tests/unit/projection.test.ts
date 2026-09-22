@@ -4,13 +4,17 @@ import { TILE_H, TILE_W, screenToTile, tileToScreen } from '../../src/renderer/p
 import { createSeededRandom, seededInt } from '../fixtures/seeded-random.js';
 
 describe('projection constants', () => {
-  it('matches the §5 contract', () => {
-    expect(TILE_W).toBe(64);
-    expect(TILE_H).toBe(32);
+  it('matches the §5 contract as C27A rewrote it', () => {
+    expect(TILE_W).toBe(48);
+    expect(TILE_H).toBe(48);
   });
 
-  it('is 2:1, which every piece of placeholder art depends on', () => {
-    expect(TILE_W).toBe(TILE_H * 2);
+  it('is square, which every piece of placeholder art now depends on', () => {
+    // The pre-C27A transform was 2:1, and half the atlas was built out of that
+    // ratio. A square tile is the whole of what "top-down" means here: it is
+    // what makes a footprint a rectangle, a tile-space circle a circle, and a
+    // screen direction a tile direction.
+    expect(TILE_W).toBe(TILE_H);
   });
 });
 
@@ -19,21 +23,24 @@ describe('tileToScreen', () => {
     expect(tileToScreen(0, 0)).toEqual({ x: 0, y: 0 });
   });
 
-  it('maps the four neighbours of the origin diamond', () => {
-    expect(tileToScreen(1, 0)).toEqual({ x: 32, y: 16 });
-    expect(tileToScreen(0, 1)).toEqual({ x: -32, y: 16 });
-    expect(tileToScreen(1, 1)).toEqual({ x: 0, y: 32 });
-    expect(tileToScreen(-1, -1)).toEqual({ x: 0, y: -32 });
+  it('maps the four neighbours of the origin tile', () => {
+    expect(tileToScreen(1, 0)).toEqual({ x: 48, y: 0 });
+    expect(tileToScreen(0, 1)).toEqual({ x: 0, y: 48 });
+    expect(tileToScreen(1, 1)).toEqual({ x: 48, y: 48 });
+    expect(tileToScreen(-1, -1)).toEqual({ x: -48, y: -48 });
   });
 
-  it('moves +X up-right and +Y down-left on screen', () => {
+  it('moves +X right and +Y down, and neither one diagonally', () => {
+    // The point of the chunk: a step east is a step east on screen. Anything
+    // that has to turn a screen direction into a tile direction — WASD, a
+    // drag, the map panel's viewport box — gets that for free from here.
     const origin = tileToScreen(10, 10);
     const east = tileToScreen(11, 10);
     const south = tileToScreen(10, 11);
 
     expect(east.x).toBeGreaterThan(origin.x);
-    expect(east.y).toBeGreaterThan(origin.y);
-    expect(south.x).toBeLessThan(origin.x);
+    expect(east.y).toBe(origin.y);
+    expect(south.x).toBe(origin.x);
     expect(south.y).toBeGreaterThan(origin.y);
   });
 
@@ -59,8 +66,10 @@ describe('tileToScreen', () => {
 
 describe('screenToTile', () => {
   it('inverts tileToScreen exactly for 10,000 random tiles', () => {
-    // Exactly, not approximately: the transform only multiplies and divides by
-    // powers of two, so an integer tile survives the round trip bit-for-bit.
+    // Exactly, not approximately. `48` is not a power of two, so this is worth
+    // a word: `x * 48` is an exact integer at these magnitudes, and IEEE
+    // division returns the correctly rounded true quotient — which is `x`,
+    // and `x` is representable. So the round trip is bit-for-bit.
     const random = createSeededRandom(0xd15ea5e);
     let checked = 0;
     for (let i = 0; i < 10_000; i++) {
@@ -93,28 +102,31 @@ describe('screenToTile', () => {
     }
   });
 
-  it('floors to the tile whose diamond contains the point', () => {
-    // The projected point for an integer tile is that diamond's top vertex, so
-    // its interior is the 32px below it, narrowing to nothing at each side.
-    const apex = tileToScreen(3, 5); // { x: -64, y: 128 }
-    const centre = screenToTile(apex.x, apex.y + TILE_H / 2);
+  it('floors to the tile whose square contains the point', () => {
+    // The projected point for an integer tile is that square's north-west
+    // corner, so its interior is the TILE_W x TILE_H block right and below it.
+    const corner = tileToScreen(3, 5); // { x: 144, y: 240 }
+    const centre = screenToTile(corner.x + TILE_W / 2, corner.y + TILE_H / 2);
     expect({ x: Math.floor(centre.x), y: Math.floor(centre.y) }).toEqual({ x: 3, y: 5 });
 
-    const justInside = screenToTile(apex.x, apex.y + 1);
+    const justInside = screenToTile(corner.x + 1, corner.y + 1);
     expect({ x: Math.floor(justInside.x), y: Math.floor(justInside.y) }).toEqual({ x: 3, y: 5 });
 
-    const justAbove = screenToTile(apex.x, apex.y - 1);
+    const justAbove = screenToTile(corner.x + 1, corner.y - 1);
     expect({ x: Math.floor(justAbove.x), y: Math.floor(justAbove.y) }).not.toEqual({ x: 3, y: 5 });
+
+    const justLeft = screenToTile(corner.x - 1, corner.y + 1);
+    expect({ x: Math.floor(justLeft.x), y: Math.floor(justLeft.y) }).not.toEqual({ x: 3, y: 5 });
   });
 
-  it('gives every point in a tile diamond back to that tile', () => {
+  it('gives every point in a tile back to that tile', () => {
     const random = createSeededRandom(0xfeed);
     for (let i = 0; i < 5000; i++) {
       const tx = seededInt(random, -200, 200);
       const ty = seededInt(random, -200, 200);
 
       // Sample strictly inside the unit square of tile space, which is exactly
-      // the interior of that tile's screen diamond.
+      // the interior of that tile's square on screen.
       const insideX = tx + 0.001 + random() * 0.998;
       const insideY = ty + 0.001 + random() * 0.998;
 
@@ -124,10 +136,10 @@ describe('screenToTile', () => {
     }
   });
 
-  it('has no seam between neighbouring diamonds', () => {
-    // Walk a horizontal line of screen pixels across several diamonds and
-    // require every pixel to belong to some tile, with no gaps or repeats in
-    // the sequence of tiles crossed.
+  it('has no seam between neighbouring tiles', () => {
+    // Walk a horizontal line of screen pixels across several tiles and require
+    // every pixel to belong to some tile, with no gaps or repeats in the
+    // sequence of tiles crossed.
     let previous: string | null = null;
     const visited: string[] = [];
     for (let sx = -128; sx <= 128; sx++) {

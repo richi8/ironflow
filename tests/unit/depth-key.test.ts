@@ -10,12 +10,15 @@ import {
 import { RenderLayer, type RenderEntity } from '../../src/renderer/render-state.js';
 
 /**
- * C03 — depth sorting. See ironflow.md §5 and §18 risk 2.
+ * C03 — depth sorting. See ironflow.md §5, §18 risk 2 and C27A.
  *
- * Risk 2 is "isometric depth sorting breaks with tall multi-tile buildings",
- * rated high likelihood. The failure is not a crash: it is a power plant that
- * looks correct until the day a belt runs behind it, at which point the belt
- * draws on top and the picture stops making sense. So the key is tested as an
+ * Risk 2 was "depth sorting breaks with tall multi-tile buildings", rated high
+ * likelihood. C27A removed the height and with it most of the risk, but not
+ * the key: things still overlap — a shadow and the machine south of it, two
+ * items on one tile, a belt under an assembler — and which one is painted last
+ * still has to have exactly one answer that does not depend on array order.
+ *
+ * The axis is `y` since C27A, where it was `x + y`. So the key is tested as an
  * ordering, not as a set of magic numbers.
  */
 
@@ -32,16 +35,16 @@ function entity(partial: Partial<RenderEntity> & { id: number }): RenderEntity {
 }
 
 describe('depthKey', () => {
-  it('draws things further along x + y later', () => {
-    expect(depthKey(entity({ id: 1, x: 0, y: 0 }))).toBeLessThan(depthKey(entity({ id: 1, x: 1, y: 0 })));
+  it('draws things further down the screen later', () => {
     expect(depthKey(entity({ id: 1, x: 0, y: 0 }))).toBeLessThan(depthKey(entity({ id: 1, x: 0, y: 1 })));
   });
 
-  it('treats x and y as the same depth axis', () => {
-    // (3, 1) and (1, 3) are the same distance along the depth axis, so only the
-    // layer and the id may separate them — never the coordinates themselves.
+  it('ignores x entirely', () => {
+    // Two entities in the same row are at the same depth however far apart
+    // they are, so only the layer and the id may separate them. This is the
+    // one line of the key C27A changed: `x` used to count.
     const a = depthKey(entity({ id: 7, x: 3, y: 1 }));
-    const b = depthKey(entity({ id: 7, x: 1, y: 3 }));
+    const b = depthKey(entity({ id: 7, x: 900, y: 1 }));
     expect(a).toBe(b);
   });
 
@@ -71,7 +74,7 @@ describe('depthKey', () => {
     for (let depth = -6; depth <= 6; depth++) {
       for (const layer of [RenderLayer.Belt, RenderLayer.Building, RenderLayer.ItemOnBelt]) {
         for (const id of [0, 1, 2, DEPTH_ID_LIMIT - 1]) {
-          seen.add(depthKey(entity({ id, x: depth, y: 0, layer })));
+          seen.add(depthKey(entity({ id, x: 0, y: depth, layer })));
           count += 1;
         }
       }
@@ -79,12 +82,12 @@ describe('depthKey', () => {
     expect(seen.size).toBe(count);
   });
 
-  it('sorts a multi-tile building by its nearest corner', () => {
-    // A 3x3 at (11, 3) reaches (13, 5): depth 18. A 1x1 at (14, 4) is also 18,
-    // and a 1x1 at (15, 4) is 19 and must draw in front of the big building.
+  it('sorts a multi-tile building by its southern row', () => {
+    // A 3x3 at (11, 3) reaches row 5. A 1x1 at (14, 5) is also row 5, and one
+    // at (15, 6) is row 6 and must draw in front of the big building.
     const assembler = entity({ id: 1, x: 11, y: 3, width: 3, height: 3 });
-    const same = entity({ id: 2, x: 14, y: 4 });
-    const nearer = entity({ id: 3, x: 15, y: 4 });
+    const same = entity({ id: 2, x: 14, y: 5 });
+    const nearer = entity({ id: 3, x: 15, y: 6 });
 
     expect(depthKey(assembler)).toBeLessThan(depthKey(same)); // equal depth, id breaks it
     expect(depthKey(same)).toBeLessThan(depthKey(nearer));
@@ -93,20 +96,20 @@ describe('depthKey', () => {
 
   it('never lets a nearer entity sort behind a further one, whatever its id', () => {
     const far = entity({ id: DEPTH_ID_LIMIT - 1, x: 5, y: 5, layer: RenderLayer.Overlay });
-    const near = entity({ id: 0, x: 6, y: 5, layer: RenderLayer.Terrain });
+    const near = entity({ id: 0, x: 5, y: 6, layer: RenderLayer.Terrain });
     expect(depthKey(far)).toBeLessThan(depthKey(near));
   });
 
   it('stays exact in float64 at the extremes of tile space', () => {
     const key = depthKey(entity({ id: DEPTH_ID_LIMIT - 1, x: 32767, y: 32767, layer: RenderLayer.InserterArm }));
     expect(Number.isSafeInteger(key)).toBe(true);
-    expect(key).toBe(65534 * DEPTH_TILE_STRIDE + RenderLayer.InserterArm * DEPTH_LAYER_STRIDE + DEPTH_ID_LIMIT - 1);
+    expect(key).toBe(32767 * DEPTH_TILE_STRIDE + RenderLayer.InserterArm * DEPTH_LAYER_STRIDE + DEPTH_ID_LIMIT - 1);
   });
 
   it('works west and north of the origin', () => {
     const key = depthKey(entity({ id: 4, x: -20, y: -20 }));
     expect(Number.isSafeInteger(key)).toBe(true);
-    expect(key).toBeLessThan(depthKey(entity({ id: 4, x: -19, y: -20 })));
+    expect(key).toBeLessThan(depthKey(entity({ id: 4, x: -20, y: -19 })));
   });
 
   it('refuses an id it cannot encode rather than colliding silently', () => {

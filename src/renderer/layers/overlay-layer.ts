@@ -137,8 +137,9 @@ export class OverlayLayer {
   /**
    * One machine's "this is what I make" badge (C20 task 5).
    *
-   * Drawn at a **fixed pixel size** above the footprint's north corner, for
-   * the reason the mining ring and the ghost's ore count are: it is a readout,
+   * Drawn at a **fixed pixel size** above the middle of the footprint's top
+   * edge, for the reason the mining ring and the ghost's ore count are: it is
+   * a readout,
    * and the whole value of the mode is being able to read forty of them at
    * once at the zoom where forty machines fit on screen. A badge that
    * foreshortened with the tile would be unreadable exactly when it is
@@ -158,7 +159,7 @@ export class OverlayLayer {
       annotation.x + annotation.width * 0.5,
       annotation.y + annotation.height * 0.5,
     );
-    const top = centre.y - (annotation.width + annotation.height) * TILE_HALF_HEIGHT * camera.zoom * 0.5;
+    const top = centre.y - annotation.height * TILE_HALF_HEIGHT * camera.zoom;
     const y = top - BADGE_OFFSET;
 
     const label = annotation.count === null ? '' : String(annotation.count);
@@ -308,9 +309,9 @@ export class OverlayLayer {
    * Drawn at a **fixed pixel size**, like the mining ring and for the same
    * reason: it is a readout rather than part of the world, and a number that
    * shrinks with the zoom is one the player cannot read at the moment they are
-   * lining a miner up. It is anchored on the footprint's north corner, which
-   * is tile-space point `(x, y)` — asked of the camera rather than derived
-   * from the tile dimensions, because §5 keeps the projection in one file.
+   * lining a miner up. It is anchored on the middle of the footprint's top
+   * edge — asked of the camera rather than derived from the tile dimensions,
+   * because §5 keeps the projection in one file.
    */
   private drawResourceCount(
     ctx: CanvasRenderingContext2D,
@@ -318,7 +319,7 @@ export class OverlayLayer {
     ghost: GhostView,
     covered: number,
   ): void {
-    const north = camera.worldToScreen(ghost.x, ghost.y);
+    const north = camera.worldToScreen(ghost.x + ghost.width * 0.5, ghost.y);
     const text = `${covered}/${ghost.width * ghost.height} ore`;
 
     ctx.font = `${GHOST_LABEL_SIZE}px ${FONT_STACK}`;

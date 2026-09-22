@@ -1,9 +1,15 @@
 /**
- * The depth-sorted entity layer. See ironflow.md C03 task 5 and §5.
+ * The depth-sorted entity layer. See ironflow.md C03 task 5, §5 and C27A.
  *
  * §18 risk 2 — "depth sorting breaks with tall multi-tile buildings" — is rated
  * high likelihood, and the mitigation named there is this file: an explicit
  * depth key with an entity-id tie-break, and overlays drawn afterwards.
+ *
+ * C27A took most of the risk away with the third dimension: nothing is drawn
+ * standing up, so nothing occludes anything, and the sort decides only which
+ * of two *overlapping* things — a shadow and its neighbour, two items sharing
+ * a tile — is painted last. The key stayed, because "which of these is on top"
+ * still has to have one deterministic answer and the picker still reads it.
  */
 
 import type { TileBounds } from '../../game/world/coordinates.js';
@@ -28,17 +34,21 @@ export const DEPTH_LAYER_STRIDE = DEPTH_ID_LIMIT;
 export const DEPTH_TILE_STRIDE = DEPTH_LAYER_STRIDE * RENDER_LAYER_COUNT;
 
 /**
- * The painter's-algorithm sort key from §5.
+ * The painter's-algorithm sort key from §5, on C27A's axis.
  *
  * ```text
- * depth = (x + y) * LARGE + layerBias * SMALL + entityId
+ * depth = y * LARGE + layerBias * SMALL + entityId
  * ```
  *
  * Three properties, all of them load-bearing:
  *
- * - **`x + y` is the depth axis.** Larger draws later, so it draws in front.
- *   A multi-tile building uses its **maximum** corner (§5), because that is the
- *   corner nearest the camera and the one that decides what it may cover.
+ * - **`y` is the depth axis.** Further down the screen draws later, so it
+ *   draws in front — which is what makes a machine's shadow fall *under* the
+ *   machine south of it rather than over it. It was `x + y` until C27A,
+ *   because that was the axis running away from an isometric camera; a
+ *   top-down camera has no such axis, and screen rows are the honest answer.
+ *   A multi-tile building uses its **southern** row, the edge nearest the
+ *   bottom of the screen, for the same reason it used its maximum corner.
  * - **The layer bias orders things sharing a tile**, so an item never sinks
  *   into the belt carrying it.
  * - **The entity id breaks the remaining ties deterministically.** Ids are
@@ -63,8 +73,8 @@ export function depthKey(entity: RenderEntity): number {
     throw new RangeError(`depthKey: layer ${entity.layer} is outside [0, ${RENDER_LAYER_COUNT}).`);
   }
 
-  const nearestCorner = entity.depthRow ?? entity.x + entity.width - 1 + (entity.y + entity.height - 1);
-  return nearestCorner * DEPTH_TILE_STRIDE + entity.layer * DEPTH_LAYER_STRIDE + entity.id;
+  const row = entity.depthRow ?? entity.y + entity.height - 1;
+  return row * DEPTH_TILE_STRIDE + entity.layer * DEPTH_LAYER_STRIDE + entity.id;
 }
 
 /** Does an entity's footprint overlap an inclusive tile rectangle? */
@@ -135,20 +145,20 @@ export class EntityLayer {
     }
 
     // Items on belts (C13) are sorted in with everything else rather than
-    // drawn over it, so a crate standing between the camera and a belt hides
-    // the ore on it. They arrive separately for the same reason the player
-    // does: this array is also what the picker searches, and an item is not
-    // something the cursor can hit — see `render-state.ts`.
+    // drawn over it, so two items sharing a tile stack in flow order. They
+    // arrive separately for the same reason the player does: this array is
+    // also what the picker searches, and an item is not something the cursor
+    // can hit — see `render-state.ts`.
     for (const item of items) {
       if (overlapsBounds(item, bounds)) this.visible.push(item);
     }
 
     // The player is sorted in with everything else rather than drawn over it,
-    // so walking behind a miner puts the miner in front — which is the whole
-    // reason §5 has a depth key. They arrive as a separate argument instead of
-    // in `entities` because that array is also what the picker searches, and
-    // the player is not something the cursor should be able to hit — see
-    // `render-state.ts` on why.
+    // so walking north of a miner puts that miner's shadow across their feet
+    // — which is the whole reason §5 has a depth key. They arrive as a
+    // separate argument instead of in `entities` because that array is also
+    // what the picker searches, and the player is not something the cursor
+    // should be able to hit — see `render-state.ts` on why.
     if (player !== null) {
       const drawable = asDrawable(player);
       if (overlapsBounds(drawable, bounds)) this.visible.push(drawable);

@@ -18,8 +18,8 @@
  * cells, and a `<div>` each is not a panel. A canvas also makes "click to jump"
  * one coordinate transform rather than an event listener per cell.
  *
- * It is **not** the world renderer and shares nothing with it: no isometry, no
- * camera, no atlas (§5 — the word "diamond" does not appear here and the
+ * It is **not** the world renderer and shares nothing with it: no projection,
+ * no camera, no atlas (§5 — no tile dimension appears here and the
  * projection boundary test checks that it does not). A map is a top-down
  * picture of tile space, which is the one space `game/` thinks in.
  *

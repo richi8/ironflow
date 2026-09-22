@@ -2,11 +2,13 @@
  * Tile space. See ironflow.md §5 and §6.
  *
  * This file is the simulation's entire vocabulary for "where". It contains no
- * pixels, no screen coordinates and no isometric concepts — those live behind
- * `renderer/projection.ts`, which is the only bridge between the two spaces.
+ * pixels, no screen coordinates and no notion of how a tile is drawn — that
+ * lives behind `renderer/projection.ts`, which is the only bridge between the
+ * two spaces.
  *
  * Axes: +X right, +Y down. Adjacency is `x±1, y±1`. Nothing here knows or cares
- * that the renderer draws these tiles as diamonds.
+ * what shape the renderer draws these tiles as, which is why C27A could change
+ * that shape without touching a line of `game/`.
  */
 
 /** An integer position in tile space. Fractional positions are not tiles. */
@@ -20,7 +22,7 @@ export interface TileCoord {
  *
  * Used for belt direction, inserter facing and building orientation. Clockwise
  * on screen and clockwise in tile space are the same rotation, because the
- * projection is a rotation-and-scale — see the linearity test in
+ * projection preserves orientation — see the linearity test in
  * `tests/unit/projection.test.ts`.
  */
 export type Rotation = 0 | 1 | 2 | 3;

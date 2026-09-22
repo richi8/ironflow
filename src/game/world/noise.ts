@@ -29,7 +29,7 @@
  * them. Perlin adds gradients, which buys a less blocky look at the cost of a
  * gradient table, and simplex adds a skewed lattice on top of that. Neither
  * difference survives being quantised to five terrain types and drawn as
- * isometric diamonds, and §3's dependency policy applies to complexity as much
+ * flat-shaded tiles, and §3's dependency policy applies to complexity as much
  * as to packages.
  */
 

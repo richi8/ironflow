@@ -231,8 +231,13 @@ export function describeEntities(
 /**
  * How much of a row an item is nudged by its position along its belt.
  *
- * Two items on one tile must overlap in the order they sit in, and an item
- * must still draw after the belt under it and before anything a row in front.
+ * Two items on one tile must overlap in the order they sit in. Since C27A the
+ * depth axis is `y`, so a belt running east or west gives its items no row of
+ * their own to sort by and they would all tie on the entity id — which every
+ * item shares, because an item is not an entity and has no id. This nudge is
+ * what separates them: it runs along the flow, so the item nearer the end of
+ * the belt is painted last whichever way the belt points.
+ *
  * `depthKey` gives a row eight layer-slots, so any nudge under an eighth of a
  * row is safe; a tenth of the half-row an item can be offset by is well inside
  * that and is plenty to separate four items.
@@ -332,7 +337,7 @@ function describeRun(
       height: 1,
       sprite: itemSprite(items.byId(item.itemId).id),
       layer: RenderLayer.ItemOnBelt,
-      depthRow: mouth.x + mouth.y + along * depthAxis + ITEM_DEPTH_NUDGE * depthAxis,
+      depthRow: mouth.y + step.y * along + ITEM_DEPTH_NUDGE * depthAxis * along,
     });
   }
 }
@@ -364,7 +369,7 @@ function describeLane(
       height: 1,
       sprite: itemSprite(items.byId(item.itemId).id),
       layer: RenderLayer.ItemOnBelt,
-      depthRow: tileX + tileY + ITEM_DEPTH_NUDGE * depthAxis * along,
+      depthRow: tileY + step.y * along + ITEM_DEPTH_NUDGE * depthAxis * along,
     });
   }
 }

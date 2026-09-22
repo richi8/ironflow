@@ -4,17 +4,24 @@ import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The projection boundary. See ironflow.md §5 and §19 rule 11.
+ * The projection boundary. See ironflow.md §5, §19 rule 11 and C27A.
  *
  * §5 says `projection.ts` is the only file that converts between tile space and
- * screen space, and that "nothing else in the codebase may contain TILE_W,
- * `/ 2`-style projection math, or the words iso/diamond". This is the
- * grep-checkable form of the C01 acceptance criterion that says so.
+ * screen space, and that nothing else in the codebase may contain `TILE_W`,
+ * projection arithmetic written out by hand, or the words iso/diamond. This is
+ * the grep-checkable form of the C01 acceptance criterion that says so.
  *
  * The failure it exists to catch is not malice, it is convenience: someone
- * three chunks from now writes `(x - y) * 32` inline in a draw call because
- * importing felt like ceremony, and then a change to TILE_W silently breaks
+ * three chunks from now writes `x * 48` inline in a draw call because
+ * importing felt like ceremony, and then a change to `TILE_W` silently breaks
  * one layer and not the others.
+ *
+ * C27A is the reason this test earned its keep. Changing the projection cost
+ * four files and a handful of tests precisely because no fifth file had
+ * quietly learned what a tile measures — and the ban on the *words* is what
+ * kept the concept from leaking into names and logic that would have had to be
+ * renamed too. Both halves stay, now that the renderer is top-down: a
+ * projection nobody restates is one that can be replaced again.
  *
  * If a future chunk genuinely needs a tile dimension — a sprite atlas sizing
  * its cells, say — the right move is to import `TILE_W` and add that file to
@@ -29,8 +36,8 @@ const SRC_DIR = resolve(REPO_ROOT, 'src');
 /** Files permitted to contain projection arithmetic. */
 const ALLOWED = new Set([resolve(SRC_DIR, 'renderer/projection.ts')]);
 
-const HALF_W = 32;
-const HALF_H = 16;
+/** The tile size `projection.ts` holds, which no other file may restate. */
+const TILE_SIZE = 48;
 
 const FORBIDDEN = [
   {
@@ -39,14 +46,14 @@ const FORBIDDEN = [
   },
   {
     pattern: /\b(?:isometric|diamond)\b/i,
-    why: '§5: isometry is a renderer detail and must not leak into names or logic',
+    why: '§5: the projection is a renderer detail and must not leak into names or logic',
   },
   {
-    pattern: new RegExp(`\\(\\s*\\w+\\s*[-+]\\s*\\w+\\s*\\)\\s*\\*\\s*(?:${HALF_W}|${HALF_H})\\b`),
+    pattern: new RegExp(`\\*\\s*${TILE_SIZE}\\b`),
     why: '§5: that is tileToScreen written out by hand',
   },
   {
-    pattern: new RegExp(`\\/\\s*(?:${HALF_W}|${HALF_H})\\b[^\\n]{0,40}\\/\\s*(?:${HALF_W}|${HALF_H})\\b`),
+    pattern: new RegExp(`\\/\\s*${TILE_SIZE}\\b`),
     why: '§5: that is screenToTile written out by hand',
   },
 ] as const;

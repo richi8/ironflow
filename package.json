@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "A seeded, replayable 2D isometric factory-automation game for the browser.",
+  "description": "A seeded, replayable 2D top-down factory-automation game for the browser.",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",

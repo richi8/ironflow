@@ -105,27 +105,29 @@ describe('sprite ids', () => {
 
   it('resolves a building with its category colour and code', () => {
     expect(describeSprite('building:extraction:MI')).toEqual({
-      kind: 'prism',
+      kind: 'machine',
       fill: color('accent'),
       code: 'MI',
       width: 1,
       height: 1,
-      rise: 1,
+      bulk: 1,
     });
   });
 
-  it('reads footprint and height off the id', () => {
+  it('reads footprint and bulk off the id', () => {
+    // The fourth field was an extrusion height until C27A and is the shadow's
+    // length now. The grammar did not move, so neither did `data/buildings.ts`.
     expect(describeSprite('building:power:PP:2x3:4')).toMatchObject({
-      kind: 'prism',
+      kind: 'machine',
       width: 2,
       height: 3,
-      rise: 4,
+      bulk: 4,
     });
   });
 
   it('falls back to a neutral colour for a category nobody has coloured yet', () => {
     expect(describeSprite('building:teleportation:TP')).toMatchObject({
-      kind: 'prism',
+      kind: 'machine',
       fill: color('panel-high'),
     });
   });

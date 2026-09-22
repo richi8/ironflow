@@ -24,20 +24,22 @@ import type { Renderer } from './renderer.js';
 import { ProceduralAtlas, type SpriteAtlas } from './sprite-atlas.js';
 
 /**
- * Cull margin, in tiles, for sprites taller than the ground they stand on.
+ * Cull margin, in tiles, for whatever a sprite draws outside its footprint.
  *
- * C03 task 6 asks for "a margin equal to the tallest sprite". §5 hazard 1 puts
- * the tallest v1 building at three tiles; four is that plus a tile of slack, and
- * padding all four sides rather than only the near ones costs a handful of
- * world chunks at the edge of a rectangle that is already conservative.
+ * C03 task 6 asks for "a margin equal to the tallest sprite", and until C27A
+ * that was four — §5 hazard 1's three-tile power plant plus slack, because a
+ * building standing just off the bottom of the screen still showed its roof on
+ * it. Nothing stands up any more, so the only thing that reaches past a
+ * footprint is its shadow, which is a fifth of a tile at the heaviest. One
+ * tile is that plus most of a tile of slack.
  *
- * Asking the atlas for a real per-sprite height was the alternative. It would
+ * Asking the atlas for a real per-sprite extent was the alternative. It would
  * mean a method on `SpriteAtlas` that only the culler uses, on an interface
  * whose whole purpose is that C29 can swap the implementation — and a wrong
  * answer from it is an invisible sprite, which is much harder to notice than a
  * few extra tiles of work.
  */
-export const TALLEST_SPRITE_TILES = 4;
+export const SPRITE_OVERHANG_TILES = 1;
 
 /** Grow an inclusive rectangle by `margin` tiles on every side. */
 export function padBounds(bounds: TileBounds, margin: number): TileBounds {
@@ -114,7 +116,7 @@ export class CanvasRenderer implements Renderer {
     ctx.fillStyle = color('bg-deep');
     ctx.fillRect(0, 0, this.width, this.height);
 
-    const bounds = padBounds(camera.visibleTileBounds(), TALLEST_SPRITE_TILES);
+    const bounds = padBounds(camera.visibleTileBounds(), SPRITE_OVERHANG_TILES);
 
     this.terrain.draw(ctx, state.world, camera, bounds, this.dpr);
     this.entities.draw(ctx, state.entities, camera, bounds, state.player, state.items);

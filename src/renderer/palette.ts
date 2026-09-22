@@ -125,10 +125,11 @@ export function color(token: ColorToken): string {
 /**
  * Multiply a `#rrggbb` colour's channels by `factor`, clamped to a byte.
  *
- * The placeholder prisms need three tones of one colour for their three faces,
- * and §11 defines one token per category rather than three. Deriving the
- * shades keeps the token list honest: a face tone is not a design decision,
- * it is what a light source does to the colour that *was* decided.
+ * A placeholder machine needs several tones of one colour — a body, a lighter
+ * machined inset, a dark outline — and §11 defines one token per category
+ * rather than four. Deriving the shades keeps the token list honest: a tone is
+ * not a design decision, it is what a light source does to the colour that
+ * *was* decided.
  *
  * Results are memoised because this is called from a draw path, and a factory
  * screen full of one building type asks for the same six strings every frame.

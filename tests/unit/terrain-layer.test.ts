@@ -45,7 +45,7 @@ function countingAtlas(): SpriteAtlas & { calls: SpriteId[] } {
   };
 }
 
-function setup(zoom: number, generator = createCheckerboardGenerator()) {
+function setup(zoom: number, generator = createCheckerboardGenerator(), viewport = VIEWPORT) {
   const atlas = countingAtlas();
   const surfaces: { width: number; height: number }[] = [];
   const layer = new TerrainLayer({
@@ -56,7 +56,7 @@ function setup(zoom: number, generator = createCheckerboardGenerator()) {
     },
   });
   const world = new World(generator);
-  const camera = new Camera({ x: 0, y: 0, zoom, viewportWidth: VIEWPORT, viewportHeight: VIEWPORT });
+  const camera = new Camera({ x: 0, y: 0, zoom, viewportWidth: viewport, viewportHeight: viewport });
   const ctx = { drawImage: vi.fn() } as unknown as CanvasRenderingContext2D;
   const bounds = camera.visibleTileBounds();
   return { atlas, surfaces, layer, world, camera, ctx, bounds };
@@ -143,8 +143,8 @@ describe('TerrainLayer', () => {
   });
 
   it('draws directly instead of caching when a world chunk would not fit a bitmap', () => {
-    // At maximum zoom a world chunk is 8192x4096 — 32 MB to avoid drawing the
-    // handful of tiles actually on screen.
+    // At maximum zoom a world chunk is 6144 square — 150 MB to avoid drawing
+    // the handful of tiles actually on screen.
     const { atlas, surfaces, layer, world, camera, ctx } = setup(4);
     layer.draw(ctx, world, camera, camera.visibleTileBounds(), 1);
 
@@ -157,8 +157,11 @@ describe('TerrainLayer', () => {
 
   it('caps how many bitmaps it builds in one frame', () => {
     // Arriving somewhere new should cost a frame of direct drawing, not a stall
-    // while fifty world chunks are rendered.
-    const { layer, world, camera, ctx } = setup(0.25);
+    // while fifty world chunks are rendered. The viewport is enlarged so that
+    // more than eight world chunks are on screen at once: since C27A the cull
+    // rectangle is the viewport rather than its bounding box, so a 640px
+    // square at minimum zoom sees only nine.
+    const { layer, world, camera, ctx } = setup(0.25, createCheckerboardGenerator(), 2000);
     layer.draw(ctx, world, camera, camera.visibleTileBounds(), 1);
 
     const stats = layer.getStats();

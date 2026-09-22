@@ -100,14 +100,11 @@ export interface RenderEntity {
   /**
    * The depth row this sorts in, when the footprint is the wrong answer (C13).
    *
-   * Normally `x + width - 1 + y + height - 1` — the corner nearest the camera
-   * (§5) — and that is what a drawable leaving this out gets. An item on a
-   * belt needs the override: it is drawn at its real position, which for the
-   * back half of a tile is a depth row *behind* the belt carrying it, so
-   * without this the belt's own flat face paints over it for half of every
-   * tile. Items therefore sort in their belt's row, where `RenderLayer`
-   * decides, nudged by a fraction of a row so that two items on one tile still
-   * overlap in the right order. See `entity-view.ts`.
+   * Normally `y + height - 1` — the southern edge, the one nearest the bottom
+   * of the screen (§5, C27A) — and that is what a drawable leaving this out
+   * gets. An item on a belt needs the override: it is drawn at its real
+   * fractional position rather than on a tile, and two items on one tile must
+   * still overlap in the order they sit in. See `entity-view.ts`.
    */
   readonly depthRow?: number;
 }

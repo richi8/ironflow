@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TileBounds } from '../../src/game/world/coordinates.js';
 import { Camera } from '../../src/renderer/camera.js';
-import { TALLEST_SPRITE_TILES, padBounds } from '../../src/renderer/canvas-renderer.js';
+import { SPRITE_OVERHANG_TILES, padBounds } from '../../src/renderer/canvas-renderer.js';
 
 /**
  * C03 — culling. See ironflow.md C03 task 6 and §5 hazard 1.
@@ -118,7 +118,7 @@ describe('cull bounds cover every partially visible tile', () => {
     const bounds = camera.visibleTileBounds();
     expect(bounds.maxX).toBeLessThan(bounds.minX);
     // And padding an empty rectangle must not conjure a tile into it.
-    expect(padBounds(bounds, TALLEST_SPRITE_TILES)).toEqual(bounds);
+    expect(padBounds(bounds, SPRITE_OVERHANG_TILES)).toEqual(bounds);
   });
 });
 
@@ -128,13 +128,13 @@ describe('padBounds', () => {
     expect(padded).toEqual({ minX: -4, minY: -4, maxX: 13, maxY: 13 });
   });
 
-  it('covers the ground tile of a sprite tall enough to reach into view', () => {
-    // A three-tile-tall building standing just below the bottom edge still
-    // shows its roof (§5 hazard 1). Its ground tile is off-screen, so only the
+  it('covers the tile of a sprite whose shadow reaches into view', () => {
+    // A machine standing just past the bottom edge still throws part of its
+    // shadow onto the screen (C27A). Its own tile is off-screen, so only the
     // margin keeps it drawn.
     const camera = new Camera({ x: 0, y: 0, zoom: 1, viewportWidth: VIEWPORT_W, viewportHeight: VIEWPORT_H });
     const bounds = camera.visibleTileBounds();
-    const padded = padBounds(bounds, TALLEST_SPRITE_TILES);
+    const padded = padBounds(bounds, SPRITE_OVERHANG_TILES);
 
     const groundX = bounds.maxX + 1;
     const groundY = bounds.maxY + 1;

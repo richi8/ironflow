@@ -1,11 +1,11 @@
 # IronFlow — Implementation Plan
 
-**A seeded, replayable 2D isometric factory-automation game for the browser.**
+**A seeded, replayable 2D top-down factory-automation game for the browser.**
 Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C27 complete — an old save has somewhere to go.** `game/save/save-migrator.ts` chains pure `vN → vN+1` steps and runs *before* C26's validator, because the validator knows one schema and an old file was written under another. The chain is empty — the format has had one version — and that is now enforced rather than assumed: `tests/fixtures/saves/v1.json` is a committed save of a factory mid-run, `npm run save:fixture` writes the next one and refuses to overwrite an old one, and the suite fails the day `SAVE_VERSION` moves without a step and a fixture. Next: C28 — performance instrumentation. |
+| **Status** | **C27A complete — the world is drawn top-down.** The renderer was isometric from C01 to C27 and is now an orthogonal square grid, the way Factorio draws its factory. `renderer/projection.ts` became a scale, the extruded prism became a plated square with a shadow, the inserter's arm sweeps in the ground plane, the depth axis is `y`, and `picker.ts` lost its ray sweep — §5 hazards 1 and 2 no longer exist. `game/**` did not change by a line, which is what the §5 boundary test was bought for. Next: C28 — performance instrumentation. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | Chunk **C28 — Performance instrumentation** |
@@ -84,7 +84,7 @@ different factory?*
 
 ```text
 single player                    procedural seeded world
-isometric 2D grid world          resource patches and depletion
+top-down 2D grid world           resource patches and depletion
 manual gathering (early game)    mining
 belts, splitters, inserters      furnaces, assemblers
 data-driven items and recipes    research / progression
@@ -344,108 +344,131 @@ and `HTMLCanvasElement` undefined. It must pass at every commit.
 
 ## §5 The projection contract
 
-**Decided: the simulation is projection-agnostic; the renderer is isometric.**
+**Decided: the simulation is projection-agnostic; the renderer is top-down.**
 
-This resolves the contradiction between the previous revision's "top-down
-grid" and `ironflow_visual_reference.png`'s "2D / ISOMETRIC".
+The first half has been true since C01 and is the part that matters. The
+second half was *isometric* from C01 to C27, which is how most of this section
+came to be written; C27A replaced it with an orthogonal top-down view, the way
+Factorio draws its factory. Both halves of that history are kept below, because
+the reversal is the best evidence the contract works: the renderer changed
+projection and `game/` did not change at all.
 
 ```text
 SIMULATION            integer tile coordinates only
                       (x, y), +X right, +Y down
-                      knows nothing about pixels, diamonds or depth
+                      knows nothing about pixels, tile shape or depth
                           |
                           | projection.ts  <-- the only bridge
                           v
-RENDERER              screen pixels, isometric diamonds, depth-sorted
+RENDERER              screen pixels, square tiles, depth-sorted by row
 INPUT                 screenToTile() inverse of the same transform
 ```
 
 ### The transform
 
-Tiles are 2:1 diamonds.
+Tiles are squares.
 
 ```text
-TILE_W = 64        // full diamond width in px at zoom 1
-TILE_H = 32        // full diamond height in px at zoom 1
+TILE_W = 48        // tile width in px at zoom 1
+TILE_H = 48        // tile height in px at zoom 1, equal to TILE_W
 
 tileToScreen(x, y):
-    sx = (x - y) * (TILE_W / 2)
-    sy = (x + y) * (TILE_H / 2)
+    sx = x * TILE_W
+    sy = y * TILE_H
 
 screenToTile(sx, sy):
-    tx = (sx / (TILE_W / 2) + sy / (TILE_H / 2)) / 2
-    ty = (sy / (TILE_H / 2) - sx / (TILE_W / 2)) / 2
+    tx = sx / TILE_W
+    ty = sy / TILE_H
     // floor() for the containing tile
 ```
 
 `projection.ts` exposes exactly these two functions plus the constants. Nothing
-else in the codebase may contain `TILE_W`, `/ 2`-style projection math, or the
-words "iso"/"diamond". If a second file needs to project, it imports this one.
+else in the codebase may contain `TILE_W`, that arithmetic written out by hand,
+or the words "iso"/"diamond". If a second file needs to project, it imports
+this one.
 
 **Implementation note (C01).** Two things this section left implicit, now fixed
 by the shipped code and pinned by tests:
 
-- **`tileToScreen(x, y)` returns the diamond's top vertex, not its centre.**
-  Tile `(x, y)` covers the unit square `[x, x+1] x [y, y+1]` in tile space, so
-  its diamond's centre is `TILE_H / 2` *below* the returned point. This is
-  forced by the transform as written — it is what makes `floor(screenToTile(p))`
-  the tile containing `p` — but C03 has to know it to anchor a sprite, so it is
-  written down rather than rediscovered.
+- **`tileToScreen(x, y)` returns a corner of the tile, not its centre.** Tile
+  `(x, y)` covers the unit square `[x, x+1] x [y, y+1]` in tile space, so the
+  returned point is its north-west corner and its centre is half a tile right
+  and down of that. (Before C27A it was the top vertex of the tile's diamond,
+  which is the same statement about the same unit square.) This is forced by
+  the transform as written — it is what makes `floor(screenToTile(p))` the tile
+  containing `p` — but C03 has to know it to anchor a sprite, so it is written
+  down rather than rediscovered.
 - **Flooring lives on the camera, not here.** `projection.ts` really does expose
   only the two functions; `Camera.screenToTile` applies `Math.floor` to a
   `screenToWorld` result. `Math.floor` is not projection arithmetic, and keeping
   it out preserves "exactly these two functions" literally.
 
-**Implementation note (C04).** Hazard 2 is implemented, in
-`renderer/picker.ts`. `Camera.screenToTile` still answers with the ground tile
-and is still the right answer for cull bounds and for terrain; `ScenePicker`
-is the one to ask whenever the answer has to match what the player can see. It
-lives in the renderer because the answer depends on how tall a sprite is drawn
-and §4 forbids `input/**` from knowing that.
+**Implementation note (C04, retired by C27A).** Hazard 2 below was implemented
+in `renderer/picker.ts`, as a ray swept up the screen by the sprite's height.
+There is no height any more, so the sweep is gone and the picker is a
+rectangle test. It still exists, and still lives in the renderer, because
+"which entity is under this pixel" is not the same question as "which tile is
+under this pixel" while multi-tile buildings and layered sprites do.
 
-The rule itself is now enforced rather than merely stated:
+The rule itself is enforced rather than merely stated:
 `tests/unit/projection-boundary.test.ts` scans every file under `src/` except
 `projection.ts` and fails on `TILE_W`/`TILE_H`, on the words "isometric" or
-"diamond" in code, and on the two transforms written out by hand. A file that
-one day genuinely needs a tile dimension is added to its allow-list with a
-note, which makes the leak a decision instead of an accident.
+"diamond" in code, and on the transform written out by hand. A file that one
+day genuinely needs a tile dimension is added to its allow-list with a note,
+which makes the leak a decision instead of an accident. C27A is what this test
+bought: changing the projection touched four source files, because no fifth one
+had quietly learned what a tile measures.
 
 ### Depth sorting
 
 Painter's algorithm on a stable key.
 
 ```text
-depth = (x + y) * LARGE + layerBias * SMALL + entityId
+depth = y * LARGE + layerBias * SMALL + entityId
 ```
 
-- `x + y` is the isometric depth axis: larger draws later (in front).
+- `y` is the depth axis: further down the screen draws later (in front). It was
+  `x + y` until C27A — the axis running away from an isometric camera — and a
+  top-down camera has no such axis, so screen rows are the honest answer.
 - `layerBias` orders things that share a tile: terrain < resource < belt <
   building < item-on-belt < inserter-arm < overlay.
 - `entityId` breaks remaining ties **deterministically** — never leave tie-break
   to array order.
 
-Multi-tile buildings sort by their **maximum** `(x + y)` corner and are drawn
-with a bottom-center anchor at the projected center of their footprint.
+Multi-tile buildings sort by their **southern** row and are drawn with their
+footprint's centre at the projected centre of that footprint.
 
 ### Known hazards (see also §16 risk register)
 
-1. **Tall sprites overlapping.** A 3-tile-tall power plant will occlude tiles
-   behind it. This is correct isometric behaviour, but the ghost preview and
-   the hover highlight must still be visible — draw both in the overlay layer,
-   after everything.
-2. **Picking a tile under a tall building.** `screenToTile` returns the *ground*
-   tile. Entity picking must additionally test entity sprite bounds in reverse
-   depth order and prefer the topmost hit. Implement in C04; the naive
-   ground-tile version is acceptable until C06.
+The first two were isometric hazards and C27A retired them; they are kept with
+their outcome written in, because the reasoning is what a future projection
+change would have to redo.
+
+1. ~~**Tall sprites overlapping.**~~ Nothing is drawn standing up any more, so
+   nothing occludes anything. The ghost preview and the hover highlight are
+   still drawn in the overlay layer, after everything, because an overlay that
+   sorts with the world can still be hidden by a shadow or an inserter arm.
+2. ~~**Picking a tile under a tall building.**~~ A sprite covers its footprint
+   and nothing else, so the entity under a pixel always stands on the tile
+   under that same pixel. `tests/unit/entity-picking.test.ts` pins that the two
+   answers agree, which is the regression test for a projection that ever grows
+   a vertical component again.
 3. **Zoom and fractional pixels.** Round the final translate to whole device
-   pixels before drawing terrain, or diamond seams appear. Keep the camera
-   position itself fractional.
+   pixels before drawing terrain, or seams appear between world-chunk bitmaps.
+   Keep the camera position itself fractional. Still live: the seam is an
+   antialiasing artefact of adjacent fills and a rounding artefact of the blit,
+   and neither cares what shape the tiles are.
 
 ### What this does *not* mean
 
-The simulation must **never** gain an "isometric" concept. Belt directions are
+The simulation must **never** gain a rendering concept. Belt directions are
 `N/E/S/W` in tile space. Adjacency is `x±1, y±1`. If a system ever needs to
 know how something looks, that system is in the wrong layer.
+
+And the converse, which C27A is the occasion to state: rotation and sub-tile
+positions are **not** projection artifacts. A belt has a direction and an item
+has a position along it because the *game* works that way; neither arrived with
+isometry and neither left with it.
 
 ---
 
@@ -929,8 +952,12 @@ Two consequences:
 Both reference images in this repository are canonical. Read them before C03.
 
 `ironflow_visual_reference.png` specifies: **clean, readable, stylized;
-contrast / functional / modern**, 2D isometric sci-fi. It also enumerates the
-v1 asset list and the eight HUD icons. Treat it as the art spec.
+contrast / functional / modern**, 2D sci-fi. It also enumerates the v1 asset
+list and the eight HUD icons. Treat it as the art spec — with one correction
+it cannot make for itself: the sheet is drawn in isometric, and C27A made the
+renderer top-down. The *style* is what is canonical about it — the palette, the
+weight of the outlines, the silhouettes, the icon set. The camera angle is not,
+and C29 draws that asset list from above.
 
 ### Design tokens
 
@@ -1022,8 +1049,10 @@ Do not let art block mechanics.
 
 ```text
 C03  procedurally drawn placeholders
-     - terrain: flat-shaded diamonds from the token palette
-     - buildings: extruded diamond prism, category colour, 2-letter code
+     - terrain: flat-shaded tiles from the token palette
+     - buildings: a plated square — shadow, body, inset, 2-letter code
+       (an extruded prism until C27A, which is where the shadow came from:
+        a machine's "bulk" is now how far it throws one)
      - belts: directional chevrons; inserters: a line + a dot
      Everything is drawn by code. Zero image assets.
         |
@@ -6154,6 +6183,144 @@ changes it fails — which is exactly when task 3's second case has to be decide
 
 ---
 
+## C27A — Orthogonal projection
+
+**Goal.** The world is drawn top-down on a square grid, the way Factorio draws
+its factory. No diamonds, no extrusion, no depth axis running diagonally.
+
+**Depends on.** C27. Must land **before** C29, which is the art pass: every
+sprite in the game is procedural today, and redrawing a projection is free
+while that is true and expensive the day an atlas exists.
+
+**Why, given §5 decided the opposite.** §5's decision was that the *simulation*
+is projection-agnostic and the renderer picks a projection. The first half is
+what mattered and it held: `coordinates.ts` has no pixels, no depth and no
+diamonds, and `projection-boundary.test.ts` has kept it that way for 27 chunks.
+The second half is a renderer preference, and it is reversible for the cost of
+the files that touch pixels — which is what this chunk spends. What an
+orthogonal view buys:
+
+```text
+- a screen direction is a tile direction        W is north, not north-west
+- a footprint is a rectangle on screen          picking is a rectangle test
+- nothing occludes anything                     no ray sweep, no tall-sprite
+                                                cull padding, no hazard 1/2
+- a chunk bitmap is a rectangle                 no wasted corners
+```
+
+**What it does not buy, and must not be sold as.** Rotation (`N/E/S/W`) and
+sub-tile belt positions are *gameplay* — belt direction, inserter facing,
+throughput and compression — and survive untouched. Neither was ever an
+isometric artifact.
+
+**Tasks.**
+1. `projection.ts`: `tileToScreen(x, y) = (x * TILE_W, y * TILE_H)` with
+   `TILE_W === TILE_H`, and its exact inverse. The returned point is the tile's
+   **north-west corner**, so `floor(screenToTile(p))` is still the tile
+   containing `p`. The file stays the only bridge; the boundary test stays.
+2. `sprite-atlas.ts`: the geometry header derives from both basis vectors
+   rather than from `EAST_STEP` alone (`EAST_STEP.y` is zero now). `RISE_UNIT`
+   goes; `<rise>` in a sprite id survives as **bulk** — how long a machine's
+   shadow is and how deep its inset reads — so no content data changes.
+3. `sprite-atlas.ts` drawing: the extruded prism becomes a plated rectangle
+   (shadow, body, inset, two-letter code). The inserter's arm keeps its
+   semicircular sweep, now **in the ground plane** — `cos` along the facing,
+   `sin` sideways — which is both what the machine does and what the iso
+   version was faking with a vertical arc. Items and the player lose their
+   lift and keep their shadow. Belts, chevrons, splitters, tunnel mouths and
+   ore lumps are already written in tile fractions against the two basis
+   vectors and change not at all.
+4. Depth: the sort axis becomes `y`, not `x + y`. Layers still order things
+   sharing a tile; the id still breaks ties. Items on belts keep their
+   `depthRow` override, nudged along the flow so two items on one tile stack
+   in flow order.
+5. `picker.ts`: with no height there is nothing to sweep. The ray against the
+   footprint becomes a rectangle test, and §5 hazard 2 stops existing.
+6. `terrain-layer.ts`: a world chunk's bitmap is `CHUNK_SIZE` tiles square.
+   `overlay-layer.ts`: badges and the ore count anchor on the footprint's top
+   edge rather than its north corner.
+7. Update §5, §11 and this document's framing. Retire the words that no longer
+   describe the renderer.
+
+**Acceptance.**
+- The whole suite passes; the four files the projection swap breaks are updated
+  rather than deleted, and `game/**` is untouched.
+- A save written before this chunk loads and plays after it. The camera is
+  presentation state (§6) and was never serialized, so there is nothing to
+  migrate — this is a claim the save round-trip tests already check.
+- `W` walks north, `S` south, at every zoom.
+- The determinism hashes from C18 do not move.
+
+**Tests.** `projection.test.ts` rewritten for a square grid; `entity-picking.test.ts`
+rewritten as footprint hits; `terrain-layer.test.ts` and the walking test in
+`input-manager.dom.test.ts` updated; the boundary test's hand-written-math
+patterns retuned to the new constants.
+
+**Out of scope.** Art. This chunk changes the projection, not the style — the
+placeholders stay placeholders until C29.
+
+### What implementing it decided
+
+**The projection swap itself was eight lines; the tests said so before the
+code did.** Changing `tileToScreen` to a scale and running the suite failed 17
+of 1,861 tests in four files, none of them under `game/` — no system, no save,
+no determinism hash. That measurement is what this chunk was costed from, and
+it is the §5 boundary test's whole return on investment: nothing outside
+`projection.ts` had quietly learned what a tile measures.
+
+**A tile is 48px, not 64.** The diamond was 64 wide and 32 tall, so a tile cost
+32 pixels of vertical progress; a 64px square would have nearly halved the rows
+on screen. At 48 a 1080p viewport holds about 40x22 tiles at zoom 1 — the
+density the genre plays at — and a world chunk's cached bitmap is 1536 square
+rather than 2048x1024, which is 15% more pixels for a tile that is 50% more
+screen area.
+
+**`<rise>` became bulk rather than being deleted.** Every building in
+`data/buildings.ts` carries one in its sprite id, and the honest options were
+to strip the field from the grammar and the data, or to find it a job. It got
+a job: it is how far a machine throws its shadow and how deep its inset reads,
+which is what the extrusion was really communicating — *this one is bigger than
+that one*. No content data changed.
+
+**The inserter's arm got more honest, not less.** Its sweep was already a half
+turn, drawn as `cos` along the facing and `sin` **up the screen** — an arc the
+machine does not make, chosen because an isometric view had no way to show the
+one it does. Top-down shows it directly: `sin` now runs sideways in the ground
+plane, and the hand traces the semicircle a real arm pivoting about a vertical
+axis would.
+
+**The depth axis is `y`, and items needed the nudge more than before.** With
+`x + y` gone, a belt running east or west gives its items no row of their own,
+and every item shares the same id — `NO_ENTITY` — so they would all tie. The
+existing `ITEM_DEPTH_NUDGE` now runs along the flow instead of along the old
+diagonal, which separates them whichever way the belt points.
+
+**The cull margin shrank from four tiles to one.** It existed for §5 hazard 1:
+a three-tile-tall building standing below the bottom edge still showed its roof
+on screen. Nothing stands up, so the only thing reaching past a footprint is a
+shadow, which is a fifth of a tile at the heaviest.
+
+**`picker.ts` kept its job and lost its arithmetic.** About a hundred lines of
+ray-against-rectangle sweep became a four-comparison containment test. The file
+stayed, because "which entity is under this pixel" is still not "which tile is
+under this pixel" while multi-tile buildings and layered sprites exist — and
+`entity-picking.test.ts` now pins that the two answers *agree*, which is the
+regression test for a projection that ever grows a vertical component again.
+
+**Verified in the browser, not only in the suite.** §17 says not to test
+renderer pixel output, and these tests do not; so the C27 save fixture was
+imported into the running game and looked at. Miner, belt with an item riding
+it, both inserters mid-swing, furnace, chests, ore and the player all read
+correctly at two zoom levels, with no console errors.
+
+**§11's reference sheet is now style-canonical, not camera-canonical.** The
+sheet is drawn in isometric. Its palette, outline weight, silhouettes and icon
+set are still the art spec; its camera angle is not, and C29 draws that asset
+list from above. That is the one thing this chunk cost that it did not buy
+back.
+
+---
+
 # Milestone E — Scale & polish
 
 > **Result:** the reference factory in §12 runs at 60 fps and the game looks like
@@ -7022,8 +7189,8 @@ by eye against the acceptance criteria.
 | # | Risk | Likelihood | Impact | Mitigation | Chunk |
 |---|---|---|---|---|---|
 | 1 | Belt simulation becomes the bottleneck | High | High | Readable version first; belt-network path pre-designed; benchmarks from C28 | C13, C29 |
-| 2 | Isometric depth sorting breaks with tall multi-tile buildings | High | Medium | Explicit depth key with entity-id tie-break; overlays drawn last | C03 |
-| 3 | Isometric mouse picking feels imprecise | Medium | High | Ground-tile transform plus reverse-depth entity hit test; tested round-trip | C04 |
+| 2 | ~~Depth sorting breaks with tall multi-tile buildings~~ | High | Medium | Explicit depth key with entity-id tie-break; overlays drawn last. **Closed by C27A**: nothing is drawn standing up, so nothing occludes anything | C03, C27A |
+| 3 | ~~Mouse picking feels imprecise~~ | Medium | High | Ground-tile transform plus entity hit test, tested round-trip. **Closed by C27A**: a sprite covers its footprint and nothing else | C04, C27A |
 | 4 | Determinism drifts silently | High | High | Contract in §6; lint rules from C00; hash tests from C18; round-trip from C24 | C18, C24 |
 | 5 | Save files balloon | Medium | Medium | World-delta strategy decided up front (§14); size budget asserted | C24 |
 | 6 | Canvas 2D fill rate at zoom-out | Medium | Medium | Terrain world-chunk caching from C03, not retrofitted | C03 |
@@ -7061,7 +7228,8 @@ by eye against the acceptance criteria.
     `SpriteAtlas`/`Renderer` interfaces are the two sanctioned exceptions, and
     both have two real implementations planned.
 11. **Do not touch the projection contract (§5).** No projection math outside
-    `projection.ts`; no isometric concepts inside `game/`.
+    `projection.ts`; no rendering concepts inside `game/`. Changing the
+    projection itself is a chunk, not an edit — C27A is what one looks like.
 
 **Simulation**
 
