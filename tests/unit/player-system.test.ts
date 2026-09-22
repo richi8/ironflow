@@ -191,6 +191,55 @@ describe('walking', () => {
     expect(simulation.player.tileY).toBeLessThan(2);
   });
 
+  it('is carried along the belt it stands on, without walking', () => {
+    const simulation = makeGame(0, 0);
+    simulation.inventory.add('belt', 6);
+    // Six tiles of belt running east, starting under the player.
+    for (let x = 0; x < 6; x++) {
+      run(simulation, 1, [{ type: 'build', buildingId: 'belt', x, y: 0, rotation: EAST }]);
+    }
+    const startX = simulation.player.subX;
+
+    // No movePlayer command at all: whatever happens here is the belt's doing.
+    run(simulation, 30);
+
+    const carried = simulation.player.subX - startX;
+    // §9's 2 tiles/s for one simulated second, and east rather than anywhere
+    // else: the belt's rotation is the direction, not the player's facing.
+    expect(carried).toBe(2 * SUBTILES_PER_TILE);
+    expect(simulation.player.subY).toBe(tileCentreSubtile(0));
+  });
+
+  it('adds the belt to the walk rather than replacing it', () => {
+    const simulation = makeGame(6, 0);
+    simulation.inventory.add('belt', 8);
+    for (let x = 0; x < 8; x++) {
+      run(simulation, 1, [{ type: 'build', buildingId: 'belt', x, y: 0, rotation: EAST }]);
+    }
+    const startX = simulation.player.subX;
+
+    // Walking west along an east-running belt: 4 tiles/s against 2 tiles/s is
+    // 2 tiles/s of progress, which is how the genre composes the two.
+    run(simulation, 30, [{ type: 'movePlayer', dx: -1, dy: 0 }]);
+
+    expect(simulation.player.subX - startX).toBe(-2 * SUBTILES_PER_TILE);
+  });
+
+  it('is not carried into something it could not have walked into', () => {
+    const simulation = makeGame(7, 0);
+    simulation.inventory.add('belt', 3);
+    // Belt running east at the edge of the lake at x = 10. The ride has to
+    // stop at the last dry tile rather than putting the player in the water.
+    for (const x of [7, 8, 9]) {
+      run(simulation, 1, [{ type: 'build', buildingId: 'belt', x, y: 0, rotation: EAST }]);
+    }
+
+    run(simulation, 300);
+
+    expect(subtileToTile(simulation.player.subX)).toBeLessThan(10);
+    expect(simulation.world.getTile(simulation.player.tileX, simulation.player.tileY)).not.toBe(TileType.Water);
+  });
+
   it('is still stopped by a chest on the same path', () => {
     // The other half of the rule, and the reason walkability is a field rather
     // than "logistics buildings do not collide": a chest is in the same

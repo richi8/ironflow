@@ -1215,6 +1215,31 @@ export class BuildingRegistry {
     return this.undergroundByType.get(type) ?? null;
   }
 
+  /**
+   * How fast this kind of building carries what sits on it, in tiles per
+   * second, or null if it carries nothing.
+   *
+   * Derived from the three configs that already state a speed rather than
+   * being a fourth content field, because it is the same fact: a building that
+   * moves *items* along itself moves the *player* along itself, at the same
+   * rate. A separate `carrySpeed` would be a number that could disagree with
+   * the belt the player is watching, which is the kind of content bug nobody
+   * finds.
+   *
+   * Every building this answers for is also `walkable`, necessarily — the
+   * player cannot stand on something solid — but the two are not the same
+   * question, and a later walkable floor that does not move is the reason they
+   * are asked separately.
+   */
+  carrySpeedFor(type: EntityType): number | null {
+    return (
+      this.beltByType.get(type)?.tilesPerSecond ??
+      this.splitterByType.get(type)?.tilesPerSecond ??
+      this.undergroundByType.get(type)?.tilesPerSecond ??
+      null
+    );
+  }
+
   /** How this kind of building sweeps, or null if it is not a radar (C23). */
   radarFor(type: EntityType): RadarConfig | null {
     return this.radarByType.get(type) ?? null;

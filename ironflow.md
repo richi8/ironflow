@@ -875,6 +875,7 @@ the renderer.
 | Item representation | `{ itemId: number; pos: number }` in a per-tile ring | Belt items are **not** entities. Do not give them ids, do not put them in the `EntityStore`. |
 | Curves | Belt direction is per-tile; a curve is inferred by the renderer from neighbours | Simulation stays direction-only; the art sheet's curve sprite is a render concern. |
 | Underground belts | Tech unlock, C23 | High layout-decision value per unit of complexity. A pair of entities with a validated span. |
+| Carries the player | **Yes**, at the belt's own `tilesPerSecond` *(added 2026-09-22)* | The belt family is walkable, and a conveyor you can stand on that does not move you reads as one that is switched off. It adds to the walk rather than replacing it, so walking with a belt is fast and walking against it is slow — 4 tiles/s against 2 leaves 2. The speed is read from the same content number the items on it visibly use, so the two can never disagree. |
 
 ### Throughput
 
@@ -6930,9 +6931,15 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 `splitter`, `underground_belt` — does not block the player. Everything else
 does. It is a `walkable` flag on the building definition rather than a rule in
 the player system, so adding one is a line of content and no system has to
-learn the names of the buildings it applies to (§19 rule 18). The player is
-*not* carried along by a belt they stand on; that is a gameplay decision nobody
-has made yet, and it would be a change to §9 rather than to this flag.
+learn the names of the buildings it applies to (§19 rule 18).
+
+**And they carry the player**, at the same `tilesPerSecond` their items move
+at — §9's table has the decision. That speed is *derived* from the three
+configs that already state one rather than being a fourth content field:
+`carrySpeedFor` asks `beltFor`, `splitterFor` and `undergroundFor` in turn, so
+a belt cannot carry the player at a speed its own items disagree with. The two
+questions stay separate all the same — a walkable floor that does not move is
+a building this plan does not have yet but could.
 
 Hand-craftable without a machine (so a new game is never soft-locked):
 `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they need.

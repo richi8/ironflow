@@ -6,6 +6,7 @@
  * ```text
  * move   one step in the held direction, per axis, blocked by terrain and by
  *        buildings that are not walkable
+ * ride   one step along the belt under the player's feet, if there is one
  * mine   one tick of progress toward the next item, or a reason to stop
  * ```
  *
@@ -29,11 +30,13 @@
 
 import type { EntityStore } from '../entities/entity-store.js';
 import type { BuildingRegistry } from '../registries/building-registry.js';
+import { TPS } from '../simulation-clock.js';
 import {
   MINE_TICKS_PER_ITEM,
   MINE_RANGE_TILES,
   PLAYER_RADIUS_SUBTILES,
   PlayerState,
+  SUBTILES_PER_TILE,
   facingFor,
   facingToward,
   stepFor,
@@ -42,7 +45,7 @@ import {
 import type { ItemRegistry } from '../registries/item-registry.js';
 import { resourceItemId } from '../world/resource.js';
 import { isPassable } from '../world/tile.js';
-import { TILE_MAX, TILE_MIN } from '../world/coordinates.js';
+import { DIRECTION_OFFSETS, TILE_MAX, TILE_MIN } from '../world/coordinates.js';
 import type { World } from '../world/world.js';
 
 export interface PlayerSystemOptions {
@@ -72,6 +75,7 @@ export class PlayerSystem {
   /** Phase 8. Movement first, then mining, so reach is judged where they land. */
   tick(): void {
     this.move();
+    this.ride();
     this.mine();
   }
 
@@ -112,6 +116,52 @@ export class PlayerSystem {
     }
     if (step.dy !== 0 && (free || this.canStandAt(player.subX, player.subY + step.dy))) {
       player.subY += step.dy;
+    }
+  }
+
+  /**
+   * One tick of being carried by the belt underfoot.
+   *
+   * A belt the player can stand on and that does not move them reads as a
+   * conveyor that is switched off, so standing on one drifts them along it at
+   * the belt's own speed — the same speed the items on it are visibly moving,
+   * because both come from `tilesPerSecond` in the content table.
+   *
+   * It is applied **after** the walk and adds to it rather than replacing it,
+   * so the two compose the way they do in the genre: walking with the belt is
+   * fast, walking against it is slow, and standing still on one is not
+   * something the player can do. Each axis is still checked against
+   * `canStandAt`, so a belt can carry the player along a wall but never into
+   * it — a belt running into a machine stops being a ride at the last tile
+   * rather than pushing the player inside it.
+   *
+   * The tile under the player's **centre** decides, not the four their box may
+   * touch. A player half on a belt is either on it or not, and the centre is
+   * the half the player is looking at; sampling every touched tile would mean
+   * two belts could each claim a share of them.
+   */
+  private ride(): void {
+    const player = this.player;
+    const entity = this.entities.at(subtileToTile(player.subX), subtileToTile(player.subY));
+    if (entity === undefined) return;
+
+    const tilesPerSecond = this.buildings.carrySpeedFor(entity.type);
+    if (tilesPerSecond === null) return;
+
+    const step = DIRECTION_OFFSETS[entity.rotation];
+    if (step === undefined) return;
+
+    // Rounded to a whole subtile, once, from two content numbers — never
+    // accumulated (§6 R3). At §9's 2 tiles/s this is 16 subtiles a tick,
+    // exactly half a walking step.
+    const carry = Math.round((tilesPerSecond * SUBTILES_PER_TILE) / TPS);
+    if (carry === 0) return;
+
+    if (step.x !== 0 && this.canStandAt(player.subX + step.x * carry, player.subY)) {
+      player.subX += step.x * carry;
+    }
+    if (step.y !== 0 && this.canStandAt(player.subX, player.subY + step.y * carry)) {
+      player.subY += step.y * carry;
     }
   }
 
