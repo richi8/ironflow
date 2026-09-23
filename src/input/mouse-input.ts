@@ -23,6 +23,7 @@ export const BUTTON_RIGHT = 2;
  * both sets are named here rather than written as literals at the call site.
  */
 export const BUTTONS_LEFT = 1;
+export const BUTTONS_RIGHT = 2;
 export const BUTTONS_MIDDLE = 4;
 
 /** `button` on an event where no button changed state, per the DOM spec. */

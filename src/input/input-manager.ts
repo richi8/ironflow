@@ -42,6 +42,7 @@ import { KeyboardInput } from './keyboard-input.js';
 import { DEFAULT_KEYBINDINGS, type InputAction, type KeyBindings } from './keybindings.js';
 import {
   BUTTONS_LEFT,
+  BUTTONS_RIGHT,
   BUTTON_LEFT,
   BUTTON_MIDDLE,
   BUTTON_RIGHT,
@@ -292,11 +293,12 @@ function axisStep(value: number): -1 | 0 | 1 {
 const DRAGGING_CLASS = 'is-dragging';
 
 /**
- * What a left-drag is doing. `tile` covers both mining and placing, because
- * which of the two it is depends on whether a building is held *at the moment
- * each tile is crossed*, not on what was true when the button went down.
+ * What a drag is doing. `tile` is the left button: placing, or feeding a held
+ * material, decided by what is in the hand *at the moment each tile is
+ * crossed*, not by what was held when the button went down. `mine` is the
+ * right button with an empty hand, gathering by hand (2026-09-23).
  */
-type DragKind = 'camera' | 'tile';
+type DragKind = 'camera' | 'tile' | 'mine';
 
 interface Drag {
   readonly pointerId: number;
@@ -365,7 +367,7 @@ export class InputManager {
    * walking speed depend on frame rate.
    */
   private sentMove: { x: number; y: number } = { x: 0, y: 0 };
-  /** True while the left button is held over a tile with an empty hand. */
+  /** True while the right button (or interact) is held over a tile with an empty hand. */
   private mining = false;
 
   /**
@@ -628,7 +630,7 @@ export class InputManager {
       // A line lays nothing on the press: which way the anchor tile should
       // face is not known until the drag has left it. A press that never
       // moves still places one belt, facing the ghost — `endDrag` does it.
-      if (!this.lineDrag) this.actOnTile(this.hovered);
+      if (!this.lineDrag && !this.handEmpty) this.actOnTile(this.hovered);
       return;
     }
 
@@ -650,7 +652,15 @@ export class InputManager {
         return;
       }
       this.selection = null;
-      this.removeAt(this.hovered);
+      // An empty hand on a building demolishes it; on bare ground it gathers
+      // for as long as the button is down, across every tile the drag crosses.
+      if (this.hoveredEntity !== null) {
+        this.removeAt(this.hovered);
+        return;
+      }
+      this.beginDrag(sample, 'mine');
+      this.lastActedTile = null;
+      this.actOnTile(this.hovered);
     }
   }
 
@@ -676,9 +686,9 @@ export class InputManager {
       return;
     }
 
-    // A mine drag. The button may have been released outside the canvas and
-    // the release event lost; `buttons` is the authority on what is still down.
-    if ((sample.buttons & BUTTONS_LEFT) === 0) {
+    // The button may have been released outside the canvas and the release
+    // event lost; `buttons` is the authority on what is still down.
+    if ((sample.buttons & (drag.kind === 'mine' ? BUTTONS_RIGHT : BUTTONS_LEFT)) === 0) {
       this.endDrag();
       this.refreshHover();
       return;
@@ -688,8 +698,12 @@ export class InputManager {
     this.dragOverTile();
   }
 
-  /** What a left-drag does to the tile it is currently over. */
+  /** What a drag does to the tile it is currently over. */
   private dragOverTile(): void {
+    const kind = this.drag?.kind;
+    // A mine drag only mines: something picked up mid-drag waits for the left
+    // button, and a left drag with nothing in hand does nothing to the ground.
+    if (kind === 'mine' ? !this.handEmpty : this.handEmpty && !this.lineDrag) return;
     if (!this.lineDrag) {
       this.actOnTile(this.hovered);
       return;
@@ -759,9 +773,8 @@ export class InputManager {
         this.item = null;
       }
       if (action === 'build.rotate') this.rotateTool();
-      // Picking up a building while mining stops the mining: the two gestures
-      // share the left button, and a held-over mining target would keep ticking
-      // under a ghost the player is now placing.
+      // Dropping everything while mining stops the mining: a held-over mining
+      // target would otherwise keep ticking after the player said "stop".
       if (action === 'selection.clear') this.stopMining();
       // Picking something up from the number row, or turning it, is the moment
       // a keyboard player wants to see where it would go (C30). Only with the
@@ -781,6 +794,11 @@ export class InputManager {
       this.stopMining();
     }
     this.onAction?.(action, phase);
+  }
+
+  /** Nothing held: neither a building nor a material. */
+  private get handEmpty(): boolean {
+    return this.tool === null && this.item === null;
   }
 
   /** Point with the keyboard, if there is a target to point at. */

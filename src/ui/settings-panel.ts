@@ -1,11 +1,10 @@
 /**
- * The game menu: save and load, then sound, size, motion and keys. See
- * ironflow.md C30 tasks 1 and 3.
+ * The settings: sound, size, motion, help and keys. See ironflow.md C30
+ * tasks 1 and 3.
  *
- * It was the settings panel until 2026-09-23, when it became the menu: the
- * MENU button in the HUD and Escape open it, and SAVE & LOAD at its top opens
- * the save menu, which used to be what Escape and the pause button opened.
- * The game pauses while it is open (the composition root's `onMenuVisibility`).
+ * For part of 2026-09-23 this panel was the menu, with SAVE & LOAD at its
+ * top. It is a dialog again, opened by the menu's SETTINGS in the menu's
+ * place (`game-menu.ts`), and the game stays paused behind it.
  *
  * The tenth panel. It changes nothing in the game — every control is a
  * preference, kept in `localStorage` by the composition root (§4 keeps
@@ -59,16 +58,12 @@ export interface SettingsPanelOptions {
   /** Put `code` on `action`, in place of the keys it had. */
   readonly onBind: (action: string, code: string) => void;
   readonly onResetBindings: () => void;
-  /** SAVE & LOAD: open the save menu in this panel's place. */
-  readonly onOpenSaves: () => void;
   readonly onClose: () => void;
 }
 
 /** The words. Central, per C30's out-of-scope line on localisation. */
 const TEXT = Object.freeze({
-  title: 'MENU',
-  game: 'GAME',
-  saves: 'SAVE & LOAD',
+  title: 'SETTINGS',
   sound: 'SOUND',
   volume: 'Volume',
   mute: 'Mute',
@@ -104,7 +99,6 @@ export class SettingsPanel {
   private readonly motion = document.createElement('select');
   private readonly objectives = document.createElement('input');
   private readonly resetButton = document.createElement('button');
-  private readonly savesButton = document.createElement('button');
   private readonly rows = new Map<string, BindingRow>();
   private readonly options: SettingsPanelOptions;
 
@@ -119,7 +113,7 @@ export class SettingsPanel {
     this.root.className = 'if-settings';
     this.root.hidden = true;
     this.root.tabIndex = -1;
-    this.root.setAttribute('aria-label', 'Menu');
+    this.root.setAttribute('aria-label', 'Settings');
 
     const head = document.createElement('div');
     head.className = 'if-inventory__head';
@@ -129,7 +123,7 @@ export class SettingsPanel {
     this.closeButton.type = 'button';
     this.closeButton.className = 'if-inspector__close';
     this.closeButton.title = 'Close (Esc)';
-    this.closeButton.setAttribute('aria-label', 'Close the menu');
+    this.closeButton.setAttribute('aria-label', 'Close the settings');
     this.closeButton.textContent = '×';
     this.closeButton.addEventListener('click', this.handleClose);
     head.append(createIcon('settings'), title, this.closeButton);
@@ -181,7 +175,6 @@ export class SettingsPanel {
   destroy(): void {
     this.stopCapture();
     this.closeButton.removeEventListener('click', this.handleClose);
-    this.savesButton.removeEventListener('click', this.handleSaves);
     this.volume.removeEventListener('input', this.handleVolume);
     this.mute.removeEventListener('change', this.handleMute);
     this.scale.removeEventListener('change', this.handleScale);
@@ -196,14 +189,6 @@ export class SettingsPanel {
   private createGeneral(view: SettingsView): HTMLElement {
     const column = document.createElement('div');
     column.className = 'if-settings__column';
-
-    column.append(heading(TEXT.game));
-    this.savesButton.type = 'button';
-    this.savesButton.className = 'if-saves__action';
-    this.savesButton.textContent = TEXT.saves;
-    this.savesButton.title = 'Save, load, import and export factories';
-    this.savesButton.addEventListener('click', this.handleSaves);
-    column.append(this.savesButton);
 
     column.append(heading(TEXT.sound));
     this.volume.type = 'range';
@@ -285,8 +270,6 @@ export class SettingsPanel {
   }
 
   private readonly handleClose = (): void => this.options.onClose();
-
-  private readonly handleSaves = (): void => this.options.onOpenSaves();
 
   private readonly handleVolume = (): void => {
     const value = this.volume.valueAsNumber;

@@ -95,13 +95,13 @@ describe('the game as main.ts starts it', () => {
     expect(panel.hidden).toBe(true);
 
     query<HTMLButtonElement>('.if-hud__menu').click();
-    expect(query<HTMLElement>('.if-settings').hidden).toBe(false);
-    const button = [...document.querySelectorAll<HTMLButtonElement>('.if-settings button')].find(
+    expect(query<HTMLElement>('.if-menu').hidden).toBe(false);
+    const button = [...document.querySelectorAll<HTMLButtonElement>('.if-menu button')].find(
       (candidate) => candidate.textContent === 'SAVE & LOAD',
     );
     button?.click();
     expect(panel.hidden).toBe(false);
-    expect(query<HTMLElement>('.if-settings').hidden).toBe(true);
+    expect(query<HTMLElement>('.if-menu').hidden).toBe(true);
     expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(true);
 
     escape();
@@ -109,7 +109,7 @@ describe('the game as main.ts starts it', () => {
     expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(false);
 
     escape();
-    expect(query<HTMLElement>('.if-settings').hidden).toBe(false);
+    expect(query<HTMLElement>('.if-menu').hidden).toBe(false);
     expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(true);
     escape();
     expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(false);

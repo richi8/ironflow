@@ -53,7 +53,7 @@ export const OBJECTIVES: readonly ObjectiveDefinition[] = Object.freeze([
   {
     id: 'mine-iron',
     text: 'Mine 20 iron ore',
-    hint: 'Hold left-click on the blue-grey ore. Keyboard: walk up to it and hold Enter.',
+    hint: 'Hold right-click on the blue-grey ore. Keyboard: walk up to it and hold Enter.',
     goal: { kind: 'carried', itemId: 'iron_ore' },
     target: 20,
   },

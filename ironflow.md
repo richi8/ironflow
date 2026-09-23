@@ -1317,9 +1317,10 @@ to arrange. What each change means:
   below, it paused into the save menu)*. It is caught on `window` in the
   capture phase, so it also works from the save menu's name field.
 - **The menu, and a smaller HUD and hotbar** *(2026-09-23, on request)*.
-  - The settings panel is now **the menu** (title MENU). Its first row is
-    **SAVE & LOAD**, which opens the save menu in its place. The HUD's **MENU**
-    button (settings icon plus the word) and Escape open it.
+  - ~~The settings panel is now **the menu** (title MENU). Its first row is
+    **SAVE & LOAD**, which opens the save menu in its place.~~ The HUD's
+    **MENU** button (settings icon plus the word) and Escape open it.
+    *Superseded by "The menu is three buttons" below.*
   - **The menu pauses the game.** §8's pause behind the save dialog now
     covers the menu too: `GameUI` reports `onMenuVisibility` once when the
     menu or the save menu comes up and once when both are gone, and the
@@ -1350,6 +1351,31 @@ to arrange. What each change means:
   the hand. `GameController.pipette` decides, and `Cursor.setBuildRotation`
   turns the tool. The input layer only reports the key (`build.pipette`),
   because it may not read the bag (§4).
+- **The menu is three buttons; settings are their own dialog**
+  *(2026-09-23, on request)*. The menu (`ui/game-menu.ts`, `.if-menu`) is
+  **NEW GAME**, **SAVE & LOAD** and **SETTINGS**. SAVE & LOAD opens the save
+  menu in its place, as before; SETTINGS opens the settings panel (title
+  SETTINGS, no GAME section) the same way. The pause covers all three:
+  `isMenuOpen` is the menu, the save menu or the settings. MENU or Escape
+  with either dialog open closes it rather than going back to the menu.
+  - **NEW GAME** takes two clicks, like DELETE (the first arms it for
+    `DELETE_ARM_MS`), because it throws away the factory on screen. The
+    composition root builds `newSimulation()` — the same fixed `WORLD_SEED`
+    and starter kit as a first boot — and swaps it in through `play`, the
+    half of `applyLoadedState` that re-points the game, controller, renderer
+    and sound at a world. The new world belongs to no slot
+    (`setCurrentId(null)`), the autosave interval restarts, and the hotbar
+    goes back to its default. `GameUI` shows NEW GAME only when given
+    `onNewGame`.
+- **Hand mining is the right button** *(2026-09-23, on request)*. With an
+  empty hand, a right press on bare ground starts a `mine` drag: one
+  `mineTile` per tile crossed and `stopMining` on release, which is what the
+  left button did from C04 to here. A right press on a building still
+  demolishes it, and with something held it still puts it down. The left
+  button with an empty hand selects a machine or clears the selection and
+  touches the ground no more. Enter still mines what is in front of the
+  player. C04 task 5's and C10 task 4's "left-click" read "right-click" from
+  here.
 - **The map is `M` only.** Tab opened it too for a day. It was unbound
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.
@@ -2984,7 +3010,8 @@ described but never scheduled.
    direction vector. Movement is simulated, not interpolated in the renderer —
    the player's position is authoritative because build range depends on it.
 3. Terrain collision: water and building footprints block movement.
-4. `mineTile` command: hold left-click on a resource tile within reach
+4. `mineTile` command: hold left-click *(right-click since 2026-09-23;
+   see §13)* on a resource tile within reach
    (**6 tiles**) to mine at 0.5 items/s into the player inventory, with a
    progress ring in the overlay layer.
 5. **Build range.** Placement requires the target within 8 tiles of the player.

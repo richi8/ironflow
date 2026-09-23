@@ -365,7 +365,7 @@ export class InventoryPanel {
     this.bag.addEventListener('keydown', this.handleCellKey);
 
     this.bagEmpty.className = 'if-inventory__empty';
-    this.bagEmpty.textContent = 'Nothing yet. Hold left-click on ore to mine it, or face it and hold Enter.';
+    this.bagEmpty.textContent = 'Nothing yet. Hold right-click on ore to mine it, or face it and hold Enter.';
 
     column.append(this.bag, this.bagEmpty);
     return column;

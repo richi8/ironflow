@@ -14,7 +14,7 @@ import {
   type TilePicker,
 } from '../../src/input/input-manager.js';
 import { DEFAULT_KEYBINDINGS, rebind, type InputAction } from '../../src/input/keybindings.js';
-import { BUTTONS_LEFT, BUTTONS_MIDDLE, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT } from '../../src/input/mouse-input.js';
+import { BUTTONS_LEFT, BUTTONS_MIDDLE, BUTTONS_RIGHT, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT } from '../../src/input/mouse-input.js';
 
 /**
  * The input layer. See ironflow.md C04.
@@ -310,9 +310,9 @@ describe('hover', () => {
 });
 
 describe('commands', () => {
-  it('enqueues one mineTile per click, at the hovered tile', () => {
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
-    canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 82, button: BUTTON_LEFT }));
+  it('enqueues one mineTile per right click, at the hovered tile', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: BUTTONS_RIGHT }));
+    canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 82, button: BUTTON_RIGHT }));
 
     // The release is a command too: mining is a *held* action, so the
     // simulation has to be told the button came up (C10 task 4).
@@ -320,23 +320,31 @@ describe('commands', () => {
   });
 
   it('enqueues once per tile crossed by a drag, however many events arrive', () => {
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_RIGHT, buttons: BUTTONS_RIGHT }));
     // Sixty moves across three tiles: the cap (§7) is a backstop, the
     // de-duplication is the plan, and this is the plan being tested.
     for (let i = 0; i < 60; i++) {
-      canvas.dispatchEvent(pointerEvent('pointermove', { x: 5 + i * 0.5, y: 5, buttons: BUTTONS_LEFT }));
+      canvas.dispatchEvent(pointerEvent('pointermove', { x: 5 + i * 0.5, y: 5, buttons: BUTTONS_RIGHT }));
     }
-    canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 5, button: BUTTON_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerup', { x: 35, y: 5, button: BUTTON_RIGHT }));
 
     expect(queuedTiles()).toEqual(['0,0', '1,0', '2,0', '3,0', 'stopMining']);
   });
 
   it('stops the drag when the button is no longer down', () => {
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_RIGHT, buttons: BUTTONS_RIGHT }));
     canvas.dispatchEvent(pointerEvent('pointermove', { x: 15, y: 5, buttons: 0 }));
     canvas.dispatchEvent(pointerEvent('pointermove', { x: 25, y: 5, buttons: 0 }));
 
     expect(queuedTiles()).toEqual(['0,0', 'stopMining']);
+  });
+
+  it('does not mine on the left button', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 5, y: 5, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointermove', { x: 25, y: 5, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerup', { x: 25, y: 5, button: BUTTON_LEFT }));
+
+    expect(queuedTiles()).toEqual([]);
   });
 
   it('enqueues nothing at all for a camera drag', () => {
@@ -359,7 +367,7 @@ describe('commands', () => {
     });
     input.attach();
 
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: BUTTONS_RIGHT }));
 
     // The command is waiting, nothing has happened, and no reason has been
     // produced — because no tick has run.
@@ -466,8 +474,8 @@ describe('the build tool', () => {
     expect(queued()).toEqual(['build miner 3,8 r0']);
   });
 
-  it('leaves the empty hand mining, which is C10s job', () => {
-    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+  it('leaves the empty hand mining on the right button, which is C10s job', () => {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: BUTTONS_RIGHT }));
     expect(queued()).toEqual(['mineTile 3,8']);
   });
 
@@ -529,7 +537,8 @@ describe('the build tool', () => {
     expect(queued()).toEqual([]);
   });
 
-  it('demolishes on the right button when the hand is empty', () => {
+  it('demolishes on the right button when the hand is empty and a building is there', () => {
+    picker.entitiesAt.set('3,8', 7);
     canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
     expect(queued()).toEqual(['remove 3,8']);
   });

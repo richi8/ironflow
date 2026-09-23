@@ -47,11 +47,12 @@
  *
  * ## Escape opens the menu, and closes things
  *
- * The menu is the settings panel with SAVE & LOAD at its top (2026-09-23).
- * The HUD's MENU button and Escape open it, and the game pauses behind it and
- * the save menu it opens (`onMenuVisibility`; §8). The HUD's clock says PAUSED
- * while it is. There is no pause key. Until 2026-09-23 the pause button, P and
- * Escape all opened the save menu instead.
+ * The menu is NEW GAME, SAVE & LOAD and SETTINGS (`game-menu.ts`,
+ * 2026-09-23). The HUD's MENU button and Escape open it, and the game pauses
+ * behind it and behind the save menu and the settings it opens
+ * (`onMenuVisibility`; §8). The HUD's clock says PAUSED while it is. There is
+ * no pause key. Earlier on 2026-09-23 the settings panel was the menu, and
+ * before that the pause button, P and Escape all opened the save menu.
  *
  * Escape backs out one layer at a time, the way the genre does:
  *
@@ -74,6 +75,7 @@
 import type { GameController } from '../game/game-controller.js';
 import type { MapPoint } from '../game/views/map-view.js';
 
+import { GameMenu } from './game-menu.js';
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
 import { activateRoleButtons } from './keyboard.js';
@@ -87,10 +89,10 @@ import { SettingsPanel, type MotionChoice, type SettingsView } from './settings-
 import { Toolbar } from './toolbar.js';
 
 /** The panels that open in the middle of the screen, one at a time. */
-type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings';
+type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings' | 'menu';
 
 /** Their roots, for focus (C30). */
-const PANEL_SELECTOR = '.if-inventory, .if-research, .if-map, .if-saves, .if-settings';
+const PANEL_SELECTOR = '.if-inventory, .if-research, .if-map, .if-saves, .if-settings, .if-menu';
 
 /** §13's HUD rate: counters, power, research. */
 export const HUD_HZ = 5;
@@ -150,6 +152,11 @@ export interface GameUIOptions {
    * LOAD is one open. The composition root pauses behind it (§8).
    */
   readonly onMenuVisibility?: (open: boolean) => void;
+  /**
+   * The menu's NEW GAME (2026-09-23): replace the running world with a new
+   * one. Omitted, the menu has no NEW GAME.
+   */
+  readonly onNewGame?: () => void;
 }
 
 /** What the settings panel reads and asks for (C30). */
@@ -210,6 +217,8 @@ export class GameUI {
   private readonly saves: SaveBridge | null;
   private readonly settingsBridge: SettingsBridge | null;
   private readonly settings: SettingsPanel | null;
+  /** The menu. Only with settings: without them, the save menu is the menu. */
+  private readonly menu: GameMenu | null;
   private readonly objectivesBridge: ObjectivesBridge | null;
   private readonly objectives: ObjectivesPanel;
   /** Objectives met so far, in the order they were met. See `refreshObjectives`. */
@@ -255,8 +264,24 @@ export class GameUI {
               bridge.onResetBindings();
               this.refreshSettings();
             },
-            onOpenSaves: () => this.toggleSaveMenu(),
             onClose: () => this.toggleSettings(),
+          });
+    const onNewGame = options.onNewGame;
+    this.menu =
+      bridge === null
+        ? null
+        : new GameMenu({
+            ...(onNewGame === undefined
+              ? {}
+              : {
+                  onNewGame: () => {
+                    this.closeOthers(null);
+                    onNewGame();
+                  },
+                }),
+            onOpenSaves: () => this.toggleSaveMenu(),
+            onOpenSettings: () => this.toggleSettings(),
+            onClose: () => this.toggleMenu(),
           });
 
     this.hud = new Hud({
@@ -370,6 +395,7 @@ export class GameUI {
     this.research.mount(this.root, this.controller.getResearchView());
     this.map.mount(this.root);
     this.saveMenu.mount(this.root);
+    this.menu?.mount(this.root);
     if (this.settings !== null && this.settingsBridge !== null) {
       this.settings.mount(this.root, this.settingsBridge.view());
     }
@@ -495,17 +521,28 @@ export class GameUI {
   /**
    * Open or close the menu: the HUD's MENU button and Escape. See the header.
    * A UI mounted without settings has no menu panel, and its menu is the save
-   * menu alone. Closing the save menu this way counts too, since the menu is
-   * where it was opened from.
+   * menu alone. With the save menu or the settings open, it closes them, since
+   * the menu is where they were opened from.
    */
   toggleMenu(): boolean {
-    if (this.settings === null || this.saveMenu.isOpen()) return this.toggleSaveMenu();
-    return this.toggleSettings();
+    if (this.menu === null) return this.toggleSaveMenu();
+    if (this.saveMenu.isOpen() || this.isSettingsOpen()) {
+      this.closeOthers(null);
+      return false;
+    }
+    const open = this.setGameMenuOpen(!this.menu.isOpen());
+    if (open) this.closeOthers('menu');
+    return open;
   }
 
-  /** Is the menu, or the save menu it opens, on screen? */
+  /** Is the menu, or a dialog it opens, on screen? */
   isMenuOpen(): boolean {
-    return this.isSettingsOpen() || this.saveMenu.isOpen();
+    return this.menu?.isOpen() === true || this.isSettingsOpen() || this.saveMenu.isOpen();
+  }
+
+  /** Is the menu itself on screen, rather than a dialog it opened? For the tests. */
+  isGameMenuOpen(): boolean {
+    return this.menu?.isOpen() === true;
   }
 
   /**
@@ -521,7 +558,8 @@ export class GameUI {
       this.inventory.isOpen() ||
       this.research.isOpen() ||
       this.map.isOpen() ||
-      this.settings?.isOpen() === true;
+      this.settings?.isOpen() === true ||
+      this.menu?.isOpen() === true;
     this.closeOthers(null);
     return open;
   }
@@ -613,6 +651,7 @@ export class GameUI {
     if (keep !== 'map' && this.map.isOpen()) this.setMapOpen(false);
     if (keep !== 'saves' && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     if (keep !== 'settings' && this.settings?.isOpen() === true) this.setSettingsOpen(false);
+    if (keep !== 'menu' && this.menu?.isOpen() === true) this.setGameMenuOpen(false);
   }
 
   /** Is the map on screen? For the composition root and the tests. */
@@ -637,6 +676,7 @@ export class GameUI {
     this.notifications.destroy();
     this.objectives.destroy();
     this.settings?.destroy();
+    this.menu?.destroy();
     this.saveMenu.destroy();
     this.map.destroy();
     this.research.destroy();
@@ -750,6 +790,15 @@ export class GameUI {
     if (open === this.menuReported) return;
     this.menuReported = open;
     this.onMenuVisibility?.(open);
+  }
+
+  /** Show or hide the menu itself (2026-09-23). */
+  private setGameMenuOpen(open: boolean): boolean {
+    if (this.menu === null) return false;
+    this.menu.setOpen(open);
+    this.syncMenu();
+    this.focusPanel('.if-menu', open);
+    return open;
   }
 
   /** Show or hide the settings, repainting on the way in (C30). */

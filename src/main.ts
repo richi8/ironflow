@@ -978,6 +978,27 @@ async function bootstrap(): Promise<void> {
     const loaded = deserialize(state);
     milestones.load = performance.now() - started;
     milestones.worldgen = null;
+    play(loaded, hotbar);
+    origin = 'loaded';
+  }
+
+  /**
+   * The menu's NEW GAME (2026-09-23): a brand-new world, played the way a
+   * loaded one is. It belongs to no slot, so the next manual save is a new
+   * one and the autosave interval starts again.
+   */
+  function startNewGame(): void {
+    const fresh = timedNewSimulation();
+    milestones.load = null;
+    play(fresh, null);
+    origin = 'new';
+    saves.setCurrentId(null);
+    autosave.reset();
+    publishSaves();
+  }
+
+  /** Put a world on screen in place of the one there. Load's and NEW GAME's shared half. */
+  function play(loaded: Simulation, hotbar: readonly (string | null)[] | null): void {
     simulation = loaded;
     syncProfiler();
     game.replaceSimulation(loaded);
@@ -990,7 +1011,6 @@ async function bootstrap(): Promise<void> {
     renderer.invalidate();
     renderEntities = describeEntities(loaded.entities, loaded.buildings, renderSeconds);
     centreOnPlayer();
-    origin = 'loaded';
     // A different world's counters: without this the load itself would be
     // heard as a thousand buildings going down (C30).
     heardNextId = loaded.entities.nextId;
@@ -1091,6 +1111,7 @@ async function bootstrap(): Promise<void> {
     // §8's pause behind a modal dialog, extended to the whole menu
     // (2026-09-23): Escape opens it, and the game waits. Remembered rather
     // than toggled, so closing it does not start a game paused some other way.
+    onNewGame: () => startNewGame(),
     onMenuVisibility: (open) => {
       if (open) {
         pausedByMenu = !game.isPaused();

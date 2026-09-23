@@ -196,7 +196,9 @@ interface UiHarness {
   readonly progress: ObjectiveProgress[];
 }
 
-function mountUi(options: { objectives?: ObjectiveProgress; settings?: boolean } = {}): UiHarness {
+function mountUi(
+  options: { objectives?: ObjectiveProgress; settings?: boolean; onNewGame?: () => void } = {},
+): UiHarness {
   const simulation = new Simulation({ world: new World(createPlaygroundGenerator()) });
   simulation.inventory.add('iron_ore', 30);
   simulation.inventory.add('chest', 5);
@@ -225,6 +227,7 @@ function mountUi(options: { objectives?: ObjectiveProgress; settings?: boolean }
           },
         }
       : {}),
+    ...(options.onNewGame === undefined ? {} : { onNewGame: options.onNewGame }),
   });
   ui.mount();
   return { root, ui, controller, simulation, progress };
@@ -336,7 +339,6 @@ describe('rebinding', () => {
       onObjectives: () => {},
       onBind: (action, code) => binds.push([action, code]),
       onResetBindings: () => {},
-      onOpenSaves: () => {},
       onClose: () => {},
     });
     panel.mount(document.body, SETTINGS_VIEW);
@@ -381,27 +383,59 @@ describe('rebinding', () => {
     expect(ui.isSettingsOpen()).toBe(false);
   });
 
-  it('is the menu Escape opens, and SAVE & LOAD opens the save menu from it', () => {
+  it('is opened from the menu, in its place', () => {
+    const { root, ui } = mountUi({ settings: true });
+    ui.toggleMenu();
+    menuButton(root, 'SETTINGS')?.click();
+    expect(ui.isSettingsOpen()).toBe(true);
+    expect(ui.isGameMenuOpen()).toBe(false);
+    expect(ui.isMenuOpen()).toBe(true);
+    expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+function menuButton(root: HTMLElement, text: string): HTMLButtonElement | undefined {
+  return [...root.querySelectorAll<HTMLButtonElement>('.if-menu button')].find((button) => button.textContent === text);
+}
+
+describe('the menu', () => {
+  it('is what Escape opens, and SAVE & LOAD opens the save menu from it', () => {
     const { root, ui, controller } = mountUi({ settings: true });
     const escape = (): void => void window.dispatchEvent(key('keydown', 'Escape', { key: 'Escape' }));
 
     escape();
-    expect(ui.isSettingsOpen()).toBe(true);
+    expect(ui.isGameMenuOpen()).toBe(true);
+    expect(ui.isSettingsOpen()).toBe(false);
     expect(ui.isSaveMenuOpen()).toBe(false);
     expect(controller.isPaused()).toBe(false);
     expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('true');
 
-    const saves = [...root.querySelectorAll<HTMLButtonElement>('.if-settings button')].find(
-      (button) => button.textContent === 'SAVE & LOAD',
-    );
-    saves?.click();
+    menuButton(root, 'SAVE & LOAD')?.click();
     expect(ui.isSaveMenuOpen()).toBe(true);
-    expect(ui.isSettingsOpen()).toBe(false);
+    expect(ui.isGameMenuOpen()).toBe(false);
     expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('true');
 
     escape();
     expect(ui.isSaveMenuOpen()).toBe(false);
     expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('starts a new game on the second click of NEW GAME, and closes', () => {
+    let started = 0;
+    const { root, ui } = mountUi({ settings: true, onNewGame: () => void started++ });
+    ui.toggleMenu();
+
+    menuButton(root, 'NEW GAME')?.click();
+    expect(started).toBe(0);
+    menuButton(root, 'NEW GAME? Click again')?.click();
+    expect(started).toBe(1);
+    expect(ui.isMenuOpen()).toBe(false);
+  });
+
+  it('has no NEW GAME when nothing can start one', () => {
+    const { root, ui } = mountUi({ settings: true });
+    ui.toggleMenu();
+    expect(menuButton(root, 'NEW GAME')).toBeUndefined();
   });
 });
 
