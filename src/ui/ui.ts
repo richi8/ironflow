@@ -45,19 +45,20 @@
  * finishes, and §8's "pause the loop outright when a modal save/load dialog is
  * open" means there are no lanes running behind it anyway.
  *
- * ## Pause is the game menu, and Escape closes things
+ * ## Escape opens the menu, and closes things
  *
- * Pausing — the HUD's button, or P — opens the save menu, which is the game
- * menu for now; §8 already pauses the loop behind it, and closing it resumes.
- * A pause with nothing on screen to say why was a state a player could get
- * into by accident and not see the way out of.
+ * The menu is the settings panel with SAVE & LOAD at its top (2026-09-23).
+ * The HUD's MENU button and Escape open it; it does not pause. P pauses, and
+ * the HUD's clock says PAUSED while it is. The save menu opens from the menu
+ * (or F2), and §8 still pauses the loop behind it. Until 2026-09-23 the pause
+ * button, P and Escape all opened the save menu instead.
  *
  * Escape backs out one layer at a time, the way the genre does:
  *
  * ```text
- *   a panel is open                  close it (the game menu: and play on)
+ *   a panel is open                  close it
  *   a building, material or machine is held    let the input layer drop it
- *   nothing                          pause into the game menu
+ *   nothing                          open the menu
  * ```
  *
  * It is caught on `window` in the capture phase so that it works with the
@@ -215,8 +216,6 @@ export class GameUI {
   private liveAccumulatorMs = 0;
   /** The map's own lane while paused. See `update`. */
   private pausedMapAccumulatorMs = 0;
-  /** Wall time since the HUD last read a snapshot, so it can measure a rate. */
-  private hudElapsedMs = 0;
   private mounted = false;
 
   constructor(options: GameUIOptions) {
@@ -246,11 +245,12 @@ export class GameUI {
               bridge.onResetBindings();
               this.refreshSettings();
             },
+            onOpenSaves: () => this.toggleSaveMenu(),
             onClose: () => this.toggleSettings(),
           });
 
     this.hud = new Hud({
-      onTogglePause: () => this.togglePauseMenu(),
+      onToggleMenu: () => this.toggleMenu(),
       // C22. The RESEARCH tile has shown a dash since C07 with nothing behind
       // it; making it the way in is why the panel is findable without reading
       // a keybinding list — the same argument the ITEMS tile makes.
@@ -265,11 +265,6 @@ export class GameUI {
       onAssignSlot: (slot, itemId) => this.controller.assignSlot(slot, itemId),
       onClearSlot: (slot) => this.controller.clearSlot(slot),
       onMoveSlot: (from, to) => this.controller.moveSlot(from, to),
-      onToggleInventory: () => this.toggleInventory(),
-      onToggleResearch: () => this.toggleResearch(),
-      onToggleMap: () => this.toggleMap(),
-      onToggleSaveMenu: () => this.toggleSaveMenu(),
-      onToggleSettings: () => this.toggleSettings(),
     });
     this.inspector = new Inspector({
       // The panel names an item and a count; which machine that means is the
@@ -454,7 +449,6 @@ export class GameUI {
     this.pausedMapAccumulatorMs = 0;
 
     this.hudAccumulatorMs += frameMs;
-    this.hudElapsedMs += frameMs;
     if (this.hudAccumulatorMs >= HUD_INTERVAL_MS) {
       // Modulo rather than zero: a long frame owes one update, not none, and
       // keeping the remainder is what holds the average at exactly 5 Hz
@@ -489,11 +483,19 @@ export class GameUI {
   }
 
   /**
-   * Pause into the game menu, or close it and play on. The HUD's pause button
-   * and P. See the header.
+   * Open or close the menu: the HUD's MENU button and Escape. See the header.
+   * A UI mounted without settings has no menu panel, and its menu is the save
+   * menu alone. Closing the save menu this way counts too, since the menu is
+   * where it was opened from.
    */
-  togglePauseMenu(): boolean {
-    return this.toggleSaveMenu();
+  toggleMenu(): boolean {
+    if (this.settings === null || this.saveMenu.isOpen()) return this.toggleSaveMenu();
+    return this.toggleSettings();
+  }
+
+  /** Is the menu, or the save menu it opens, on screen? */
+  isMenuOpen(): boolean {
+    return this.isSettingsOpen() || this.saveMenu.isOpen();
   }
 
   /**
@@ -650,7 +652,7 @@ export class GameUI {
       ) {
         return;
       }
-      this.togglePauseMenu();
+      this.toggleMenu();
     }
     event.preventDefault();
     event.stopPropagation();
@@ -666,7 +668,6 @@ export class GameUI {
    */
   private setInventoryOpen(open: boolean): boolean {
     this.inventory.setOpen(open);
-    this.toolbar.setInventoryOpen(open);
     if (open) this.refreshInventory();
     this.focusPanel('.if-inventory', open);
     return open;
@@ -687,7 +688,6 @@ export class GameUI {
    */
   private setResearchOpen(open: boolean): boolean {
     this.research.setOpen(open);
-    this.toolbar.setResearchOpen(open);
     if (open) this.refreshResearch();
     this.focusPanel('.if-research', open);
     return open;
@@ -707,7 +707,6 @@ export class GameUI {
    */
   private setMapOpen(open: boolean): boolean {
     this.map.setOpen(open);
-    this.toolbar.setMapOpen(open);
     if (open) this.refreshMap();
     this.focusPanel('.if-map', open);
     return open;
@@ -728,7 +727,7 @@ export class GameUI {
   private setSaveMenuOpen(open: boolean): boolean {
     if (this.saveMenu.isOpen() === open) return open;
     this.saveMenu.setOpen(open);
-    this.toolbar.setSaveMenuOpen(open);
+    this.hud.setMenuOpen(this.isMenuOpen());
     this.saves?.onVisibility(open);
     this.focusPanel('.if-saves', open);
     return open;
@@ -738,7 +737,7 @@ export class GameUI {
   private setSettingsOpen(open: boolean): boolean {
     if (this.settings === null) return false;
     this.settings.setOpen(open);
-    this.toolbar.setSettingsOpen(open);
+    this.hud.setMenuOpen(this.isMenuOpen());
     if (open) this.refreshSettings();
     this.focusPanel('.if-settings', open);
     return open;
@@ -813,8 +812,6 @@ export class GameUI {
   }
 
   private refreshHud(): void {
-    const elapsed = this.hudElapsedMs;
-    this.hudElapsedMs = 0;
-    this.hud.update(this.controller.getHudView(), elapsed);
+    this.hud.update(this.controller.getHudView());
   }
 }

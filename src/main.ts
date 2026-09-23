@@ -368,6 +368,9 @@ async function bootstrap(): Promise<void> {
   // while it is open, so the game ticks with no timer at all unless somebody
   // asks — which is C28's "zero-cost when disabled" without a build flag.
   const overlay = new DebugOverlay(uiRoot, false);
+  /** The overlay's tick-rate sample: the tick and the time at its last repaint. */
+  let tickSample: { tick: number; at: number } | null = null;
+  let ticksPerSecond = 0;
 
   /**
    * Performance numbers measured once, or once per event (C28). Written where
@@ -627,8 +630,9 @@ async function bootstrap(): Promise<void> {
       return;
     }
     if (action === 'game.togglePause') {
-      // Pausing is opening the game menu, which pauses behind it (§8).
-      ui.togglePauseMenu();
+      // A plain pause (2026-09-23): the menu no longer comes with it. Not while
+      // the save menu holds the game paused itself (§8) — closing it resumes.
+      if (!ui.isSaveMenuOpen()) controller.togglePause();
       return;
     }
     if (action === 'ui.toggleSettings') {
@@ -877,6 +881,16 @@ async function bootstrap(): Promise<void> {
 
       rows.section('session');
       rows.row('tick', String(simulation.getTick()));
+      // Moved here from the HUD on 2026-09-23: ticks per second, measured over
+      // wall time between repaints, because the simulation has no clock (§6 R1).
+      const now = performance.now();
+      const tick = simulation.getTick();
+      if (tickSample !== null && now > tickSample.at) {
+        ticksPerSecond = ((tick - tickSample.tick) * 1000) / (now - tickSample.at);
+      }
+      tickSample = { tick, at: now };
+      const speed = controller.getSpeed();
+      rows.row('tps', speed === 1 ? ticksPerSecond.toFixed(1) : `${ticksPerSecond.toFixed(1)} (x${speed})`);
       rows.row('size', `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`);
       // C19: the seed is the first thing to check when a map looks wrong,
       // and it is not necessarily the one `WORLD_SEED` asked for.

@@ -120,8 +120,9 @@ export type InputAction =
    */
   | 'ui.toggleSaveMenu'
   /**
-   * Pause into the game menu, or close it and play on (C07, §8). The menu is
-   * the save menu for now; the loop is held still behind it.
+   * Pause, or play on (C07, §8). Until 2026-09-23 this opened the save menu,
+   * which holds the loop still behind it; now the menu is Escape's, and P
+   * only pauses.
    */
   | 'game.togglePause'
   /**
@@ -182,8 +183,8 @@ export const ACTION_LABELS: Readonly<Record<InputAction, string>> = Object.freez
   'ui.toggleMap': 'Map',
   'ui.toggleAltMode': 'Show what machines make',
   'ui.toggleSaveMenu': 'Save menu',
-  'ui.toggleSettings': 'Settings',
-  'game.togglePause': 'Pause / game menu',
+  'ui.toggleSettings': 'Menu',
+  'game.togglePause': 'Pause',
   'game.speedUp': 'Game speed up',
   'game.speedDown': 'Game speed down',
   'debug.toggleOverlay': 'Debug overlay',

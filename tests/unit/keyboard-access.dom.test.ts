@@ -325,6 +325,7 @@ describe('rebinding', () => {
       onObjectives: () => {},
       onBind: (action, code) => binds.push([action, code]),
       onResetBindings: () => {},
+      onOpenSaves: () => {},
       onClose: () => {},
     });
     panel.mount(document.body, SETTINGS_VIEW);
@@ -367,6 +368,29 @@ describe('rebinding', () => {
     expect(ui.isSettingsOpen()).toBe(true);
     window.dispatchEvent(key('keydown', 'Escape', { key: 'Escape' }));
     expect(ui.isSettingsOpen()).toBe(false);
+  });
+
+  it('is the menu Escape opens, and SAVE & LOAD opens the save menu from it', () => {
+    const { root, ui, controller } = mountUi({ settings: true });
+    const escape = (): void => void window.dispatchEvent(key('keydown', 'Escape', { key: 'Escape' }));
+
+    escape();
+    expect(ui.isSettingsOpen()).toBe(true);
+    expect(ui.isSaveMenuOpen()).toBe(false);
+    expect(controller.isPaused()).toBe(false);
+    expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('true');
+
+    const saves = [...root.querySelectorAll<HTMLButtonElement>('.if-settings button')].find(
+      (button) => button.textContent === 'SAVE & LOAD',
+    );
+    saves?.click();
+    expect(ui.isSaveMenuOpen()).toBe(true);
+    expect(ui.isSettingsOpen()).toBe(false);
+    expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('true');
+
+    escape();
+    expect(ui.isSaveMenuOpen()).toBe(false);
+    expect(root.querySelector('.if-hud__menu')?.getAttribute('aria-pressed')).toBe('false');
   });
 });
 

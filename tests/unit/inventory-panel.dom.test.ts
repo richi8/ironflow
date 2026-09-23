@@ -102,18 +102,12 @@ afterEach(() => {
 });
 
 describe('opening and closing', () => {
-  it('starts closed and opens on the toolbar button', () => {
+  it('starts closed and opens on the call I makes', () => {
     const panel = query<HTMLElement>(harness.root, '.if-inventory');
     expect(panel.hidden).toBe(true);
 
-    const bag = [...harness.root.querySelectorAll<HTMLButtonElement>('.if-toolbar__menu')].find(
-      (button) => button.textContent === 'BAG',
-    );
-    expect(bag).toBeDefined();
-    bag?.click();
-
+    harness.ui.toggleInventory();
     expect(panel.hidden).toBe(false);
-    expect(bag?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('opens on the HUD tile whose number it explains', () => {

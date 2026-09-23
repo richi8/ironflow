@@ -98,19 +98,11 @@ afterEach(() => {
 });
 
 describe('opening and closing', () => {
-  it('opens on the toolbar button and on the HUD tile it explains', () => {
+  it('opens on the HUD tile it explains', () => {
     harness.ui.toggleResearch();
     const panel = query<HTMLElement>(harness.root, '.if-research');
     expect(panel.hidden).toBe(true);
 
-    const tech = [...harness.root.querySelectorAll<HTMLButtonElement>('.if-toolbar__menu')].find(
-      (button) => button.textContent === 'TECH',
-    );
-    tech?.click();
-    expect(panel.hidden).toBe(false);
-    expect(tech?.getAttribute('aria-pressed')).toBe('true');
-
-    harness.ui.toggleResearch();
     const tile = [...harness.root.querySelectorAll<HTMLElement>('.if-hud__tile')].find(
       (element) => element.querySelector('.if-hud__label')?.textContent === 'RESEARCH',
     );

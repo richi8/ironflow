@@ -1,9 +1,12 @@
 /**
  * The hotbar. See ironflow.md C07 task 3 and §13.
  *
- * Nine slots along the bottom, bound to the number row, beside the buttons
- * that open the other panels. What each slot holds is the player's: any
- * item — a building or a material — is dragged onto a slot from the
+ * Nine slots along the bottom, bound to the number row, and nothing else: the
+ * BAG, TECH, MAP, SAVE and settings buttons that sat beside them came off on
+ * 2026-09-23. The bag and the tech tree open from their HUD tiles (and I, T),
+ * the map from M, and saving from the MENU button or Escape.
+ *
+ * What each slot holds is the player's: any item — a building or a material — is dragged onto a slot from the
  * inventory, dragged from one slot to another to swap the two, and taken off
  * with a right-click. A slot is **one stack**, so the same item may fill
  * several. The toolbar only reports those gestures — the controller keeps
@@ -16,8 +19,6 @@
 
 import type { BuildMenuEntry, BuildMenuView, HotbarSlotView } from '../game/views/build-menu-view.js';
 import { HOTBAR_SLOTS } from '../game/game-controller.js';
-
-import { createIcon } from './icons.js';
 
 /**
  * The drag payload for an item on its way to the hotbar: its id. A type of
@@ -43,16 +44,6 @@ export interface ToolbarOptions {
   readonly onClearSlot: (slot: number) => void;
   /** Slot `from`'s item was dropped on slot `to` (both 1-based): swap them. */
   readonly onMoveSlot: (from: number, to: number) => void;
-  /** Open or close the inventory panel (C21A). */
-  readonly onToggleInventory: () => void;
-  /** Open or close the technology tree (C22). */
-  readonly onToggleResearch: () => void;
-  /** Open or close the map (C23). */
-  readonly onToggleMap: () => void;
-  /** Open or close the save menu (C25). */
-  readonly onToggleSaveMenu: () => void;
-  /** Open or close the settings (C30). Optional for the tests that predate it. */
-  readonly onToggleSettings?: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -61,11 +52,6 @@ const ROTATION_LABELS = ['N', 'E', 'S', 'W'] as const;
 export class Toolbar {
   private readonly root = document.createElement('div');
   private readonly slots: Slot[] = [];
-  private readonly bagButton = document.createElement('button');
-  private readonly techButton = document.createElement('button');
-  private readonly mapButton = document.createElement('button');
-  private readonly saveButton = document.createElement('button');
-  private readonly settingsButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -75,53 +61,6 @@ export class Toolbar {
 
   mount(parent: HTMLElement): void {
     this.root.className = 'if-toolbar';
-
-    // Here rather than in the HUD's row of read-outs: a panel the player opens
-    // with their left hand while the right one is on the map — and the bag is
-    // where the hotbar is filled from.
-    this.bagButton.type = 'button';
-    this.bagButton.className = 'if-toolbar__menu';
-    this.bagButton.textContent = 'BAG';
-    this.bagButton.title = 'Open your inventory and craft by hand (I)';
-    this.bagButton.addEventListener('click', this.handleBag);
-    this.root.append(this.bagButton);
-
-    // The third panel that opens from here, for the bag's reason (C22).
-    this.techButton.type = 'button';
-    this.techButton.className = 'if-toolbar__menu';
-    this.techButton.textContent = 'TECH';
-    this.techButton.title = 'Open the technology tree (T)';
-    this.techButton.addEventListener('click', this.handleTech);
-    this.root.append(this.techButton);
-
-    // The fourth, and the one a player reaches for most once the factory has
-    // outgrown the starting patch (C23).
-    this.mapButton.type = 'button';
-    this.mapButton.className = 'if-toolbar__menu';
-    this.mapButton.textContent = 'MAP';
-    this.mapButton.title = 'Open the map (M)';
-    this.mapButton.addEventListener('click', this.handleMap);
-    this.root.append(this.mapButton);
-
-    // The fifth, and the one a player needs to be able to find without having
-    // read a keybinding list — which is the whole argument for the four above
-    // it, and it applies hardest to the panel that keeps their factory.
-    this.saveButton.type = 'button';
-    this.saveButton.className = 'if-toolbar__menu';
-    this.saveButton.textContent = 'SAVE';
-    this.saveButton.title = 'Open the save menu (F2)';
-    this.saveButton.addEventListener('click', this.handleSave);
-    this.root.append(this.saveButton);
-
-    // C30. Sound, size, motion and keys — the things a player changes once
-    // and then forgets, so the button is an icon and the smallest of the six.
-    this.settingsButton.type = 'button';
-    this.settingsButton.className = 'if-toolbar__menu if-toolbar__icon';
-    this.settingsButton.title = 'Settings: sound, size, motion and keys (O)';
-    this.settingsButton.setAttribute('aria-label', 'Settings');
-    this.settingsButton.append(createIcon('settings'));
-    this.settingsButton.addEventListener('click', this.handleSettings);
-    this.root.append(this.settingsButton);
 
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
@@ -148,37 +87,7 @@ export class Toolbar {
     this.rotationLabel.classList.toggle('is-active', held);
   }
 
-  setInventoryOpen(open: boolean): void {
-    this.bagButton.classList.toggle('is-active', open);
-    this.bagButton.setAttribute('aria-pressed', String(open));
-  }
-
-  setResearchOpen(open: boolean): void {
-    this.techButton.classList.toggle('is-active', open);
-    this.techButton.setAttribute('aria-pressed', String(open));
-  }
-
-  setMapOpen(open: boolean): void {
-    this.mapButton.classList.toggle('is-active', open);
-    this.mapButton.setAttribute('aria-pressed', String(open));
-  }
-
-  setSaveMenuOpen(open: boolean): void {
-    this.saveButton.classList.toggle('is-active', open);
-    this.saveButton.setAttribute('aria-pressed', String(open));
-  }
-
-  setSettingsOpen(open: boolean): void {
-    this.settingsButton.classList.toggle('is-active', open);
-    this.settingsButton.setAttribute('aria-pressed', String(open));
-  }
-
   destroy(): void {
-    this.bagButton.removeEventListener('click', this.handleBag);
-    this.techButton.removeEventListener('click', this.handleTech);
-    this.mapButton.removeEventListener('click', this.handleMap);
-    this.saveButton.removeEventListener('click', this.handleSave);
-    this.settingsButton.removeEventListener('click', this.handleSettings);
     for (const slot of this.slots) {
       slot.button.removeEventListener('keydown', this.handleSlotKey);
       slot.button.removeEventListener('click', this.handleSlot);
@@ -191,26 +100,6 @@ export class Toolbar {
     this.root.remove();
     this.slots.length = 0;
   }
-
-  private readonly handleTech = (): void => {
-    this.options.onToggleResearch();
-  };
-
-  private readonly handleMap = (): void => {
-    this.options.onToggleMap();
-  };
-
-  private readonly handleBag = (): void => {
-    this.options.onToggleInventory();
-  };
-
-  private readonly handleSave = (): void => {
-    this.options.onToggleSaveMenu();
-  };
-
-  private readonly handleSettings = (): void => {
-    this.options.onToggleSettings?.();
-  };
 
   /**
    * One listener for all nine slots, reading the slot number off the element.

@@ -214,7 +214,7 @@ body {
   text-align: right;
 }
 
-.if-hud__pause {
+.if-hud__menu {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -230,12 +230,12 @@ body {
   cursor: pointer;
 }
 
-.if-hud__pause:hover {
+.if-hud__menu:hover {
   border-color: var(--if-accent);
   color: var(--if-text);
 }
 
-.if-hud__pause[aria-pressed='true'] {
+.if-hud__menu[aria-pressed='true'] {
   border-color: var(--if-accent);
   background: var(--if-accent-dim);
   color: var(--if-text);
@@ -261,24 +261,6 @@ body {
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 92%, transparent);
   user-select: none;
-}
-
-.if-toolbar__menu {
-  padding: 0 12px;
-  border: 1px solid var(--if-stroke);
-  border-radius: var(--if-radius);
-  background: var(--if-panel-high);
-  color: var(--if-text-muted);
-  font: inherit;
-  font-size: 14px;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-}
-
-.if-toolbar__menu:hover,
-.if-toolbar__menu.is-active {
-  border-color: var(--if-accent);
-  color: var(--if-text);
 }
 
 .if-toolbar__rotation {
@@ -1413,6 +1395,12 @@ body {
   color: var(--if-accent-high);
 }
 
+/* Paused: the clock's label reads PAUSED, in the accent, with no button to say so. */
+.if-hud__tile.is-paused,
+.if-hud__tile.is-paused .if-hud__label {
+  color: var(--if-accent-high);
+}
+
 /* A research card's state as a glyph in front of its name, so researched,
    active, queued and locked differ in shape and not only in border tone. */
 .if-tech[data-state='researched'] .if-tech__name::before {
@@ -1452,13 +1440,6 @@ body {
 
 .if-toast--info > .if-icon {
   color: var(--if-blue-high);
-}
-
-/* The settings button: an icon, square, beside the four words. */
-.if-toolbar__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* -------------------------------------------------------------------------- *

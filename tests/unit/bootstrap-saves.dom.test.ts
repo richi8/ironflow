@@ -90,15 +90,18 @@ describe('the game as main.ts starts it', () => {
     expect(status.classList.contains('is-warn')).toBe(true);
   });
 
-  it('opens the save menu from the toolbar and from F2', () => {
+  it('opens the save menu from the menu and from F2', () => {
     const panel = query<HTMLElement>('.if-saves');
     expect(panel.hidden).toBe(true);
 
-    const button = [...document.querySelectorAll<HTMLButtonElement>('.if-toolbar__menu')].find(
-      (candidate) => candidate.textContent === 'SAVE',
+    query<HTMLButtonElement>('.if-hud__menu').click();
+    expect(query<HTMLElement>('.if-settings').hidden).toBe(false);
+    const button = [...document.querySelectorAll<HTMLButtonElement>('.if-settings button')].find(
+      (candidate) => candidate.textContent === 'SAVE & LOAD',
     );
     button?.click();
     expect(panel.hidden).toBe(false);
+    expect(query<HTMLElement>('.if-settings').hidden).toBe(true);
 
     press('F2');
     expect(panel.hidden).toBe(true);

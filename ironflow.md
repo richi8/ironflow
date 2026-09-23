@@ -1310,15 +1310,33 @@ to arrange. What each change means:
 - **The lock moved.** C22 printed a locked building's technology in the build
   menu. It is now on the hotbar slot: greyed, with the technology named in the
   slot's tooltip.
-- **Pause is the game menu.** The HUD's PAUSE button and `P` open the save
-  menu, which is the game menu for now. §8 already pauses the loop behind it,
-  and closing it resumes. A bare pause with nothing on screen to explain it is
-  gone. `B` is unbound.
-- **Escape backs out one layer at a time.** An open panel closes first (the
-  game menu closing resumes the game). Otherwise, a held building or a
-  selection is dropped by the input layer as before. With nothing to drop,
-  Escape pauses into the game menu. It is caught on `window` in the capture
-  phase, so it also works from the save menu's name field.
+- ~~**Pause is the game menu.**~~ The HUD's PAUSE button and `P` opened the
+  save menu, with §8 pausing the loop behind it. `B` is unbound.
+  *Superseded by "The menu" below.*
+- **Escape backs out one layer at a time.** An open panel closes first.
+  Otherwise, a held building or a selection is dropped by the input layer as
+  before. With nothing to drop, Escape opens the menu *(until the change
+  below, it paused into the save menu)*. It is caught on `window` in the
+  capture phase, so it also works from the save menu's name field.
+- **The menu, and a smaller HUD and hotbar** *(2026-09-23, on request)*.
+  - The settings panel is now **the menu** (title MENU). Its first row is
+    **SAVE & LOAD**, which opens the save menu in its place. The HUD's **MENU**
+    button (settings icon plus the word), Escape and `O` open it. It does not
+    pause the game.
+  - **The pause button is gone.** `P` is a plain pause toggle. While paused,
+    the HUD's TIME tile reads PAUSED in the accent colour. `P` does nothing
+    while the save menu is open, because §8 already holds the loop still
+    behind that menu and closing it resumes. The save menu still opens on
+    `F2` too.
+  - **The hotbar is the nine slots and the facing, and nothing else.** BAG,
+    TECH, MAP, SAVE and the settings icon are gone. The bag and the tech tree
+    open from their HUD tiles and from `I` and `T`. The map opens from `M`.
+  - **The HUD is ITEMS, POWER, RESEARCH, ALERTS and TIME, then MENU.** BUILT
+    and CHUNKS are gone, because the F3 overlay's world section already has
+    both counts. TPS moved to the overlay's session section as `tps`, measured
+    over wall time between repaints. C30's speed marker (`×4`) moved onto the
+    TIME tile. `HudView` still carries `entityCount`, `exploredChunks` and
+    `tick`, but nothing reads them.
 - **The map is `M` only.** Tab opened it too for a day. It was unbound
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.
@@ -7265,7 +7283,8 @@ into a chest untouched. The last is C20's own milestone, read the way
   then the key one. It is the only teaching there is.
 
 **The speed control** is 1x, 2x, 4x and 8x (`GAME_SPEEDS`), stepped with `[`
-and `]` and shown in the HUD's TPS tile only when it is not 1x. It lives in
+and `]` and shown in the HUD's TPS tile only when it is not 1x *(on the TIME
+tile since 2026-09-23, when TPS moved to F3; see §13)*. It lives in
 `SimulationClock` as an integer multiplier, so §8's integer accumulator stays
 exact. The per-frame step cap scales with it, or 8x would be five ticks a
 frame; the 250 ms clamp does not, since that is about real time away. It
@@ -7274,7 +7293,9 @@ frames against 1x for 2N and gets the same tick count. It is not saved.
 
 **Pause** stays what §13 decided on 2026-09-23: the HUD's button (the
 reference sheet's icon) and P open the game menu, and the loop is held behind
-it. C30 added nothing there.
+it. C30 added nothing there. *(Changed later on 2026-09-23: the pause button
+is gone, P only pauses, and Escape opens the settings panel as the menu. See
+§13, "The menu, and a smaller HUD and hotbar".)*
 
 **The close guard** is `beforeunload`, armed whenever the tick has moved since
 the factory last reached storage or a file: a manual save, an export, an

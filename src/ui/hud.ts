@@ -2,9 +2,18 @@
  * The status bar. See ironflow.md C07 task 4, §11 and §13.
  *
  * A row of tiles across the top of the screen, each one icon plus a tabular
- * number, and a pause button at the end. §13 asks for "resources, power,
+ * number, and the MENU button at the end. §13 asks for "resources, power,
  * research progress, tick rate, alerts"; §11 supplies the icon set and §13's
  * budget table says this panel updates at 5 Hz.
+ *
+ * ## What left, 2026-09-23
+ *
+ * BUILT, CHUNKS and TPS were counters a player never acted on. The building
+ * and chunk counts are in the F3 readout's world section already, and the
+ * tick rate moved there too — it is a question about the machine the game is
+ * running on, not about the factory. The pause button went with them: P still
+ * pauses, and the TIME tile says PAUSED while it is. The settings button took
+ * its place as MENU, which Escape also opens.
  *
  * ## The two tiles that had no data, and now have
  *
@@ -21,31 +30,24 @@
  * `is-warning` goes on below full satisfaction, which is C21 task 5's "visible
  * HUD indicator": a factory that has outgrown its generators says so in the
  * corner of the screen continuously, where a toast per machine would not.
- *
- * ## Ticks per second is measured here, not in the simulation
- *
- * `HudView` carries the tick count; the rate is this panel's own difference
- * between two samples divided by the wall time between them. That is
- * deliberately on this side of §6: the rate is a presentation number, the
- * simulation has no clock to derive it from (§6 R1), and the number the player
- * wants to see is "is it keeping up", which is exactly a wall-clock question.
  */
 
 import type { HudView } from '../game/views/hud-view.js';
 
-import { createIcon, setIcon, type IconName } from './icons.js';
+import { createIcon, type IconName } from './icons.js';
 
 /** What a tile says when the thing it reads does not exist yet. */
 const OFFLINE = '—';
 
 interface Tile {
   readonly root: HTMLElement;
+  readonly label: HTMLElement;
   readonly value: HTMLElement;
 }
 
 export interface HudOptions {
-  /** Called when the pause button is pressed. The controller owns the decision. */
-  readonly onTogglePause: () => void;
+  /** Called when the MENU button is pressed. */
+  readonly onToggleMenu: () => void;
   /**
    * Called when the ITEMS tile is pressed (C21A).
    *
@@ -68,20 +70,13 @@ export interface HudOptions {
 export class Hud {
   private readonly root = document.createElement('div');
   private readonly tiles = new Map<string, Tile>();
-  private readonly pauseButton = document.createElement('button');
-  private readonly pauseIcon = createIcon('pause');
-  private readonly pauseLabel = document.createElement('span');
-  private readonly onTogglePause: () => void;
+  private readonly menuButton = document.createElement('button');
+  private readonly onToggleMenu: () => void;
   private readonly onOpenInventory: () => void;
   private readonly onOpenResearch: () => void;
 
-  /** The previous sample, for the measured tick rate. `null` until the second one. */
-  private lastTick: number | null = null;
-  private msSinceSample = 0;
-  private ticksPerSecond = 0;
-
   constructor(options: HudOptions) {
-    this.onTogglePause = options.onTogglePause;
+    this.onToggleMenu = options.onToggleMenu;
     this.onOpenInventory = options.onOpenInventory;
     this.onOpenResearch = options.onOpenResearch;
   }
@@ -91,62 +86,57 @@ export class Hud {
 
     this.addTile('items', 'inventory', 'ITEMS');
     this.makeButton('items', 'ITEMS — open your inventory (I)', this.onOpenInventory);
-    this.addTile('buildings', 'building', 'BUILT');
     this.addTile('power', 'power', 'POWER');
     this.addTile('research', 'research', 'RESEARCH');
     this.makeButton('research', 'RESEARCH — open the technology tree (T)', this.onOpenResearch);
-    this.addTile('map', 'map', 'CHUNKS');
     this.addTile('alerts', 'alert', 'ALERTS');
-    this.addTile('rate', null, 'TPS');
     this.addTile('time', null, 'TIME');
 
-    this.pauseButton.type = 'button';
-    this.pauseButton.className = 'if-hud__pause';
-    this.pauseButton.title = 'Pause and open the game menu (P)';
-    this.pauseLabel.textContent = 'PAUSE';
-    this.pauseButton.append(this.pauseIcon, this.pauseLabel);
-    this.pauseButton.addEventListener('click', this.onTogglePause);
-    this.root.append(this.pauseButton);
+    this.menuButton.type = 'button';
+    this.menuButton.className = 'if-hud__menu';
+    this.menuButton.title = 'Menu: save and load, sound, size, motion and keys (Esc)';
+    const label = document.createElement('span');
+    label.textContent = 'MENU';
+    this.menuButton.append(createIcon('settings'), label);
+    this.menuButton.addEventListener('click', this.onToggleMenu);
+    this.root.append(this.menuButton);
 
     parent.append(this.root);
   }
 
-  /**
-   * Repaint from a snapshot. Assignment only — no element is created here (§13).
-   *
-   * @param elapsedMs wall time since the previous *periodic* update. Zero for an
-   * event-driven repaint, which must not be mistaken for a zero-length frame
-   * and turned into an infinite tick rate.
-   */
-  update(view: HudView, elapsedMs: number): void {
-    this.sampleRate(view.tick, elapsedMs);
-
+  /** Repaint from a snapshot. Assignment only — no element is created here (§13). */
+  update(view: HudView): void {
     this.setValue('items', formatCount(view.itemTotal));
-    this.setValue('buildings', formatCount(view.entityCount));
-    this.setValue('map', formatCount(view.exploredChunks));
     this.setValue('alerts', formatCount(view.alerts));
     this.updatePower(view);
     this.updateResearch(view);
-    // C30's speed control says so where the rate is, and only when it is on:
-    // a factory at 4x that looked like 1x would look broken.
-    this.setValue('rate', view.speed === 1 ? this.ticksPerSecond.toFixed(1) : `${this.ticksPerSecond.toFixed(0)} ×${view.speed}`);
-    const rate = this.tiles.get('rate');
-    if (rate !== undefined) {
-      rate.root.classList.toggle('is-fast', view.speed !== 1);
-      rate.root.title = view.speed === 1 ? 'TPS — ticks per second. [ and ] change the game speed' : `TPS — running at ${view.speed}x speed. [ slows it back down`;
-    }
-    this.setValue('time', formatClock(view.playtimeSeconds));
+    // C30's speed control says so on the clock, and only when it is on: a
+    // factory at 4x that looked like 1x would look broken.
+    this.setValue('time', view.speed === 1 ? formatClock(view.playtimeSeconds) : `${formatClock(view.playtimeSeconds)} ×${view.speed}`);
 
     this.tiles.get('alerts')?.root.classList.toggle('is-warning', view.alerts > 0);
     this.root.classList.toggle('is-paused', view.paused);
-    setIcon(this.pauseIcon, view.paused ? 'play' : 'pause');
-    const label = view.paused ? 'PAUSED' : 'PAUSE';
-    if (this.pauseLabel.textContent !== label) this.pauseLabel.textContent = label;
-    this.pauseButton.setAttribute('aria-pressed', String(view.paused));
+    // With no pause button, the clock is what says the game is stopped.
+    const time = this.tiles.get('time');
+    if (time !== undefined) {
+      const label = view.paused ? 'PAUSED' : 'TIME';
+      if (time.label.textContent !== label) time.label.textContent = label;
+      time.root.classList.toggle('is-paused', view.paused);
+      time.root.classList.toggle('is-fast', view.speed !== 1);
+      time.root.title = view.paused
+        ? 'PAUSED — P resumes'
+        : `TIME — simulated play time${view.speed === 1 ? '' : `, at ${view.speed}x speed`}. P pauses, [ and ] change the speed`;
+    }
+  }
+
+  /** Light the MENU button while the menu, or the save menu it opens, is up. */
+  setMenuOpen(open: boolean): void {
+    this.menuButton.classList.toggle('is-active', open);
+    this.menuButton.setAttribute('aria-pressed', String(open));
   }
 
   destroy(): void {
-    this.pauseButton.removeEventListener('click', this.onTogglePause);
+    this.menuButton.removeEventListener('click', this.onToggleMenu);
     const items = this.tiles.get('items');
     if (items !== undefined) items.root.removeEventListener('click', this.onOpenInventory);
     const research = this.tiles.get('research');
@@ -161,7 +151,7 @@ export class Hud {
    * A `div` with a role rather than a `<button>`, because the tile is laid
    * out by `.if-hud__tile` and its `+` sibling border, and swapping the
    * element would put a second set of button defaults through that rule for
-   * one tile out of eight. The role and the tab stop are what a screen reader
+   * one tile out of five. The role and the tab stop are what a screen reader
    * and a keyboard actually need.
    */
   private makeButton(key: string, title: string, onActivate: () => void): void {
@@ -243,7 +233,7 @@ export class Hud {
 
     root.append(name, value);
     this.root.append(root);
-    this.tiles.set(key, { root, value });
+    this.tiles.set(key, { root, label: name, value });
   }
 
   private setValue(key: string, text: string): void {
@@ -254,21 +244,6 @@ export class Hud {
     if (tile.value.textContent !== text) tile.value.textContent = text;
   }
 
-  private sampleRate(tick: number, elapsedMs: number): void {
-    if (elapsedMs <= 0) return;
-    this.msSinceSample += elapsedMs;
-    const previous = this.lastTick;
-    if (previous === null) {
-      this.lastTick = tick;
-      this.msSinceSample = 0;
-      return;
-    }
-    if (this.msSinceSample < 250) return;
-
-    this.ticksPerSecond = ((tick - previous) * 1000) / this.msSinceSample;
-    this.lastTick = tick;
-    this.msSinceSample = 0;
-  }
 }
 
 /** Kilowatts, or megawatts once there are enough of them to read badly. */

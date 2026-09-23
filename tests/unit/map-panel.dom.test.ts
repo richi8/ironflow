@@ -171,18 +171,12 @@ afterEach(() => {
 });
 
 describe('the panel', () => {
-  it('is mounted shut, and opens from the toolbar and from M alike', () => {
+  it('is mounted shut, and opens and closes from M', () => {
     expect(panel().hidden).toBe(true);
-    query<HTMLButtonElement>(harness.root, '.if-toolbar__menu[aria-label], .if-toolbar');
 
-    const button = [...harness.root.querySelectorAll<HTMLButtonElement>('.if-toolbar__menu')].find(
-      (element) => element.textContent === 'MAP',
-    );
-    expect(button).toBeDefined();
-    button?.click();
+    harness.ui.toggleMap();
     expect(panel().hidden).toBe(false);
     expect(harness.ui.isMapOpen()).toBe(true);
-    expect(button?.getAttribute('aria-pressed')).toBe('true');
 
     // The same call the `ui.toggleMap` keybinding makes in `main.ts`.
     harness.ui.toggleMap();

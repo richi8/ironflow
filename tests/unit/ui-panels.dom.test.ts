@@ -133,8 +133,16 @@ describe('mounting', () => {
   it('has no build menu: building starts from the hotbar or the bag', () => {
     const { root } = harness;
     expect(root.querySelector('.if-build-menu')).toBeNull();
-    const labels = [...root.querySelectorAll('.if-toolbar__menu')].map((button) => button.textContent);
-    expect(labels).not.toContain('BUILD');
+    // The hotbar is slots and a facing, and nothing that opens a panel.
+    expect(root.querySelectorAll('.if-toolbar button:not(.if-slot)').length).toBe(0);
+  });
+
+  it('keeps the HUD to what a player acts on, and a MENU button', () => {
+    const { root } = harness;
+    const labels = [...root.querySelectorAll('.if-hud__label')].map((label) => label.textContent);
+    expect(labels).toEqual(['ITEMS', 'POWER', 'RESEARCH', 'ALERTS', 'TIME']);
+    expect(query<HTMLButtonElement>(root, '.if-hud__menu').textContent).toBe('MENU');
+    expect(root.querySelector('.if-hud__pause')).toBeNull();
   });
 
   it('starts with the hand empty', () => {
@@ -305,13 +313,18 @@ describe('the toolbar drives the game through commands only', () => {
 });
 
 describe('pause and Escape', () => {
-  it('pauses into the game menu, and plays on when it closes', () => {
-    const { root, ui } = harness;
-    query<HTMLButtonElement>(root, '.if-hud__pause').click();
+  it('opens the menu from MENU without pausing; with no settings, the menu is the save menu', () => {
+    const { root, ui, controller } = harness;
+    const menu = query<HTMLButtonElement>(root, '.if-hud__menu');
+    menu.click();
     expect(ui.isSaveMenuOpen()).toBe(true);
+    expect(menu.getAttribute('aria-pressed')).toBe('true');
+    // Pausing behind the save menu is the composition root's (§8), not the UI's.
+    expect(controller.isPaused()).toBe(false);
 
-    ui.togglePauseMenu();
+    ui.toggleMenu();
     expect(ui.isSaveMenuOpen()).toBe(false);
+    expect(menu.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('closes whichever panel is open on Escape, and only that', () => {
@@ -330,7 +343,7 @@ describe('pause and Escape', () => {
     }
   });
 
-  it('lets Escape through to drop what is held, and pauses when nothing is', () => {
+  it('lets Escape through to drop what is held, and opens the menu when nothing is', () => {
     const { ui, controller } = harness;
     const press = (): KeyboardEvent => {
       const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
@@ -347,7 +360,7 @@ describe('pause and Escape', () => {
     expect(press().defaultPrevented).toBe(true);
     expect(ui.isSaveMenuOpen()).toBe(true);
 
-    // And Escape again closes the game menu.
+    // And Escape again closes the menu.
     press();
     expect(ui.isSaveMenuOpen()).toBe(false);
   });
@@ -414,7 +427,7 @@ describe('the update budget', () => {
     observer.disconnect();
 
     expect(hudFrames).toBe(HUD_HZ);
-    expect(tileValue(root, 'TPS')).not.toBe('—');
+    expect(tileValue(root, 'TIME')).not.toBe('—');
   });
 
   it('ages a toast on the live lane, at 10 Hz', () => {
@@ -442,7 +455,7 @@ describe('the update budget', () => {
     // The HUD still repainted once, on the pause event, and said so: that is
     // the one panel that has to update while both lanes are stopped.
     expect(query<HTMLElement>(root, '.if-hud').classList.contains('is-paused')).toBe(true);
-    expect(query<HTMLElement>(root, '.if-hud__pause').textContent).toContain('PAUSED');
+    expect(tileValue(root, 'PAUSED')).not.toBe('');
 
     const records: MutationRecord[] = [];
     const observer = new MutationObserver((batch) => records.push(...batch));
