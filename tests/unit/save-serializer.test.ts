@@ -18,6 +18,7 @@ import { GENERATOR_VERSION } from '../../src/game/world/world-generator.js';
 import { World, type ChunkGenerator } from '../../src/game/world/world.js';
 
 import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
+import { stacked } from '../fixtures/chest.js';
 
 /**
  * The save format and the serializer, at unit scale. C24 tasks 1–3 and 5.
@@ -107,7 +108,7 @@ describe('what a save writes as a number, and what it writes as a name', () => {
   it('leaves an entity that is not a machine exactly as it was', () => {
     const simulation = sandbox();
     const chest = simulation.entities.create<ChestEntity>(newChest(3, 3, NORTH));
-    chest.contents = [[simulation.items.idOf('coal'), 11]];
+    chest.contents = stacked(simulation, [[simulation.items.idOf('coal'), 11]]);
 
     const state = serialize(simulation);
     expect(state.entities[0]).toEqual({ ...chest });
@@ -375,13 +376,13 @@ describe('the loaded world does not share memory with the saved one', () => {
   it('gives a chest its own contents array', () => {
     const simulation = sandbox();
     const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
-    chest.contents = [[simulation.items.idOf('coal'), 2]];
+    chest.contents = stacked(simulation, [[simulation.items.idOf('coal'), 2]]);
 
     const loaded = reload(simulation);
     const restored = loaded.entities.byType<ChestEntity>(EntityType.Chest)[0];
     if (restored === undefined) throw new Error('the chest did not come back.');
-    restored.contents[0] = [restored.contents[0]?.[0] ?? 0, 99];
-    expect(chest.contents[0]?.[1]).toBe(2);
+    restored.contents[0] = [0, restored.contents[0]?.[1] ?? 0, 99];
+    expect(chest.contents[0]?.[2]).toBe(2);
   });
 
   it('gives a loaded world its own world chunks', () => {

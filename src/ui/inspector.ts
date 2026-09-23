@@ -60,7 +60,10 @@ import type {
 } from '../game/views/building-view.js';
 import type { RecipeView } from '../game/views/recipe-view.js';
 
+import type { InventoryCellView } from '../game/views/inventory-view.js';
+
 import { createIcon } from './icons.js';
+import { CELL_DRAG_TYPE, decodeCell, encodeCell, type CellRef } from './inventory.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
 
 /** Buffer lines drawn per section. See the file header. */
@@ -141,6 +144,12 @@ export interface InspectorOptions {
   readonly onTake: (itemId: string, count: number) => void;
   /** Put up to `count` of `itemId` from the bag into the inspected machine. */
   readonly onDeposit: (itemId: string, count: number) => void;
+  /**
+   * A stack dropped on slot `to` of the inspected chest, from the bag or from
+   * the chest itself; or, for `to: null`, a chest stack clicked to send it to
+   * the bag (2026-09-23).
+   */
+  readonly onMoveStack: (from: CellRef, to: CellRef | null) => void;
   /** Make `recipeId`, or `null` to make nothing at all (C16 task 3). */
   readonly onSetRecipe: (recipeId: string | null) => void;
   /** Stop inspecting. */
@@ -171,6 +180,15 @@ export class Inspector {
    */
   private readonly slotSection = document.createElement('div');
   private readonly slotRows: SlotRow[] = [];
+
+  /**
+   * A chest's grid (2026-09-23), drawn like the bag. Its cells are built the
+   * first time a chest of that size is shown and reused after, for the recipe
+   * grid's reason: the count is content, and only changes with the building.
+   */
+  private readonly storageSection = document.createElement('div');
+  private readonly storageGrid = document.createElement('div');
+  private storageCells: HTMLElement[] = [];
 
   /** The MAKING line, for a machine that chooses its own recipe. */
   private readonly makingRow = document.createElement('div');
@@ -311,6 +329,14 @@ export class Inspector {
       this.slotSection.append(row.root);
     }
 
+    this.storageSection.className = 'if-inspector__section if-inspector__storage';
+    this.storageSection.hidden = true;
+    const storageLabel = document.createElement('div');
+    storageLabel.className = 'if-inspector__label';
+    storageLabel.textContent = 'CONTENTS';
+    this.storageGrid.className = 'if-bag if-chest-grid';
+    this.storageSection.append(storageLabel, this.storageGrid);
+
     const where = document.createElement('div');
     where.className = 'if-inspector__where';
     const whereLabel = document.createElement('span');
@@ -329,6 +355,7 @@ export class Inspector {
       this.powerRow,
       this.recipeSection,
       this.slotSection,
+      this.storageSection,
       this.inputs.root,
       this.outputs.root,
       where,
@@ -387,7 +414,9 @@ export class Inspector {
     this.fillSlots(view.slots, view.inReach);
     // A building with slots shows its inputs there; the list is for the rest.
     this.fill(this.inputs, view.slots === null ? view.inputs : NO_STACKS, view.inReach);
-    this.fill(this.outputs, view.outputs, view.inReach);
+    // A chest's contents are its grid; the list is for everything else.
+    this.fillStorage(view);
+    this.fill(this.outputs, view.storage === null ? view.outputs : NO_STACKS, view.inReach);
 
     setText(this.whereValue, `${view.x}, ${view.y}`);
   }
@@ -405,6 +434,7 @@ export class Inspector {
       row.root.removeEventListener('drop', this.handleSlotDrop);
     }
     this.slotRows.length = 0;
+    this.clearStorage();
     this.clearRecipes();
     this.root.remove();
   }
@@ -662,6 +692,112 @@ export class Inspector {
     }
   }
 
+  /** Paint a chest's grid, building the cells only when the slot count changes. */
+  private fillStorage(view: MachineView): void {
+    const cells = view.storage;
+    this.storageSection.hidden = cells === null;
+    this.root.classList.toggle('is-wide', cells !== null);
+    if (cells === null) return;
+    if (this.storageCells.length !== cells.length) {
+      this.clearStorage();
+      for (let i = 0; i < cells.length; i++) this.storageGrid.append(this.createStorageCell(i));
+    }
+    cells.forEach((cell, index) => {
+      const element = this.storageCells[index];
+      if (element !== undefined) paintStorageCell(element, cell, view.inReach);
+    });
+  }
+
+  private createStorageCell(index: number): HTMLElement {
+    const root = document.createElement('div');
+    root.className = 'if-bag-cell is-empty';
+    root.dataset['index'] = String(index);
+    root.tabIndex = 0;
+    root.setAttribute('role', 'button');
+    const name = document.createElement('span');
+    name.className = 'if-bag-cell__name';
+    const count = document.createElement('span');
+    count.className = 'if-bag-cell__count';
+    root.append(name, count);
+    root.addEventListener('click', this.handleStorageClick);
+    root.addEventListener('dragstart', this.handleStorageDragStart);
+    root.addEventListener('dragover', this.handleStorageDragOver);
+    root.addEventListener('dragleave', this.handleSlotDragLeave);
+    root.addEventListener('drop', this.handleStorageDrop);
+    this.storageCells.push(root);
+    return root;
+  }
+
+  private clearStorage(): void {
+    for (const cell of this.storageCells) {
+      cell.removeEventListener('click', this.handleStorageClick);
+      cell.removeEventListener('dragstart', this.handleStorageDragStart);
+      cell.removeEventListener('dragover', this.handleStorageDragOver);
+      cell.removeEventListener('dragleave', this.handleSlotDragLeave);
+      cell.removeEventListener('drop', this.handleStorageDrop);
+    }
+    this.storageCells = [];
+    this.storageGrid.replaceChildren();
+  }
+
+  /** The chest slot an event is on, or null. */
+  private storageRef(event: Event): CellRef | null {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement) || this.view === null) return null;
+    const slot = Number(target.dataset['index']);
+    return Number.isInteger(slot) ? { entityId: this.view.id, slot } : null;
+  }
+
+  /** A click on a chest stack sends it to the bag. */
+  private readonly handleStorageClick = (event: Event): void => {
+    const ref = this.storageRef(event);
+    const target = event.currentTarget;
+    if (ref === null || !(target instanceof HTMLElement) || target.classList.contains('is-empty')) return;
+    this.options.onMoveStack(ref, null);
+  };
+
+  private readonly handleStorageDragStart = (event: DragEvent): void => {
+    const ref = this.storageRef(event);
+    const target = event.currentTarget;
+    const itemId = target instanceof HTMLElement ? target.dataset['item'] : undefined;
+    if (ref === null || itemId === undefined || event.dataTransfer === null) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData(CELL_DRAG_TYPE, encodeCell(ref));
+    event.dataTransfer.setData(ITEM_DRAG_TYPE, itemId);
+    event.dataTransfer.effectAllowed = 'copyMove';
+  };
+
+  /** A stack from the bag or this chest, or an item from the hotbar. */
+  private readonly handleStorageDragOver = (event: DragEvent): void => {
+    const types = event.dataTransfer?.types;
+    if (types === undefined) return;
+    const list = Array.from(types);
+    if (!list.includes(CELL_DRAG_TYPE) && !list.includes(ITEM_DRAG_TYPE)) return;
+    event.preventDefault();
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.add('is-drop-target');
+  };
+
+  private readonly handleStorageDrop = (event: DragEvent): void => {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) target.classList.remove('is-drop-target');
+    const to = this.storageRef(event);
+    if (to === null) return;
+    const from = decodeCell(event.dataTransfer?.getData(CELL_DRAG_TYPE) ?? '');
+    if (from !== null) {
+      event.preventDefault();
+      if (from.entityId !== to.entityId || from.slot !== to.slot) this.options.onMoveStack(from, to);
+      return;
+    }
+    // From the hotbar: an item with no slot of its own. As much as the chest
+    // takes goes in, by the chest's own fill order.
+    const itemId = event.dataTransfer?.getData(ITEM_DRAG_TYPE) ?? '';
+    if (itemId === '') return;
+    event.preventDefault();
+    this.options.onDeposit(itemId, Number.MAX_SAFE_INTEGER);
+  };
+
   /** Point a section's rows at `stacks`, hiding the ones it does not need. */
   private fill(section: Section, stacks: readonly MachineStack[], inReach: boolean): void {
     section.root.hidden = stacks.length === 0;
@@ -682,6 +818,28 @@ export class Inspector {
       row.take.disabled = !inReach || stack.count === 0;
     }
   }
+}
+
+/** One chest slot, painted the way the bag paints its own. */
+function paintStorageCell(element: HTMLElement, cell: InventoryCellView, inReach: boolean): void {
+  const name = element.querySelector<HTMLElement>('.if-bag-cell__name');
+  const count = element.querySelector<HTMLElement>('.if-bag-cell__count');
+  if (name === null || count === null) return;
+  if (cell.itemId === null) {
+    setText(name, '');
+    setText(count, '');
+    delete element.dataset['item'];
+    element.draggable = false;
+    element.classList.add('is-empty');
+    element.title = 'Empty — drag a stack here from your bag';
+    return;
+  }
+  setText(name, cell.name);
+  setText(count, String(cell.count));
+  if (element.dataset['item'] !== cell.itemId) element.dataset['item'] = cell.itemId;
+  element.draggable = inReach;
+  element.classList.remove('is-empty');
+  element.title = `${cell.name} — ${cell.count} / ${cell.stackSize}. Click to take it, or drag it to a slot.`;
 }
 
 /** No list: a building whose inputs are drawn as slots instead. */

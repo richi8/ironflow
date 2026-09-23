@@ -199,7 +199,7 @@ describe('prototype pollution', () => {
 describe('ids this build does not have', () => {
   it('refuses an unknown item id in a container', () => {
     const chest = entityPath(valid(), EntityType.Chest);
-    expect(reason(broken([`${chest}.contents`, [[9999, 1]]]))).toMatch(/item 9999, which this build has no item for/);
+    expect(reason(broken([`${chest}.contents`, [[0, 9999, 1]]]))).toMatch(/item 9999, which this build has no item for/);
   });
 
   it('refuses an item number whose name this build has dropped', () => {
@@ -208,7 +208,7 @@ describe('ids this build does not have', () => {
     // chest, because nothing could ever look it up again.
     const chest = entityPath(valid(), EntityType.Chest);
     expect(
-      reason(broken(['state.itemIdMap.unobtainium', 900], [`${chest}.contents`, [[900, 3]]])),
+      reason(broken(['state.itemIdMap.unobtainium', 900], [`${chest}.contents`, [[0, 900, 3]]])),
     ).toMatch(/item 900, which this build has no item for/);
   });
 
@@ -306,7 +306,7 @@ describe('numbers that are not numbers', () => {
   it('refuses a count that is not a count', () => {
     const chest = entityPath(valid(), EntityType.Chest);
     for (const count of [0, -4, 1.5]) {
-      expect(reason(broken([`${chest}.contents`, [[1, count]]]))).toMatch(/a count in|an item id in/);
+      expect(reason(broken([`${chest}.contents`, [[0, 1, count]]]))).toMatch(/a count in|an item id in/);
     }
   });
 
@@ -319,9 +319,9 @@ describe('capacities', () => {
   it('refuses a chest holding more than its slots', () => {
     const save = valid();
     const chest = entityPath(save, EntityType.Chest);
-    expect(reason(broken([`${chest}.contents`, [[itemId(save, 'iron_ore'), 1_000_000]]]))).toMatch(
-      /needs \d+ slots of \d+/,
-    );
+    // A grid (2026-09-23): a slot past the chest's last, and a stack past a stack.
+    expect(reason(broken([`${chest}.contents`, [[999, itemId(save, 'iron_ore'), 1]]]))).toMatch(/a slot in/);
+    expect(reason(broken([`${chest}.contents`, [[0, itemId(save, 'iron_ore'), 1_000_000]]]))).toMatch(/a count in/);
   });
 
   it('refuses a furnace buffer above its ceiling', () => {
@@ -330,12 +330,12 @@ describe('capacities', () => {
     expect(reason(broken([`${furnace}.input`, [[itemId(save, 'iron_ore'), 100_000]]]))).toMatch(/that buffer holds/);
   });
 
-  it('refuses an inventory that lists an item twice', () => {
+  it('refuses an inventory that lists a slot twice', () => {
     const save = valid();
     const chest = entityPath(save, EntityType.Chest);
     const id = itemId(save, 'iron_plate');
     expect(
-      reason(broken([`${chest}.contents`, [[id, 2], [id, 3]]])),
+      reason(broken([`${chest}.contents`, [[4, id, 2], [4, id, 3]]])),
     ).toMatch(/must ascend and never repeat/);
   });
 

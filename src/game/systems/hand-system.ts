@@ -50,7 +50,9 @@
 
 import type { EntityStore } from '../entities/entity-store.js';
 import { forEachFootprintTile, type Entity } from '../entities/entity.js';
+import { asChest } from '../entities/chest-entity.js';
 import { asMachine } from '../entities/machine-entity.js';
+import { GridInventory } from '../items/inventory.js';
 import type { CommandRejectionReason, EntityId } from '../commands/command.js';
 import {
   handSourceOf,
@@ -309,6 +311,67 @@ export class HandSystem {
       const moved = this.player.inventory.add(itemId, Math.min(buffers.input.count(itemId), room));
       if (moved > 0) buffers.input.take(itemId, moved);
     }
+    return null;
+  }
+
+  /**
+   * The grid a `moveStack` names: the player's bag for `null`, or a chest the
+   * player can reach. A reason instead when there is no such grid.
+   */
+  private gridOf(entityId: EntityId | null): GridInventory | CommandRejectionReason {
+    if (entityId === null) return this.player.inventory;
+    const entity = this.entities.get(entityId);
+    if (entity === undefined) return 'unknown_entity';
+    if (!this.canReach(entity)) return 'out_of_reach';
+    const storage = this.buildings.storageFor(entity.type);
+    const chest = asChest(entity);
+    if (storage === null || chest === null) return 'not_accepted';
+    return new GridInventory({ slots: storage.slots, stackSizeOf: this.items.stackSizeOf, entries: chest.contents });
+  }
+
+  /**
+   * Move a stack between two grids, or within one (2026-09-23). See the
+   * `moveStack` command for the rules; `GridInventory` carries them out.
+   *
+   * Nothing is created or lost: a merge moves what fits and leaves the rest
+   * in the slot it came from, and a swap exchanges two stacks that each fit a
+   * slot already, because a stack is never more than its item's stack size.
+   */
+  moveStack(
+    fromEntity: EntityId | null,
+    from: number,
+    toEntity: EntityId | null,
+    to: number | null,
+  ): CommandRejectionReason | null {
+    const source = this.gridOf(fromEntity);
+    if (typeof source === 'string') return source;
+    const target = fromEntity === toEntity ? source : this.gridOf(toEntity);
+    if (typeof target === 'string') return target;
+
+    const moving = source.cellAt(from);
+    if (moving === null) return 'empty_slot';
+
+    if (to === null) {
+      if (source === target) return null;
+      const moved = target.add(moving[0], moving[1]);
+      if (moved === 0) return 'inventory_full';
+      source.takeFromSlot(from, moved);
+      return null;
+    }
+    if (!target.isSlot(to)) return 'empty_slot';
+    if (source === target) {
+      source.move(from, to);
+      return null;
+    }
+
+    const there = target.cellAt(to);
+    if (there === null || there[0] === moving[0]) {
+      const moved = target.putIntoSlot(to, moving[0], moving[1]);
+      source.takeFromSlot(from, moved);
+      return null;
+    }
+    target.setSlot(to, moving);
+    source.setSlot(from, there);
     return null;
   }
 

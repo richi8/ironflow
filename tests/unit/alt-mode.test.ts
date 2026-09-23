@@ -80,9 +80,11 @@ describe('describeAnnotations', () => {
   it('names what a chest holds most of, with the count', () => {
     const simulation = new Simulation({ world: world() });
     const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
+    // Gears in two stacks: the badge totals them.
     chest.contents = [
-      [simulation.items.idOf('iron_plate'), 4],
-      [simulation.items.idOf('gear'), 17],
+      [0, simulation.items.idOf('iron_plate'), 4],
+      [1, simulation.items.idOf('gear'), 10],
+      [5, simulation.items.idOf('gear'), 7],
     ];
 
     const [badge] = annotate(simulation);

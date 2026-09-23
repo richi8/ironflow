@@ -14,6 +14,7 @@ import { EAST, NORTH, SOUTH } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
+import { heldIn, stacked } from '../fixtures/chest.js';
 
 /**
  * §17's third required integration chain: **miner → belt → inserter → chest**
@@ -112,7 +113,7 @@ function run(simulation: Simulation, ticks: number): void {
 /** How much iron ore is in the chest. */
 function stored(chest: ChestEntity, simulation: Simulation): number {
   const iron = simulation.items.idOf('iron_ore');
-  return chest.contents.find((entry) => entry[0] === iron)?.[1] ?? 0;
+  return heldIn(chest.contents, iron);
 }
 
 /** Everything riding a belt anywhere in the world. */
@@ -164,7 +165,7 @@ describe('miner -> belt -> inserter -> chest', () => {
     const { simulation, miner, inserter, chest } = buildChain();
     const iron = simulation.items.idOf('iron_ore');
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
-    chest.contents = [[iron, slots * simulation.items.get('iron_ore').stackSize]];
+    chest.contents = stacked(simulation, [[iron, slots * simulation.items.get('iron_ore').stackSize]]);
 
     const capacity = simulation.buildings.miningFor(miner.type)?.bufferCapacity ?? 0;
     // Long enough for the block to reach back through the inserter, fill five

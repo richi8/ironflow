@@ -476,8 +476,12 @@ function annotationItem(
   if (chest !== null) {
     // The one it holds most of, and ties go to the lower item id so the badge
     // does not flicker between two equal stacks as they fill.
+    // Totalled per item first: since chests became grids, one item can be
+    // several stacks.
+    const totals = new Map<number, number>();
+    for (const entry of chest.contents) totals.set(entry[1], (totals.get(entry[1]) ?? 0) + entry[2]);
     let best: readonly [number, number] | null = null;
-    for (const entry of chest.contents) {
+    for (const entry of [...totals].sort((a, b) => a[0] - b[0])) {
       if (best === null || entry[1] > best[1]) best = entry;
     }
     if (best === null || !items.isItemId(best[0])) return null;

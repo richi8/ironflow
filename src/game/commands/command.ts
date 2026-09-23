@@ -66,12 +66,21 @@ export type Command =
   /** Drop the order at `index` in the hand-craft queue and refund it (C21A). */
   | { readonly type: 'cancelCraft'; readonly index: number }
   /**
-   * Move the stack in bag slot `from` to slot `to` (both 0-based). Added
-   * 2026-09-23, when the bag gained positions. Onto an empty slot it moves,
-   * onto the same item it merges what fits, onto anything else it swaps —
-   * see `GridInventory.move`. A command because the arrangement is state.
+   * Move the stack in slot `from` of one grid to slot `to` of another, or of
+   * the same one. Added 2026-09-23, when the bag gained positions; chests
+   * joined it the same day. A grid is the player's bag (`null`) or a chest
+   * (its entity id). Onto an empty slot the stack moves, onto the same item
+   * it merges what fits, onto anything else the two swap. `to: null` means
+   * "wherever it fits", by the grid's own fill order — a click that sends a
+   * stack across. A command because the arrangement is state.
    */
-  | { readonly type: 'moveStack'; readonly from: number; readonly to: number }
+  | {
+      readonly type: 'moveStack';
+      readonly fromEntity: EntityId | null;
+      readonly from: number;
+      readonly toEntity: EntityId | null;
+      readonly to: number | null;
+    }
   | { readonly type: 'movePlayer'; readonly dx: number; readonly dy: number }
   | { readonly type: 'mineTile'; readonly x: number; readonly y: number }
   /**
@@ -263,9 +272,10 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
       if (!isName(command.recipeId)) return 'malformed';
       return isCount(command.count) ? null : 'malformed';
     case 'moveStack':
-      return Number.isInteger(command.from) && command.from >= 0 && Number.isInteger(command.to) && command.to >= 0
-        ? null
-        : 'malformed';
+      if (command.fromEntity !== null && !isEntityId(command.fromEntity)) return 'malformed';
+      if (command.toEntity !== null && !isEntityId(command.toEntity)) return 'malformed';
+      if (!Number.isInteger(command.from) || command.from < 0) return 'malformed';
+      return command.to === null || (Number.isInteger(command.to) && command.to >= 0) ? null : 'malformed';
     case 'cancelCraft':
       // Zero is the order being made right now, so this is the one index in
       // the game that is allowed to be it.

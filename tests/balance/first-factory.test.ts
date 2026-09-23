@@ -14,6 +14,7 @@ import { ResourceType } from '../../src/game/world/resource.js';
 import { createStartingWorld, WORLD_SPAWN } from '../../src/game/world/starting-area.js';
 import { isBuildable } from '../../src/game/world/tile.js';
 import type { World } from '../../src/game/world/world.js';
+import { heldIn } from '../fixtures/chest.js';
 
 /**
  * How long a new game takes to automate something. C20 task 3's acceptance.
@@ -419,15 +420,15 @@ function playOpening(bot: Bot): Run {
 
 /** The chest standing on a tile. Throws rather than returning null: a missing
  *  chest means the script is wrong, and a null would be found three lines on. */
-function chestAt(bot: Bot, x: number, y: number): { contents: [number, number][] } {
+function chestAt(bot: Bot, x: number, y: number): { contents: [number, number, number][] } {
   const entity = bot.simulation.entities.at(x, y);
   const chest = entity === undefined ? null : asChest(entity);
   if (chest === null) throw new Error(`no chest at ${x},${y}`);
   return chest;
 }
 
-function held(chest: { contents: [number, number][] }, itemId: number): number {
-  return chest.contents.find((entry) => entry[0] === itemId)?.[1] ?? 0;
+function held(chest: { contents: [number, number, number][] }, itemId: number): number {
+  return heldIn(chest.contents, itemId);
 }
 
 /** Tick, doing nothing, until `done`. Returns the elapsed simulated seconds. */

@@ -212,7 +212,7 @@ describe('what the player is carrying', () => {
       value: { types: [], setData: (type: string, value: string) => (stored[type] = value), effectAllowed: 'none' },
     });
     first.dispatchEvent(start);
-    expect(stored['application/x-ironflow-cell']).toBe('0');
+    expect(stored['application/x-ironflow-cell']).toBe('bag:0');
     expect(stored['application/x-ironflow-item']).toBe('coal');
 
     const target = query<HTMLElement>(harness.root, '.if-bag-cell[data-index="7"]');

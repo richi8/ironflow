@@ -93,7 +93,7 @@ function deliver(simulation: Simulation, y: number, ticks: number): number {
   const chest = asChest(simulation.entities.at(CHEST_X, y) as never);
   expect(chest).not.toBeNull();
   let total = 0;
-  for (const entry of chest?.contents ?? []) total += entry[1];
+  for (const entry of chest?.contents ?? []) total += entry[2];
   return total;
 }
 

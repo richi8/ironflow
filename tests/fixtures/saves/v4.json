@@ -1,0 +1,263 @@
+{
+  "format": "ironflow-save",
+  "version": 4,
+  "metadata": {
+    "name": "Fixture v4",
+    "createdAt": 1767225600000,
+    "playtimeTicks": 960,
+    "thumbnail": null,
+    "hotbar": [
+      "belt",
+      "miner",
+      null,
+      "inserter",
+      "furnace",
+      null,
+      "chest",
+      null,
+      null
+    ]
+  },
+  "state": {
+    "generatorVersion": 1,
+    "seed": 20260924,
+    "rngPosition": 20260924,
+    "tick": 960,
+    "nextEntityId": 10,
+    "itemIdMap": {
+      "assembler": 17,
+      "assembler_2": 26,
+      "belt": 13,
+      "brick": 8,
+      "chest": 18,
+      "circuit": 11,
+      "coal": 3,
+      "copper_ore": 2,
+      "copper_plate": 6,
+      "copper_wire": 10,
+      "data_core": 23,
+      "electric_furnace": 21,
+      "frame": 22,
+      "furnace": 16,
+      "gear": 9,
+      "generator": 19,
+      "inserter": 15,
+      "iron_ore": 1,
+      "iron_plate": 5,
+      "lab": 24,
+      "miner": 12,
+      "miner_2": 25,
+      "power_pole": 20,
+      "radar": 27,
+      "splitter": 14,
+      "steel": 7,
+      "stone": 4,
+      "underground_belt": 28
+    },
+    "player": {
+      "subX": 3480,
+      "subY": 1080,
+      "facing": 1,
+      "moveX": 0,
+      "moveY": 0,
+      "miningX": 15,
+      "miningY": 4,
+      "miningTicks": 46,
+      "inventory": [
+        [
+          0,
+          12,
+          1
+        ],
+        [
+          1,
+          13,
+          37
+        ],
+        [
+          2,
+          15,
+          4
+        ],
+        [
+          3,
+          16,
+          1
+        ],
+        [
+          4,
+          18,
+          2
+        ],
+        [
+          5,
+          3,
+          10
+        ],
+        [
+          6,
+          5,
+          2
+        ]
+      ],
+      "crafts": [
+        {
+          "recipe": "make_gear",
+          "remaining": 3,
+          "progressTicks": 47
+        }
+      ]
+    },
+    "entities": [
+      {
+        "type": 0,
+        "x": 15,
+        "y": 3,
+        "rotation": 1,
+        "resourceType": 1,
+        "progressTicks": 0,
+        "outputCount": 0,
+        "tileCursor": 0,
+        "status": 1,
+        "id": 1
+      },
+      {
+        "type": 1,
+        "x": 17,
+        "y": 3,
+        "rotation": 1,
+        "items": [
+          {
+            "itemId": 1,
+            "pos": 255
+          }
+        ],
+        "id": 2
+      },
+      {
+        "type": 1,
+        "x": 18,
+        "y": 3,
+        "rotation": 1,
+        "items": [],
+        "id": 3
+      },
+      {
+        "type": 1,
+        "x": 19,
+        "y": 3,
+        "rotation": 1,
+        "items": [],
+        "id": 4
+      },
+      {
+        "type": 4,
+        "x": 20,
+        "y": 3,
+        "rotation": 0,
+        "contents": [],
+        "id": 5
+      },
+      {
+        "type": 3,
+        "x": 20,
+        "y": 4,
+        "rotation": 2,
+        "state": 4,
+        "stateTicks": 11,
+        "heldItem": 0,
+        "status": 1,
+        "id": 6
+      },
+      {
+        "type": 5,
+        "x": 19,
+        "y": 5,
+        "rotation": 1,
+        "progressTicks": 83,
+        "fuelTicksRemaining": 109,
+        "input": [
+          [
+            1,
+            6
+          ]
+        ],
+        "fuel": [
+          [
+            3,
+            16
+          ]
+        ],
+        "output": [],
+        "status": 1,
+        "id": 7,
+        "recipe": "smelt_iron"
+      },
+      {
+        "type": 3,
+        "x": 21,
+        "y": 5,
+        "rotation": 1,
+        "state": 0,
+        "stateTicks": 0,
+        "heldItem": 0,
+        "status": 0,
+        "id": 8
+      },
+      {
+        "type": 4,
+        "x": 22,
+        "y": 5,
+        "rotation": 0,
+        "contents": [],
+        "id": 9
+      }
+    ],
+    "chunkDeltas": [
+      {
+        "cx": 0,
+        "cy": 0,
+        "terrain": {
+          "at": [],
+          "to": []
+        },
+        "resource": {
+          "at": [],
+          "to": []
+        },
+        "amount": {
+          "at": [
+            111,
+            112,
+            143,
+            144
+          ],
+          "to": [
+            46,
+            46,
+            140,
+            110
+          ]
+        }
+      }
+    ],
+    "exploredChunks": [
+      2096127,
+      2096128,
+      2096129,
+      2098175,
+      2098176,
+      2098177,
+      2100223,
+      2100224,
+      2100225
+    ],
+    "research": {
+      "unlocked": [],
+      "progress": [],
+      "queue": [
+        "logistics_1"
+      ]
+    }
+  }
+}

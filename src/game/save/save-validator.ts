@@ -753,6 +753,12 @@ function readEntityFields(
       fields[key] = readItemIdField(value, where, numbering);
       continue;
     }
+    // A storage building's inventory is a grid since v4 (2026-09-23): the
+    // only array such a building holds is its contents.
+    if (capacity !== null && capacity.kind === 'slots' && Array.isArray(value)) {
+      fields[key] = readItemGrid(value, where, numbering, capacity.slots) as unknown as SaveValue;
+      continue;
+    }
     if (isItemSlots(value)) {
       fields[key] = readItemSlots(value, where, numbering, capacity) as SaveValue;
       continue;

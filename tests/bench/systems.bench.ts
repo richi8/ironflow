@@ -15,6 +15,7 @@ import { EAST } from '../../src/game/world/coordinates.js';
 import { layReferenceFactory, oreEverywhere, referenceWorld } from '../determinism/reference-factory.js';
 import { loadReferenceFactory } from './reference-fixture.js';
 import { World } from '../../src/game/world/world.js';
+import { stacked } from '../fixtures/chest.js';
 
 /**
  * Per-system tick cost. C18 task 7, and the baseline §12 is measured against.
@@ -127,7 +128,7 @@ function inserters(): Simulation {
     const y = Math.floor(i / 32) * 2;
     const source = simulation.entities.create<ChestEntity>(newChest(x, y, EAST));
     // A full source, so every inserter is swinging rather than idling.
-    source.contents = [[simulation.items.idOf('iron_ore'), 500]];
+    source.contents = stacked(simulation, [[simulation.items.idOf('iron_ore'), 500]]);
     simulation.entities.create<InserterEntity>(newInserter(x + 1, y, EAST));
     simulation.entities.create<ChestEntity>(newChest(x + 2, y, EAST));
   }

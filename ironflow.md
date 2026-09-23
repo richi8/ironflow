@@ -621,15 +621,19 @@ export type Command =
   | { type: 'movePlayer'; dx: number; dy: number }
   | { type: 'mineTile';   x: number; y: number }
   | { type: 'stopMining' }                       // added in C10, see below
-  | { type: 'moveStack'; from: number; to: number };   // added 2026-09-23
+  | { type: 'moveStack'; fromEntity: EntityId | null; from: number;
+      toEntity: EntityId | null; to: number | null };  // added 2026-09-23
 ```
 
 **Implementation note (2026-09-23).** `moveStack` came with the player's bag
-becoming a grid of positioned stacks (§13). Where a stack sits is now
-authoritative state, so rearranging the bag is a command like any other.
-Dropped on an empty slot the stack moves, on the same item it merges what
-fits, and on anything else the two swap (`GridInventory.move`). The one
-refusal is `empty_slot`. The same day gave `insertItems` its first two UIs: a
+becoming a grid of positioned stacks (§13), and chests became grids the same
+day. Where a stack sits is now authoritative state, so rearranging is a
+command like any other. A grid is the bag (`null`) or a chest (its id, within
+reach). Dropped on an empty slot the stack moves, on the same item it merges
+what fits, and on anything else the two swap. `to: null` means "wherever it
+fits", which is a click sending a stack across. `HandSystem.moveStack` owns
+it. Its own refusal is `empty_slot`; a chest out of reach or gone gives the
+usual `out_of_reach` or `unknown_entity`. The same day gave `insertItems` its first two UIs: a
 material held in the hand, and the machine dialog's input slots.
 
 **Implementation note (C22).** `cancelResearch` is the member this union did
@@ -1237,6 +1241,16 @@ to arrange. What each change means:
   hotbar, and one dropped on a machine's input slot goes into the machine.
   The hotbar's "one stack per slot" now shows real stacks: the k-th hotbar
   slot holding an item shows the k-th stack of it, in bag order.
+- **Chests work the same way** *(2026-09-23, on request)*. A chest's
+  `contents` is a grid, `[slot, itemId, count]` per occupied slot, handled by
+  the same `GridInventory` over the entity's own array. Inserters and belts
+  fill it by the grid's rules and take from its lowest occupied slot, where
+  they used to take the lowest item id. Selecting a chest shows its grid in
+  the inspector, one cell per slot, and opens the bag beside it. Stacks drag
+  between any two cells of either grid. A click on a chest stack sends it to
+  the bag, a shift-click on a bag stack sends it to the chest, and an item
+  dragged from the hotbar goes in by the chest's fill order. The drag payload
+  names its grid (`bag:3`, `<chest id>:3`).
 - **The machine dialog shows input slots** *(same request)*. A building that
   takes materials by hand shows one INPUT slot per thing it needs, drawn even
   when empty: a machine gets one per ingredient of its recipe (a furnace that
@@ -1272,7 +1286,9 @@ to arrange. What each change means:
   selection is dropped by the input layer as before. With nothing to drop,
   Escape pauses into the game menu. It is caught on `window` in the capture
   phase, so it also works from the save menu's name field.
-- **Tab opens the map**, as well as `M`.
+- **The map is `M` only.** Tab opened it too for a day. It was unbound
+  again on request (2026-09-23): a bound key's default is prevented, and Tab
+  is how a keyboard user moves focus between the panels' buttons.
 
 ### Rules
 
@@ -1630,6 +1646,13 @@ stack-size table **frozen in the migration** rather than `data/items.ts`, so
 a later balance change cannot alter what an old save becomes. The validator
 checks each slot is inside the bag, ascending, and at most one stack. The v3
 fixture joins v1 and v2.
+
+**Schema v4 (2026-09-23).** Chests became grids too, so a chest's
+`contents` is `[slot, itemId, count]` per occupied slot. The validator reads
+any array on a storage building as a grid, bounded by its slot count.
+`migrations/v3-to-v4.ts` deals old totals into slots exactly as v2 -> v3 did
+for the bag, with the same frozen stack sizes. The v4 fixture joins the
+others.
 
 **Implementation note (C27).** The sentence above about migrations — "pure
 functions `vN -> vN+1`, chained, each independently unit-tested against a

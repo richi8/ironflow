@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/game/save/migrations/index.js';
 import { v1ToV2 } from '../../src/game/save/migrations/v1-to-v2.js';
 import { v2ToV3 } from '../../src/game/save/migrations/v2-to-v3.js';
+import { v3ToV4 } from '../../src/game/save/migrations/v3-to-v4.js';
 import { SAVE_FORMAT, SAVE_VERSION } from '../../src/game/save/save-format.js';
 import {
   SaveMigrationError,
@@ -241,5 +242,34 @@ describe('v2 -> v3: the bag gets positions', () => {
     const v2 = { version: 2, state: { player: { inventory: [[1]] } } };
     expect(v2ToV3.migrate(v2)).toEqual({ ...v2, version: 3 });
     expect(v2ToV3.migrate({ version: 2, state: 'nope' })).toEqual({ version: 3, state: 'nope' });
+  });
+});
+
+describe('v3 -> v4: chests get positions', () => {
+  it('deals a chest\'s totals into slots and leaves every other entity alone', () => {
+    const v3 = {
+      version: 3,
+      state: {
+        itemIdMap: { iron_ore: 1, gear: 9 },
+        entities: [
+          { id: 1, type: 4, contents: [[1, 60], [9, 3]] },
+          { id: 2, type: 3, input: [[1, 5]] },
+        ],
+      },
+    };
+    const v4 = v3ToV4.migrate(v3);
+    expect(v4['version']).toBe(4);
+    const [chest, furnace] = (v4['state'] as { entities: Record<string, unknown>[] }).entities;
+    expect(chest?.['contents']).toEqual([
+      [0, 1, 50],
+      [1, 1, 10],
+      [2, 9, 3],
+    ]);
+    expect(furnace).toEqual({ id: 2, type: 3, input: [[1, 5]] });
+  });
+
+  it('leaves malformed chest contents for the validator', () => {
+    const v3 = { version: 3, state: { entities: [{ id: 1, type: 4, contents: [[1]] }] } };
+    expect((v3ToV4.migrate(v3)['state'] as { entities: unknown[] }).entities[0]).toEqual({ id: 1, type: 4, contents: [[1]] });
   });
 });

@@ -15,7 +15,7 @@ import type { Migration, SaveDocument } from '../save-migrator.js';
  * into. An id this table does not know gets 50. The validator still has the
  * last word on what comes out.
  */
-const STACK_SIZES_AT_V3: Readonly<Record<string, number>> = Object.freeze({
+export const STACK_SIZES_AT_V3: Readonly<Record<string, number>> = Object.freeze({
   iron_ore: 50,
   copper_ore: 50,
   coal: 50,
@@ -46,7 +46,7 @@ const STACK_SIZES_AT_V3: Readonly<Record<string, number>> = Object.freeze({
   underground_belt: 100,
 });
 
-const UNKNOWN_STACK_SIZE = 50;
+export const UNKNOWN_STACK_SIZE = 50;
 
 export const v2ToV3: Migration = Object.freeze({
   from: 2,

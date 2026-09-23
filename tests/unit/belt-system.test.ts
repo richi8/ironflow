@@ -20,6 +20,7 @@ import { CHUNK_SIZE, createChunk, localIndex } from '../../src/game/world/chunk.
 import { EAST, NORTH, SOUTH, WEST, type Rotation } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
+import { stacked } from '../fixtures/chest.js';
 
 /**
  * Belts. See ironflow.md §9 and C13.
@@ -292,7 +293,7 @@ describe('belts into containers', () => {
     laneAccept(head.items, simulation.items.idOf('iron_ore'), 0);
 
     run(simulation, 200);
-    expect(chest.contents).toEqual([[simulation.items.idOf('iron_ore'), 1]]);
+    expect(chest.contents).toEqual([[0, simulation.items.idOf('iron_ore'), 1]]);
   });
 
   it('backs the line up when the chest is full, rather than deleting items', () => {
@@ -306,7 +307,7 @@ describe('belts into containers', () => {
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
     const full = slots * simulation.items.get('iron_ore').stackSize;
     expect(full).toBeGreaterThan(0);
-    chest.contents = [[iron, full]];
+    chest.contents = stacked(simulation, [[iron, full]]);
 
     const head = belts[0];
     if (head === undefined) throw new Error('no belt');
@@ -319,7 +320,7 @@ describe('belts into containers', () => {
     }
 
     // Nothing went in and, crucially, nothing went missing.
-    expect(chest.contents[0]?.[1] ?? 0).toBe(full);
+    expect(chest.contents.reduce((sum, entry) => sum + entry[2], 0)).toBe(full);
     for (const belt of belts) expect(belt.items.length).toBe(BELT_SLOTS_PER_TILE);
   });
 });
@@ -371,7 +372,7 @@ describe('belt ordering', () => {
         }
         simulation.tick();
       }
-      return asChest(chest)?.contents[0]?.[1] ?? 0;
+      return (asChest(chest)?.contents ?? []).reduce((sum, entry) => sum + entry[2], 0);
     };
 
     expect(delivered('forwards')).toBe(delivered('backwards'));
@@ -399,9 +400,9 @@ describe('belt throughput', () => {
     // Prime the line first. A ten-tile belt holds five seconds of travel, and
     // measuring from an empty one measures the fill as well as the rate.
     feed(600);
-    const before = asChest(chest)?.contents[0]?.[1] ?? 0;
+    const before = (asChest(chest)?.contents ?? []).reduce((sum, entry) => sum + entry[2], 0);
     feed(60 * TPS);
-    const after = asChest(chest)?.contents[0]?.[1] ?? 0;
+    const after = (asChest(chest)?.contents ?? []).reduce((sum, entry) => sum + entry[2], 0);
 
     const perSecond = (after - before) / 60;
     // 7.97, not 8.00: 256 units per tile over 30 ticks is 17.07 units a tick
@@ -425,8 +426,8 @@ describe('machines loading belts', () => {
     run(simulation, 10 * TPS);
     // 0.5 items/s for ten seconds, minus whatever is still in transit.
     const chest = simulation.entities.at(2, 0) as ChestEntity;
-    expect(chest.contents[0]?.[1]).toBeGreaterThanOrEqual(4);
-    expect(chest.contents[0]?.[0]).toBe(simulation.items.idOf('iron_ore'));
+    expect(chest.contents[0]?.[2]).toBeGreaterThanOrEqual(4);
+    expect(chest.contents[0]?.[1]).toBe(simulation.items.idOf('iron_ore'));
   });
 
   it('stalls the miner with output_full when the belt cannot take any more', () => {

@@ -635,7 +635,13 @@ describe('the recipe picker (C16)', () => {
 
 describe('the row pool', () => {
   it('is built once and hidden rather than created per stack', () => {
-    const inspector = new Inspector({ onTake: () => {}, onDeposit: () => {}, onSetRecipe: () => {}, onClose: () => {} });
+    const inspector = new Inspector({
+      onTake: () => {},
+      onDeposit: () => {},
+      onMoveStack: () => {},
+      onSetRecipe: () => {},
+      onClose: () => {},
+    });
     const root = document.createElement('div');
     inspector.mount(root);
 
@@ -643,5 +649,68 @@ describe('the row pool', () => {
     expect(root.querySelectorAll('.if-stack').length).toBeGreaterThanOrEqual(2);
     for (const row of root.querySelectorAll<HTMLElement>('.if-stack')) expect(row.hidden).toBe(true);
     inspector.destroy();
+  });
+});
+
+describe('a chest (2026-09-23)', () => {
+  function chest(): ChestEntity {
+    return harness.simulation.entities.create<ChestEntity>(newChest(PATCH.x + 2, PATCH.y + 2, NORTH));
+  }
+
+  function cells(): HTMLElement[] {
+    return [...harness.root.querySelectorAll<HTMLElement>('.if-chest-grid .if-bag-cell')];
+  }
+
+  function dropOn(target: HTMLElement, payload: Record<string, string>): void {
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: { types: Object.keys(payload), getData: (type: string) => payload[type] ?? '' },
+    });
+    target.dispatchEvent(drop);
+  }
+
+  it('shows its grid, slot by slot, and opens the bag beside it', () => {
+    const box = chest();
+    const ore = harness.simulation.items.idOf('iron_ore');
+    box.contents = [[3, ore, 12]];
+    select(box.id);
+    settle();
+
+    expect(query<HTMLElement>('.if-inspector__storage').hidden).toBe(false);
+    expect(cells().length).toBe(harness.simulation.buildings.get('chest').storage?.slots);
+    expect(cells()[3]?.dataset['item']).toBe('iron_ore');
+    expect(cells()[0]?.classList.contains('is-empty')).toBe(true);
+    // A chest's contents are the grid; the OUTPUT list is not drawn as well.
+    expect(section('OUTPUT').hidden).toBe(true);
+    expect(harness.ui.isInventoryOpen()).toBe(true);
+  });
+
+  it('takes a stack dropped from the bag into the slot it was dropped on', () => {
+    const box = chest();
+    const coal = harness.simulation.items.idOf('coal');
+    harness.simulation.player.inventory.add(coal, 9);
+    select(box.id);
+    settle();
+
+    const target = cells()[7];
+    if (target === undefined) throw new Error('no cell 7');
+    dropOn(target, { 'application/x-ironflow-cell': 'bag:0' });
+    runTicks(1);
+
+    expect(box.contents).toEqual([[7, coal, 9]]);
+    expect(harness.simulation.player.inventory.count(coal)).toBe(0);
+  });
+
+  it('sends a clicked stack to the bag', () => {
+    const box = chest();
+    const ore = harness.simulation.items.idOf('iron_ore');
+    box.contents = [[2, ore, 5]];
+    select(box.id);
+    settle();
+
+    cells()[2]?.click();
+    runTicks(1);
+    expect(box.contents).toEqual([]);
+    expect(harness.simulation.player.inventory.count(ore)).toBe(5);
   });
 });

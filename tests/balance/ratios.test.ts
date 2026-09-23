@@ -20,6 +20,7 @@ import { CHUNK_AREA, createChunk } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, SOUTH } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World, type ChunkGenerator } from '../../src/game/world/world.js';
+import { heldIn } from '../fixtures/chest.js';
 
 /**
  * §15's derived ratios, verified. See ironflow.md C20 task 3 and §15.
@@ -274,7 +275,7 @@ function referenceFactory(): ReferenceFactory {
 }
 
 function stored(chest: ChestEntity, itemId: number): number {
-  return chest.contents.find((entry) => entry[0] === itemId)?.[1] ?? 0;
+  return heldIn(chest.contents, itemId);
 }
 
 /** Top every furnace's fuel buffer back up, as a player with coal would. */

@@ -14,6 +14,7 @@ import { EAST, NORTH } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
+import { heldIn, stacked } from '../fixtures/chest.js';
 
 /**
  * §17's sixth required integration chain: **belt → splitter → 2 belts → 2
@@ -139,7 +140,7 @@ function run(simulation: Simulation, ticks: number): void {
 
 /** How much iron ore is in a chest that may not have been built. */
 function stored(chest: ChestEntity | null, iron: number): number {
-  return chest?.contents.find((entry) => entry[0] === iron)?.[1] ?? 0;
+  return heldIn(chest?.contents, iron);
 }
 
 /** Every ore still riding a belt or sitting in a splitter lane. */
@@ -210,8 +211,8 @@ describe('belt -> splitter -> 2 belts -> 2 chests', () => {
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
     const full = slots * simulation.items.get('iron_ore').stackSize;
     if (north === null || south === null) throw new Error('no chests');
-    north.contents = [[iron, full]];
-    south.contents = [[iron, full]];
+    north.contents = stacked(simulation, [[iron, full]]);
+    south.contents = stacked(simulation, [[iron, full]]);
 
     // Long enough to fill both output belts, both splitter lanes, the belt
     // line behind it and the miner's fifty-item buffer.

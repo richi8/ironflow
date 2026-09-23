@@ -59,8 +59,31 @@ import type {
 import { createIcon } from './icons.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
 
-/** The drag payload for a bag stack on its way to another slot: the source slot, 0-based. */
+/**
+ * The drag payload for a stack on its way to another slot: which grid and
+ * which slot it came from, as `bag:3` or `<chest id>:3`. Read by the bag and
+ * by a chest's grid in the inspector, so a stack crosses between them.
+ */
 export const CELL_DRAG_TYPE = 'application/x-ironflow-cell';
+
+/** Where a dragged stack came from: a grid (`null` for the bag) and a slot. */
+export interface CellRef {
+  readonly entityId: number | null;
+  readonly slot: number;
+}
+
+export function encodeCell(ref: CellRef): string {
+  return `${ref.entityId ?? 'bag'}:${ref.slot}`;
+}
+
+/** The inverse of `encodeCell`, or null for anything it did not write. */
+export function decodeCell(raw: string): CellRef | null {
+  const match = /^(bag|\d+):(\d+)$/.exec(raw);
+  if (match === null) return null;
+  const slot = Number(match[2]);
+  const entityId = match[1] === 'bag' ? null : Number(match[1]);
+  return Number.isSafeInteger(slot) && (entityId === null || Number.isSafeInteger(entityId)) ? { entityId, slot } : null;
+}
 
 /**
  * Queue rows drawn. More than `MAX_CRAFT_ORDERS`, which is the simulation's
@@ -100,8 +123,10 @@ export interface InventoryPanelOptions {
   readonly onCancel: (index: number) => void;
   /** A carried item was clicked: hold it, ready to place or to feed a machine. */
   readonly onPickItem: (itemId: string) => void;
-  /** The stack in slot `from` was dropped on slot `to` (both 0-based). */
-  readonly onMoveStack: (from: number, to: number) => void;
+  /** The stack at `from` (the bag or a chest) was dropped on bag slot `to`. */
+  readonly onMoveStack: (from: CellRef, to: number) => void;
+  /** Shift-click on a bag stack: send it across to an open chest, if there is one. */
+  readonly onQuickMove: (slot: number) => void;
   readonly onClose: () => void;
 }
 
@@ -231,10 +256,16 @@ export class InventoryPanel {
     this.options.onCraft(recipeId, batch);
   };
 
-  /** A click on a carried item picks it up. */
+  /** A click on a carried item picks it up; with shift it goes to an open chest. */
   private readonly handlePick = (event: Event): void => {
     const itemId = itemOf(event);
-    if (itemId !== null) this.options.onPickItem(itemId);
+    const index = indexOf(event);
+    if (itemId === null) return;
+    if (event instanceof MouseEvent && event.shiftKey && index !== null) {
+      this.options.onQuickMove(index);
+      return;
+    }
+    this.options.onPickItem(itemId);
   };
 
   /**
@@ -250,7 +281,7 @@ export class InventoryPanel {
       return;
     }
     event.dataTransfer.setData(ITEM_DRAG_TYPE, itemId);
-    event.dataTransfer.setData(CELL_DRAG_TYPE, String(index));
+    event.dataTransfer.setData(CELL_DRAG_TYPE, encodeCell({ entityId: null, slot: index }));
     event.dataTransfer.effectAllowed = 'copyMove';
   };
 
@@ -270,11 +301,10 @@ export class InventoryPanel {
   private readonly handleDrop = (event: DragEvent): void => {
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
     const to = indexOf(event);
-    const raw = event.dataTransfer?.getData(CELL_DRAG_TYPE) ?? '';
-    const from = raw === '' ? NaN : Number(raw);
-    if (to === null || !Number.isInteger(from)) return;
+    const from = decodeCell(event.dataTransfer?.getData(CELL_DRAG_TYPE) ?? '');
+    if (to === null || from === null) return;
     event.preventDefault();
-    if (from !== to) this.options.onMoveStack(from, to);
+    if (from.entityId !== null || from.slot !== to) this.options.onMoveStack(from, to);
   };
 
   private readonly handleCancel = (event: Event): void => {

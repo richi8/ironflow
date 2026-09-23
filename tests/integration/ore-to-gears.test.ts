@@ -14,6 +14,7 @@ import { EAST, NORTH, SOUTH, WEST } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
+import { heldIn, stacked } from '../fixtures/chest.js';
 
 /**
  * **C16's acceptance chain**, and §17's required integration chain for this
@@ -179,7 +180,7 @@ function run(simulation: Simulation, ticks: number): void {
 }
 
 function stored(chest: ChestEntity, itemId: number): number {
-  return chest.contents.find((entry) => entry[0] === itemId)?.[1] ?? 0;
+  return heldIn(chest.contents, itemId);
 }
 
 function held(slots: readonly (readonly [number, number])[], itemId: number): number {
@@ -239,7 +240,7 @@ describe('ore -> smelt -> assemble -> chest', () => {
   it('stalls backwards through the assembler to the miner when the chest is full', () => {
     const { simulation, miner, furnace, assembler, chest, gear } = buildChain();
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
-    chest.contents = [[gear, slots * simulation.items.get('gear').stackSize]];
+    chest.contents = stacked(simulation, [[gear, slots * simulation.items.get('gear').stackSize]]);
 
     // Long enough for the block to fill the assembler's two buffers, then the
     // furnace's, then the belt, then the miner's fifty.

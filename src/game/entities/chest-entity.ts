@@ -22,21 +22,26 @@
  * a view. Nothing is copied, nothing has to be written back, and there is one
  * implementation of stack packing rather than two.
  *
+ * **Since 2026-09-23 the array is a grid**, like the player's bag: a
+ * `GridEntry` per occupied slot, `[slot, itemId, count]`, ascending by slot.
+ * Each stack has a position the player can rearrange, and a system builds a
+ * `GridInventory` over it the way it used to build a `SlotInventory`.
+ *
  * The slot count is **not** here: 24 slots is content (§15's building table),
  * it lives on `BuildingDefinition.storage`, and storing it per chest would
  * freeze C20's balance pass into every existing save — the same reason C11
  * kept a miner's rate off `MinerEntity`.
  */
 
-import type { ItemSlots } from '../items/inventory.js';
+import type { GridEntry } from '../items/inventory.js';
 import type { Rotation } from '../world/coordinates.js';
 
 import type { Entity } from './entity.js';
 import { EntityType } from './entity-types.js';
 
 export interface ChestEntity extends Entity {
-  /** Authoritative (§10). Sorted by item id, so a save is byte-stable (§6 R4). */
-  contents: ItemSlots;
+  /** Authoritative (§10). One entry per occupied slot, ascending by slot (§6 R4). */
+  contents: GridEntry[];
 }
 
 /** A chest as `EntityStore.create` wants it: everything but the id. */

@@ -17,6 +17,7 @@ import { World, type ChunkGenerator } from '../../src/game/world/world.js';
 import { deserialize, serialize } from '../../src/game/save/save-serializer.js';
 import { hashSavedState } from '../determinism/state-hash.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
+import { heldIn, stacked } from '../fixtures/chest.js';
 
 /**
  * **C15's acceptance: the vertical slice.** See ironflow.md C15 and the §20
@@ -178,7 +179,7 @@ function run(simulation: Simulation, ticks: number): void {
 }
 
 function stored(chest: ChestEntity, itemId: number): number {
-  return chest.contents.find((entry) => entry[0] === itemId)?.[1] ?? 0;
+  return heldIn(chest.contents, itemId);
 }
 
 /** Everything riding a belt anywhere in the world. */
@@ -257,7 +258,7 @@ describe('iron patch -> miner -> belt -> inserter -> furnace -> inserter -> ches
   it('stalls the whole chain backwards to the miner when the chest is full', () => {
     const { simulation, miner, furnace, chest, plate, plateInserter } = buildSlice();
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
-    chest.contents = [[plate, slots * simulation.items.get('iron_plate').stackSize]];
+    chest.contents = stacked(simulation, [[plate, slots * simulation.items.get('iron_plate').stackSize]]);
 
     // Long enough for the block to fill the furnace's two buffers, the belt
     // and finally the miner's fifty-item buffer at half an item a second.

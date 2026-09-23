@@ -141,8 +141,9 @@ describe('the reference factory', () => {
 
     let inChests = 0;
     simulation.entities.forEach((entity) => {
-      const contents = (entity as { contents?: readonly (readonly [number, number])[] }).contents;
-      if (contents !== undefined) for (const stack of contents) inChests += stack[1];
+      // A chest's contents are `[slot, itemId, count]` since chests became grids.
+      const contents = (entity as { contents?: readonly (readonly [number, number, number])[] }).contents;
+      if (contents !== undefined) for (const stack of contents) inChests += stack[2];
     });
     // A test that hashed a stalled factory ten times would pass and mean
     // nothing, so the run is asserted to have produced something first.

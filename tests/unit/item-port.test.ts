@@ -59,12 +59,13 @@ describe('a chest', () => {
     expect(outputPortOf(entity, ctx)?.peek()).toBe(PLATE);
   });
 
-  it('offers its lowest item id, not the first thing put in it (§6 R4)', () => {
+  it('offers the stack in its lowest slot, which is a position and so is state (§6 R4)', () => {
     const entity = chest();
     const port = inputPortOf(entity, ctx);
     port?.give(PLATE, 1);
     port?.give(IRON_ORE, 1);
-    expect(outputPortOf(entity, ctx)?.peek()).toBe(Math.min(PLATE, IRON_ORE));
+    // Plates went in first and sit in slot 0; chests are grids since 2026-09-23.
+    expect(outputPortOf(entity, ctx)?.peek()).toBe(PLATE);
   });
 
   it('shows no per-item capacity, because it fills by running out of slots', () => {

@@ -22,6 +22,7 @@ import { EAST } from '../../src/game/world/coordinates.js';
 import { World } from '../../src/game/world/world.js';
 
 import { createPlaygroundGenerator } from './world-fixtures.js';
+import { stacked } from './chest.js';
 
 /** A small world with something in the player's bag, so the bytes are not empty. */
 export function sampleSimulation(seed = 11): Simulation {
@@ -74,7 +75,7 @@ export function factorySimulation(seed = 5): Simulation {
   simulation.entities.create<SplitterEntity>(newSplitter(10, 4, EAST));
 
   const chest = simulation.entities.create<ChestEntity>(newChest(13, 4, EAST));
-  chest.contents = [[items.idOf('iron_plate'), 25]];
+  chest.contents = stacked(simulation, [[items.idOf('iron_plate'), 25]]);
 
   const inserter = simulation.entities.create<InserterEntity>(newInserter(13, 6, EAST));
   inserter.heldItem = items.idOf('iron_ore');

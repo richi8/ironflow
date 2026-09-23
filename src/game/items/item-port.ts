@@ -38,7 +38,7 @@ import { asMiner, minerOutput, takeMinerOutput } from '../entities/miner-entity.
 import type { BuildingRegistry, ProductionProperties } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import type { RecipeGate, RecipeRegistry } from '../registries/recipe-registry.js';
-import { BufferInventory, SlotInventory, slotsCount, type Inventory, type ItemSlots } from './inventory.js';
+import { BufferInventory, GridInventory, slotsCount, type Inventory, type ItemSlots } from './inventory.js';
 
 /** One line of a port's contents, for the inspector (C12). */
 export interface PortStack {
@@ -229,11 +229,21 @@ function chestPort(entity: Entity, ctx: PortContext): (ItemSource & ItemSink) | 
   if (storage === null) return null;
   const chest = asChest(entity);
   if (chest === null) return null;
-  return containerPort(
-    chest.contents,
-    new SlotInventory({ slots: storage.slots, stackSizeOf: ctx.items.stackSizeOf, contents: chest.contents }),
-    null,
-  );
+  const grid = new GridInventory({ slots: storage.slots, stackSizeOf: ctx.items.stackSizeOf, entries: chest.contents });
+  // The six keys in `containerPort`'s order, for the reason `generatorPort`
+  // spells out. A chest is a grid since 2026-09-23: it offers the stack in its
+  // lowest slot first, and lists its stacks slot by slot.
+  return {
+    peek: () => grid.peek() ?? NO_ITEM,
+    count: (itemId) => grid.count(itemId),
+    take: (itemId, amount) => (itemId === NO_ITEM || amount < 1 ? 0 : grid.remove(itemId, amount)),
+    spaceFor: (itemId) => (itemId === NO_ITEM ? 0 : grid.spaceFor(itemId)),
+    give: (itemId, amount) => (itemId === NO_ITEM || amount < 1 ? 0 : grid.add(itemId, amount)),
+    stacks: () =>
+      chest.contents.length === 0
+        ? NO_STACKS
+        : Object.freeze(chest.contents.map((entry) => Object.freeze({ itemId: entry[1], count: entry[2], capacity: null }))),
+  };
 }
 
 /**

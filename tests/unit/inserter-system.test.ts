@@ -23,6 +23,7 @@ import { createChunk } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, WEST } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
+import { heldIn, stacked } from '../fixtures/chest.js';
 
 /**
  * Inserters. See ironflow.md C14 and §8 phase 6.
@@ -61,7 +62,7 @@ const IRON = (() => new Simulation({ world: flatWorld() }).items.idOf('iron_ore'
 
 /** How much iron ore is in a chest. */
 function stored(chest: ChestEntity): number {
-  return chest.contents.find((entry) => entry[0] === IRON)?.[1] ?? 0;
+  return heldIn(chest.contents, IRON);
 }
 
 describe('the inserter cycle', () => {
@@ -137,7 +138,7 @@ describe('inserter rate', () => {
     // A chest full of ore is a source that never runs dry, which isolates the
     // inserter's own rate from anything a belt or a miner is doing.
     const source = simulation.entities.create<ChestEntity>(newChest(1, 0, NORTH));
-    source.contents = [[IRON, 500]];
+    source.contents = stacked(simulation, [[IRON, 500]]);
     simulation.entities.create<InserterEntity>(newInserter(1, 1, 2));
     const sink = simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
 
@@ -186,7 +187,7 @@ describe('an inserter that cannot finish', () => {
     const chest = simulation.entities.create<ChestEntity>(newChest(1, 2, NORTH));
 
     const slots = simulation.buildings.get('chest').storage?.slots ?? 0;
-    chest.contents = [[IRON, slots * simulation.items.get('iron_ore').stackSize]];
+    chest.contents = stacked(simulation, [[IRON, slots * simulation.items.get('iron_ore').stackSize]]);
     laneAccept(belt.items, IRON, BELT_MAX_POSITION);
 
     run(simulation, CONFIG.ticksPerItem * 3);
@@ -283,7 +284,7 @@ describe('an inserter that cannot finish', () => {
       }),
     });
     const source = simulation.entities.create<ChestEntity>(newChest(0, 5, NORTH));
-    source.contents = [[IRON, 10]];
+    source.contents = stacked(simulation, [[IRON, 10]]);
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 5, EAST));
     simulation.entities.create<MinerEntity>(newMiner(2, 5, NORTH));
 
@@ -300,7 +301,7 @@ describe('an inserter that cannot finish', () => {
   it('says the same about a splitter, which is what C17 noticed', () => {
     const simulation = new Simulation({ world: flatWorld() });
     const source = simulation.entities.create<ChestEntity>(newChest(0, 5, NORTH));
-    source.contents = [[IRON, 10]];
+    source.contents = stacked(simulation, [[IRON, 10]]);
     const inserter = simulation.entities.create<InserterEntity>(newInserter(1, 5, EAST));
     simulation.entities.create(newSplitter(2, 5, EAST));
 
@@ -323,7 +324,7 @@ describe('contention', () => {
   } {
     const simulation = new Simulation({ world: flatWorld() });
     const middle = simulation.entities.create<ChestEntity>(newChest(2, 0, NORTH));
-    middle.contents = [[IRON, 1]];
+    middle.contents = stacked(simulation, [[IRON, 1]]);
 
     const west = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     const east = simulation.entities.create<ChestEntity>(newChest(4, 0, NORTH));

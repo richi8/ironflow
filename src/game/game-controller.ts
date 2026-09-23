@@ -62,7 +62,8 @@ import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
 import type { MachinePowerView, MachineSlotView, MachineStack, MachineView } from './views/building-view.js';
 import { asGenerator } from './entities/generator-entity.js';
-import { slotsCount } from './items/inventory.js';
+import { GridInventory, slotsCount } from './items/inventory.js';
+import { asChest } from './entities/chest-entity.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudPowerView, HudResearchView, HudView } from './views/hud-view.js';
 import type {
@@ -616,28 +617,10 @@ export class GameController {
 
     const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
 
-    const cells: InventoryCellView[] = [];
-    for (let index = 0; index < bag.slots; index++) {
-      const cell = bag.cellAt(index);
-      if (cell === null || !this.simulation.items.isItemId(cell[0])) {
-        cells.push(freeze({ index, itemId: null, name: '', count: 0, stackSize: 0, buildingId: null }));
-        continue;
-      }
-      const definition = this.simulation.items.byId(cell[0]);
-      cells.push(
-        freeze({
-          index,
-          itemId: definition.id,
-          name: definition.name,
-          count: cell[1],
-          stackSize: definition.stackSize,
-          buildingId: this.buildingForItem(definition.id),
-        }),
-      );
-    }
+    const cells = this.cellViews(bag);
 
     return freeze({
-      cells: freeze(cells),
+      cells,
       items: freeze(items),
       slots: bag.slots,
       usedSlots: bag.usedSlots,
@@ -941,6 +924,44 @@ export class GameController {
     return { total, working };
   }
 
+  /** Every slot of a grid, in order, as the panels draw it. */
+  private cellViews(grid: GridInventory): readonly InventoryCellView[] {
+    const cells: InventoryCellView[] = [];
+    for (let index = 0; index < grid.slots; index++) {
+      const cell = grid.cellAt(index);
+      if (cell === null || !this.simulation.items.isItemId(cell[0])) {
+        cells.push(freeze({ index, itemId: null, name: '', count: 0, stackSize: 0, buildingId: null }));
+        continue;
+      }
+      const definition = this.simulation.items.byId(cell[0]);
+      cells.push(
+        freeze({
+          index,
+          itemId: definition.id,
+          name: definition.name,
+          count: cell[1],
+          stackSize: definition.stackSize,
+          buildingId: this.buildingForItem(definition.id),
+        }),
+      );
+    }
+    return freeze(cells);
+  }
+
+  /** A chest's grid, or null for a building that is not storage. */
+  private storageOf(entity: Entity): readonly InventoryCellView[] | null {
+    const storage = this.simulation.buildings.storageFor(entity.type);
+    const chest = asChest(entity);
+    if (storage === null || chest === null) return null;
+    // Built over a copy: a view must never hold the entity's own array.
+    const grid = new GridInventory({
+      slots: storage.slots,
+      stackSizeOf: this.simulation.items.stackSizeOf,
+      entries: chest.contents.map((entry) => [entry[0], entry[1], entry[2]]),
+    });
+    return this.cellViews(grid);
+  }
+
   /**
    * The input slots of a building that takes materials by hand, or null.
    *
@@ -1084,6 +1105,7 @@ export class GameController {
       inputs: inputs.length === 0 ? EMPTY_STACKS : freeze(inputs),
       slots: this.machineSlotsOf(entity),
       outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
+      storage: this.storageOf(entity),
       // Measured for the selected machine only (C12 task 2). A machine asked
       // about in passing reads 0 rather than a figure from someone else's
       // window; a machine that produces nothing at all reads null.
@@ -1436,11 +1458,18 @@ export class GameController {
   }
 
   /**
-   * Move the stack in bag slot `from` to slot `to` (0-based): a drag inside
-   * the inventory. A command, because where a stack sits is state (§7).
+   * Move the stack in slot `from` of one grid to slot `to` of another — the
+   * bag is `null`, a chest is its id — or to wherever it fits for `to: null`.
+   * A drag inside the bag, a drag between bag and chest, a click that sends a
+   * stack across. A command, because where a stack sits is state (§7).
    */
-  moveStack(from: number, to: number): CommandResult {
-    return this.dispatch({ type: 'moveStack', from, to });
+  moveStack(
+    from: number,
+    to: number | null,
+    fromEntity: EntityId | null = null,
+    toEntity: EntityId | null = null,
+  ): CommandResult {
+    return this.dispatch({ type: 'moveStack', fromEntity, from, toEntity, to });
   }
 
   /**

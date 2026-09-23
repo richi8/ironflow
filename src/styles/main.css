@@ -373,6 +373,16 @@ body {
   font-size: 12px;
 }
 
+/* A chest: wide enough for its grid of slots, six to a row like the bag. */
+.if-inspector.is-wide {
+  width: 300px;
+}
+
+.if-chest-grid {
+  max-height: 50vh;
+  margin-top: 4px;
+}
+
 .if-inspector__head {
   display: flex;
   align-items: center;

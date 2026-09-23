@@ -27,6 +27,7 @@
 
 import type { EntityId } from '../entities/entity.js';
 import type { MachineStatusName } from '../entities/machine-status.js';
+import type { InventoryCellView } from './inventory-view.js';
 import type { RecipeView } from './recipe-view.js';
 import type { Rotation } from '../world/coordinates.js';
 
@@ -139,6 +140,12 @@ export interface MachineView {
    */
   readonly slots: readonly MachineSlotView[] | null;
   readonly outputs: readonly MachineStack[];
+  /**
+   * A chest's grid, every slot in order with empty ones included, or null for
+   * a building that is not storage (2026-09-23). The dialog draws it the way
+   * the bag is drawn, and stacks move between the two by dragging.
+   */
+  readonly storage: readonly InventoryCellView[] | null;
   /**
    * A rolling average over the last 300 ticks (C12 task 2), or `null` for a
    * building that produces nothing.

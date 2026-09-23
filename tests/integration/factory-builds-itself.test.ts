@@ -11,6 +11,7 @@ import { CHUNK_AREA, createChunk } from '../../src/game/world/chunk.js';
 import { NORTH, SOUTH } from '../../src/game/world/coordinates.js';
 import { ResourceType } from '../../src/game/world/resource.js';
 import { World } from '../../src/game/world/world.js';
+import { heldIn } from '../fixtures/chest.js';
 
 /**
  * **The factory builds itself.** C20 task 1, and §15's pillar-1 moment.
@@ -99,7 +100,7 @@ function run(simulation: Simulation, ticks: number): void {
 }
 
 function held(chest: ChestEntity, itemId: number): number {
-  return chest.contents.find((entry) => entry[0] === itemId)?.[1] ?? 0;
+  return heldIn(chest.contents, itemId);
 }
 
 describe('the factory builds itself (C20)', () => {

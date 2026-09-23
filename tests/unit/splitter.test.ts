@@ -24,6 +24,7 @@ import { Simulation } from '../../src/game/simulation.js';
 import { createChunk } from '../../src/game/world/chunk.js';
 import { EAST, NORTH, SOUTH, WEST, type Rotation } from '../../src/game/world/coordinates.js';
 import { World } from '../../src/game/world/world.js';
+import { heldIn } from '../fixtures/chest.js';
 
 /**
  * Splitters. See ironflow.md §9 and C17.
@@ -133,14 +134,14 @@ function runSaturated(rig: Rig, ticks: number, itemIds: readonly string[]): void
 /** How much a chest holds in total, or 0 for a side that leads nowhere. */
 function held(chest: ChestEntity | null): number {
   if (chest === null) return 0;
-  return asChest(chest)?.contents.reduce((sum, entry) => sum + entry[1], 0) ?? 0;
+  return asChest(chest)?.contents.reduce((sum, entry) => sum + entry[2], 0) ?? 0;
 }
 
 /** How much of one item a chest holds. */
 function heldOf(simulation: Simulation, chest: ChestEntity | null, itemId: string): number {
   if (chest === null) return 0;
   const id = simulation.items.idOf(itemId);
-  return asChest(chest)?.contents.find((entry) => entry[0] === id)?.[1] ?? 0;
+  return heldIn(asChest(chest)?.contents, id);
 }
 
 /**

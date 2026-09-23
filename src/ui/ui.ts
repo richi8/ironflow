@@ -206,6 +206,10 @@ export class GameUI {
       },
       // The machine's input slots (2026-09-23): the same arrangement in the
       // other direction. The machine decides what it accepts.
+      // A chest's grid (2026-09-23): stacks moved within it, to it from the
+      // bag, or clicked to send them to the bag.
+      onMoveStack: (from, to) =>
+        this.controller.moveStack(from.slot, to?.slot ?? null, from.entityId, to === null ? null : to.entityId),
       onDeposit: (itemId, count) => {
         const selected = this.controller.getSelection();
         if (selected !== null) this.controller.insertItems(selected, itemId, count);
@@ -227,7 +231,14 @@ export class GameUI {
       onCancel: (index) => this.controller.cancelCraft(index),
       // Picked up — a building to place, or a material to feed a machine
       // with. The panel gets out of the way, so the next click is on the world.
-      onMoveStack: (from, to) => this.controller.moveStack(from, to),
+      // A stack dropped on a bag slot, from the bag or from an open chest.
+      onMoveStack: (from, to) => this.controller.moveStack(from.slot, to, from.entityId, null),
+      // Shift-click sends a stack to the chest being inspected, if it is one.
+      onQuickMove: (slot) => {
+        const selected = this.controller.getSelection();
+        const view = selected === null ? null : this.controller.getBuildingView(selected);
+        if (view?.storage != null) this.controller.moveStack(slot, null, null, view.id);
+      },
       onPickItem: (itemId) => {
         this.controller.holdItem(itemId);
         this.setInventoryOpen(false);
@@ -312,7 +323,14 @@ export class GameUI {
       // C12: the inspector opens on the frame of the click rather than on the
       // next beat of the 10 Hz lane — and while paused, which is exactly when
       // a player stops to read a machine.
-      this.controller.subscribe('selectionChanged', () => this.refreshInspector()),
+      this.controller.subscribe('selectionChanged', () => {
+        this.refreshInspector();
+        // A chest opens beside the bag, the way the genre does it, so
+        // stacks can be dragged between the two.
+        const selected = this.controller.getSelection();
+        const view = selected === null ? null : this.controller.getBuildingView(selected);
+        if (view?.storage != null && !this.inventory.isOpen()) this.toggleInventory();
+      }),
     );
   }
 
