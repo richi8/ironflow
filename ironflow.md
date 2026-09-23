@@ -1388,11 +1388,8 @@ to arrange. What each change means:
   Factorio)*. Held, it sends `pickUp { held: true }` and on release
   `{ held: false }`, like mining's press and release. While
   `PlayerState.pickingUp` is set, `PlayerSystem` takes one item a tick, the
-  nearest to the player's centre, from belts, both lanes of a splitter, the
-  two visible ends of an underground run (never the tunnel between) and an
-  inserter's hand, counted as at the inserter's tile centre. An inserter
-  emptied that way swings back at the drop without stalling, as it already
-  did when a hand was emptied through the inspector. Reach is
+  nearest to the player's centre, from belts, both lanes of a splitter and the
+  two visible ends of an underground run (never the tunnel between). Reach is
   `PICKUP_RANGE_TILES` = 1 along each axis: Factorio's pickup distance, as a
   square so the belt beside the player is in reach end to end. Only an item
   the bag has room for is taken. Distances are exact integers, and carriers are

@@ -38,7 +38,7 @@ npm run dev        # http://localhost:5173
 | `R` | Rotate the held building |
 | Right click / drag | Put the held building down; with an empty hand, demolish a building or mine the ground |
 | `Q` | Hold another of the building under the cursor |
-| `F` (hold) | Pick up items from the belts and inserters around the player |
+| `F` (hold) | Pick up items from the belts around the player |
 | `Esc` | Drop everything, close a panel, or open the menu |
 | `F3` | Toggle the debug overlay |
 
