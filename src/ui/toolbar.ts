@@ -2,9 +2,11 @@
  * The hotbar. See ironflow.md C07 task 3 and §13.
  *
  * Nine slots along the bottom, bound to the number row, beside the buttons
- * that open the other panels. What each slot holds is the player's: a
- * building is dragged onto a slot from the inventory, dragged from one slot
- * to another to swap the two, and taken off with a right-click. The toolbar only reports those gestures — the controller keeps
+ * that open the other panels. What each slot holds is the player's: any
+ * item — a building or a material — is dragged onto a slot from the
+ * inventory, dragged from one slot to another to swap the two, and taken off
+ * with a right-click. A slot is **one stack**, so the same item may fill
+ * several. The toolbar only reports those gestures — the controller keeps
  * the arrangement, and slot *n* means the same thing to a click here and to
  * the number key, because both go through `GameController.selectSlot`.
  *
@@ -12,16 +14,16 @@
  * assignment and class toggles only (§13).
  */
 
-import type { BuildMenuEntry, BuildMenuView } from '../game/views/build-menu-view.js';
+import type { BuildMenuEntry, BuildMenuView, HotbarSlotView } from '../game/views/build-menu-view.js';
 import { HOTBAR_SLOTS } from '../game/game-controller.js';
 
 /**
- * The drag payload for a building on its way to the hotbar. A type of its
- * own, so the slots ignore a drag of anything else — a file, a link, text.
+ * The drag payload for an item on its way to the hotbar: its id. A type of
+ * its own, so the slots ignore a drag of anything else — a file, a link, text.
  */
-export const BUILDING_DRAG_TYPE = 'application/x-ironflow-building';
+export const ITEM_DRAG_TYPE = 'application/x-ironflow-item';
 
-/** The drag payload for a slot's building on its way to another slot: the source slot, 1-based. */
+/** The drag payload for a slot's item on its way to another slot: the source slot, 1-based. */
 export const SLOT_DRAG_TYPE = 'application/x-ironflow-slot';
 
 interface Slot {
@@ -33,11 +35,11 @@ interface Slot {
 export interface ToolbarOptions {
   /** Slot number, 1-based. The controller decides what that means. */
   readonly onSelectSlot: (slot: number) => void;
-  /** A building was dropped on slot `slot` (1-based). */
-  readonly onAssignSlot: (slot: number, buildingId: string) => void;
+  /** An item was dropped on slot `slot` (1-based). */
+  readonly onAssignSlot: (slot: number, itemId: string) => void;
   /** Slot `slot` (1-based) was right-clicked: empty it. */
   readonly onClearSlot: (slot: number) => void;
-  /** Slot `from`'s building was dropped on slot `to` (both 1-based): swap them. */
+  /** Slot `from`'s item was dropped on slot `to` (both 1-based): swap them. */
   readonly onMoveSlot: (from: number, to: number) => void;
   /** Open or close the inventory panel (C21A). */
   readonly onToggleInventory: () => void;
@@ -124,6 +126,7 @@ export class Toolbar {
       this.paintSlot(slot, view.hotbar[index] ?? undefined);
     });
 
+    // Rotation is a building's; a material in hand has none.
     const held = view.selectedBuildingId !== null;
     const label = held ? (ROTATION_LABELS[view.rotation] ?? '') : '';
     if (this.rotationLabel.textContent !== label) this.rotationLabel.textContent = label;
@@ -195,16 +198,16 @@ export class Toolbar {
     if (slot !== null) this.options.onSelectSlot(slot);
   };
 
-  /** Right-click takes a building off the bar. The browser's menu never opens over a slot. */
+  /** Right-click takes an item off the bar. The browser's menu never opens over a slot. */
   private readonly handleClear = (event: Event): void => {
     event.preventDefault();
     const slot = slotOf(event);
     if (slot !== null) this.options.onClearSlot(slot);
   };
 
-  /** Accept a building being dragged over, and nothing else. */
+  /** Accept an item being dragged over, and nothing else. */
   private readonly handleDragOver = (event: DragEvent): void => {
-    if (!carriesBuilding(event)) return;
+    if (!carriesItem(event)) return;
     event.preventDefault();
     if (event.dataTransfer !== null) {
       event.dataTransfer.dropEffect = Array.from(event.dataTransfer.types).includes(SLOT_DRAG_TYPE) ? 'move' : 'copy';
@@ -221,7 +224,7 @@ export class Toolbar {
     const slot = slotOf(event);
     if (slot === null) return;
 
-    // From another slot: a swap, which keeps both buildings on the bar.
+    // From another slot: a swap, which keeps both items on the bar.
     const from = Number(event.dataTransfer?.getData(SLOT_DRAG_TYPE) ?? '');
     if (Number.isInteger(from) && from > 0) {
       event.preventDefault();
@@ -229,13 +232,13 @@ export class Toolbar {
       return;
     }
 
-    const buildingId = event.dataTransfer?.getData(BUILDING_DRAG_TYPE) ?? '';
-    if (buildingId === '') return;
+    const itemId = event.dataTransfer?.getData(ITEM_DRAG_TYPE) ?? '';
+    if (itemId === '') return;
     event.preventDefault();
-    this.options.onAssignSlot(slot, buildingId);
+    this.options.onAssignSlot(slot, itemId);
   };
 
-  /** Pick a slot's building up to move it. An empty slot has nothing to drag. */
+  /** Pick a slot's item up to move it. An empty slot has nothing to drag. */
   private readonly handleDragStart = (event: DragEvent): void => {
     const slot = slotOf(event);
     const target = event.currentTarget;
@@ -276,50 +279,45 @@ export class Toolbar {
     return button;
   }
 
-  private paintSlot(slot: Slot, entry: BuildMenuEntry | undefined): void {
+  private paintSlot(slot: Slot, view: HotbarSlotView | undefined): void {
     const { button, name, count } = slot;
 
-    if (entry === undefined) {
+    if (view === undefined) {
       setText(name, '');
       setText(count, '');
       button.classList.add('is-empty');
-      button.classList.remove('is-selected', 'is-unaffordable', 'is-locked');
+      button.classList.remove('is-selected', 'is-unaffordable', 'is-locked', 'is-spent');
       button.draggable = false;
       // Not disabled: a disabled button receives no drag events, and an empty
-      // slot is exactly where a building gets dropped.
-      button.title = 'Empty — drag a building here from your inventory';
+      // slot is exactly where an item gets dropped.
+      button.title = 'Empty — drag an item here from your inventory';
       return;
     }
 
-    setText(name, entry.name);
-    setText(count, String(stockOf(entry)));
+    setText(name, view.name);
+    // One stack: what this slot stands for, not the whole bag.
+    setText(count, String(view.count));
     button.classList.remove('is-empty');
     button.draggable = true;
-    button.classList.toggle('is-selected', entry.selected);
+    button.classList.toggle('is-selected', view.selected);
+
+    const entry = view.building;
+    const edit = 'Drag to move, right-click to remove.';
+    if (entry === null) {
+      button.classList.remove('is-unaffordable', 'is-locked');
+      button.classList.toggle('is-spent', view.count === 0);
+      button.title = `${view.name} — ${view.count} / ${view.stackSize}. Click to hold, then click a machine to feed it. ${edit}`;
+      return;
+    }
+
+    button.classList.remove('is-spent');
     button.classList.toggle('is-unaffordable', !entry.affordable);
     button.classList.toggle('is-locked', !entry.unlocked);
     // C22's lock, said where the building is: the build menu that used to say
     // it is gone.
     const lock = entry.unlocked ? '' : ` — locked, research ${entry.unlockedBy ?? 'required'}`;
-    button.title = `${entry.name} — ${describeCost(entry)}${lock}. Drag to move, right-click to remove.`;
+    button.title = `${entry.name} — ${describeCost(entry)}${lock}. ${edit}`;
   }
-}
-
-/**
- * How many more of this building the player could place.
- *
- * The smallest ratio across the cost lines. §15 makes every build cost a single
- * stack of the building's own item, so today this is just "how many you have" —
- * but writing it as the limiting line means a two-item cost in a later chunk
- * shows the right number without anyone revisiting this file.
- */
-function stockOf(entry: BuildMenuEntry): number {
-  let limit = Infinity;
-  for (const line of entry.cost) {
-    if (line.count <= 0) continue;
-    limit = Math.min(limit, Math.floor(line.held / line.count));
-  }
-  return Number.isFinite(limit) ? limit : 0;
 }
 
 function describeCost(entry: BuildMenuEntry): string {
@@ -335,12 +333,12 @@ function slotOf(event: Event): number | null {
   return Number.isInteger(slot) ? slot : null;
 }
 
-/** Is this drag carrying a building, from the bag or another slot? The type list is readable during a drag; the data is not. */
-function carriesBuilding(event: DragEvent): boolean {
+/** Is this drag carrying an item, from the bag or another slot? The type list is readable during a drag; the data is not. */
+function carriesItem(event: DragEvent): boolean {
   const types = event.dataTransfer?.types;
   if (types === undefined) return false;
   const list = Array.from(types);
-  return list.includes(BUILDING_DRAG_TYPE) || list.includes(SLOT_DRAG_TYPE);
+  return list.includes(ITEM_DRAG_TYPE) || list.includes(SLOT_DRAG_TYPE);
 }
 
 function setText(element: HTMLElement, text: string): void {

@@ -128,7 +128,7 @@ describe('opening and closing', () => {
 
   it('picks up a carried building on a click and gets out of the way', () => {
     harness.ui.toggleInventory();
-    const cell = query<HTMLElement>(harness.root, '.if-bag-cell[data-building="chest"]');
+    const cell = query<HTMLElement>(harness.root, '.if-bag-cell[data-item="chest"]');
     expect(cell.draggable).toBe(true);
 
     cell.click();
@@ -141,13 +141,17 @@ describe('opening and closing', () => {
     expect(harness.controller.getSelectedBuilding()).toBe('chest');
   });
 
-  it('offers nothing to pick up or drag for an item that builds nothing', () => {
-    const ore = [...harness.root.querySelectorAll<HTMLElement>('.if-bag-cell')].find(
-      (cell) => cell.querySelector('.if-bag-cell__name')?.textContent === 'Iron Ore',
-    );
-    expect(ore).toBeDefined();
-    expect(ore?.draggable).toBe(false);
-    expect(ore?.classList.contains('is-placeable')).toBe(false);
+  it('picks up a material to feed a machine with, and lets it be dragged', () => {
+    give(harness.simulation, 'coal', 5);
+    harness.ui.toggleInventory();
+    const coal = query<HTMLElement>(harness.root, '.if-bag-cell[data-item="coal"]');
+    expect(coal.draggable).toBe(true);
+    expect(coal.classList.contains('is-placeable')).toBe(false);
+
+    coal.click();
+    expect(harness.controller.getHeldItem()).toBe('coal');
+    expect(harness.controller.getSelectedBuilding()).toBeNull();
+    expect(harness.ui.isInventoryOpen()).toBe(false);
   });
 
   it('repaints on the frame it opens, even while paused', () => {

@@ -1111,3 +1111,66 @@ describe('laying a belt line', () => {
     });
   });
 });
+
+describe('feeding a machine by hand', () => {
+  const COAL = { itemId: 'coal', amount: 50 } as const;
+
+  /** The queue as short strings: feeding is `insertItems`, everything else its type. */
+  function queued(): string[] {
+    return commands.drain().map((c) => {
+      if (c.type === 'insertItems') return `insert ${c.amount} ${c.itemId} -> #${c.entityId}`;
+      if (c.type === 'mineTile') return `mineTile ${c.x},${c.y}`;
+      return c.type;
+    });
+  }
+
+  function leftDown(x: number, y: number): void {
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x, y, button: BUTTON_LEFT, buttons: BUTTONS_LEFT }));
+  }
+
+  it('feeds one stack into the machine clicked, and selects it', () => {
+    picker.entitiesAt.set('3,8', 7);
+    input.setHeldItem(COAL);
+    leftDown(35, 82);
+
+    expect(queued()).toEqual(['insert 50 coal -> #7']);
+    expect(input.selectedEntityId).toBe(7);
+  });
+
+  it('feeds each machine a drag crosses once, however many of its tiles it crosses', () => {
+    picker.entitiesAt.set('0,0', 3);
+    picker.entitiesAt.set('1,0', 3);
+    picker.entitiesAt.set('2,0', 4);
+    input.setHeldItem(COAL);
+    leftDown(5, 5);
+    for (const x of [15, 25]) canvas.dispatchEvent(pointerEvent('pointermove', { x, y: 5, buttons: BUTTONS_LEFT }));
+
+    expect(queued()).toEqual(['insert 50 coal -> #3', 'insert 50 coal -> #4']);
+  });
+
+  it('still mines bare ground with a material in hand', () => {
+    input.setHeldItem(COAL);
+    leftDown(35, 82);
+    expect(queued()).toEqual(['mineTile 3,8']);
+  });
+
+  it('puts the material down on the right button and on Escape, demolishing nothing', () => {
+    picker.entitiesAt.set('3,8', 7);
+    input.setHeldItem(COAL);
+    canvas.dispatchEvent(pointerEvent('pointerdown', { x: 35, y: 82, button: BUTTON_RIGHT, buttons: 0 }));
+    expect(input.heldItem).toBeNull();
+    expect(queued()).toEqual([]);
+
+    input.setHeldItem(COAL);
+    document.dispatchEvent(keyEvent('keydown', 'Escape'));
+    expect(input.heldItem).toBeNull();
+  });
+
+  it('holds a building or a material, never both', () => {
+    input.setHeldItem(COAL);
+    input.setBuildTool({ buildingId: 'chest', rotationCount: 1, lineBuild: false });
+    expect(input.heldItem).toBeNull();
+    input.setHeldItem(COAL);
+    expect(input.buildTool).toBeNull();
+  });
+});

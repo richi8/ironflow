@@ -56,7 +56,7 @@
  *
  * ```text
  *   a panel is open                  close it (the game menu: and play on)
- *   a building or machine is held    let the input layer drop it
+ *   a building, material or machine is held    let the input layer drop it
  *   nothing                          pause into the game menu
  * ```
  *
@@ -65,7 +65,9 @@
  * hears nothing.
  *
  * There is no build menu. Buildings are picked from the hotbar or from the
- * inventory, and the hotbar is filled by dragging buildings onto it.
+ * inventory, and the hotbar is filled by dragging items onto it — buildings
+ * and materials alike, one stack per slot. A material in hand feeds the
+ * machine it is clicked on.
  */
 
 import type { GameController } from '../game/game-controller.js';
@@ -185,7 +187,7 @@ export class GameUI {
     });
     this.toolbar = new Toolbar({
       onSelectSlot: (slot) => this.controller.selectSlot(slot),
-      onAssignSlot: (slot, buildingId) => this.controller.assignSlot(slot, buildingId),
+      onAssignSlot: (slot, itemId) => this.controller.assignSlot(slot, itemId),
       onClearSlot: (slot) => this.controller.clearSlot(slot),
       onMoveSlot: (from, to) => this.controller.moveSlot(from, to),
       onToggleInventory: () => this.toggleInventory(),
@@ -217,11 +219,10 @@ export class GameUI {
       // does not allow.
       onCraft: (recipeId, count) => this.controller.craftItem(recipeId, count),
       onCancel: (index) => this.controller.cancelCraft(index),
-      // Picked up to build with: the panel gets out of the way, so the next
-      // click is on the world. `selectBuilding` puts down a building already
-      // held, so this holds it whether or not it was held before.
-      onPickBuilding: (buildingId) => {
-        if (this.controller.getSelectedBuilding() !== buildingId) this.controller.selectBuilding(buildingId);
+      // Picked up — a building to place, or a material to feed a machine
+      // with. The panel gets out of the way, so the next click is on the world.
+      onPickItem: (itemId) => {
+        this.controller.holdItem(itemId);
         this.setInventoryOpen(false);
       },
       onClose: () => this.toggleInventory(),
@@ -494,7 +495,13 @@ export class GameUI {
     if (event.key !== 'Escape' || event.repeat) return;
     if (!this.closeDialog()) {
       // Something in hand: the input layer's Escape drops it (see the header).
-      if (this.controller.getSelectedBuilding() !== null || this.controller.getSelection() !== null) return;
+      if (
+        this.controller.getSelectedBuilding() !== null ||
+        this.controller.getHeldItem() !== null ||
+        this.controller.getSelection() !== null
+      ) {
+        return;
+      }
       this.togglePauseMenu();
     }
     event.preventDefault();

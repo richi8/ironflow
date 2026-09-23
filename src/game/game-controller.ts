@@ -56,7 +56,7 @@ import { NO_TECHNOLOGY, type Technology, type Unlock } from './registries/techno
 import { asLab, type LabEntity } from './entities/lab-entity.js';
 import { MachineStatus } from './entities/machine-status.js';
 import { TPS } from './simulation-clock.js';
-import type { BuildMenuCost, BuildMenuEntry, BuildMenuView } from './views/build-menu-view.js';
+import type { BuildMenuCost, BuildMenuEntry, BuildMenuView, HotbarSlotView } from './views/build-menu-view.js';
 import type { Inventory } from './items/inventory.js';
 import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
@@ -119,6 +119,20 @@ export interface HeldBuilding {
 }
 
 /**
+ * A material held in the hand: ore, plates, coal — an item that places no
+ * building. Clicking a machine with one feeds it (`insertItems`, §7).
+ *
+ * Structurally `input/input-manager.ts`'s `HandItem`, redeclared for the
+ * reason `HeldBuilding` is. `amount` is one stack of the item, resolved here
+ * because §4 will not let the input layer read the item table: a click feeds
+ * up to one stack, and the machine takes what fits.
+ */
+export interface HeldItem {
+  readonly itemId: string;
+  readonly amount: number;
+}
+
+/**
  * What the player is holding, where they are pointing, and what they have
  * selected. See the file header.
  *
@@ -134,7 +148,10 @@ export interface Cursor {
   readonly buildRotation: Rotation;
   readonly hover: TileCoord | null;
   readonly selectedEntityId: EntityId | null;
+  /** A material in the hand, or null. Never set at the same time as `buildTool`. */
+  readonly heldItem: HeldItem | null;
   setBuildTool(tool: HeldBuilding | null): void;
+  setHeldItem(item: HeldItem | null): void;
   setSelectedEntity(entityId: EntityId | null): void;
 }
 
@@ -162,9 +179,11 @@ export interface GameControllerOptions {
    */
   readonly cursor?: Cursor;
   /**
-   * What the player last put on the hotbar, slot by slot — a building id or
+   * What the player last put on the hotbar, slot by slot — an item id or
    * `null` for an empty slot. Defaults to the first nine buildings in content
    * order, which is what the hotbar was before the player could arrange it.
+   * (A building's id is its item's id — §15 — so a layout saved when the
+   * hotbar held only buildings reads the same today.)
    *
    * The arrangement is not simulation state (§10) — no system reads it, and
    * it changes while paused, which a command could not — but it travels in
@@ -180,10 +199,17 @@ export class DetachedCursor implements Cursor {
   buildRotation: Rotation = NORTH;
   hover: TileCoord | null = null;
   selectedEntityId: EntityId | null = null;
+  heldItem: HeldItem | null = null;
 
   setBuildTool(tool: HeldBuilding | null): void {
     if (tool === null || this.buildTool?.buildingId !== tool.buildingId) this.buildRotation = NORTH;
     this.buildTool = tool;
+    if (tool !== null) this.heldItem = null;
+  }
+
+  setHeldItem(item: HeldItem | null): void {
+    this.heldItem = item;
+    if (item !== null) this.setBuildTool(null);
   }
 
   setSelectedEntity(entityId: EntityId | null): void {
@@ -239,10 +265,18 @@ export class GameController {
   private readonly mapChunks = new Map<string, { revision: number; view: MapChunkView }>();
 
   /**
-   * The hotbar, slot by slot: a building id or `null`. See `hotbar` in the
-   * options. Length is always `HOTBAR_SLOTS`.
+   * The hotbar, slot by slot: an item id or `null`. See `hotbar` in the
+   * options. Length is always `HOTBAR_SLOTS`. One item may sit on several
+   * slots; each shows its own stack (see `hotbarView`).
    */
   private readonly hotbar: (string | null)[];
+
+  /**
+   * The slot the hand was last filled from (0-based), or null when it was
+   * filled from the bag. Only for the highlight: with one item on two slots,
+   * the one the player pressed is the one that lights up.
+   */
+  private heldSlot: number | null = null;
 
   constructor(options: GameControllerOptions) {
     this.game = options.game;
@@ -286,6 +320,8 @@ export class GameController {
     this.cursor.setSelectedEntity(null);
     this.lastSelection = null;
     this.cursor.setBuildTool(null);
+    this.cursor.setHeldItem(null);
+    this.heldSlot = null;
     this.menuSignature = this.buildMenuSignature();
     // Drop what the old world recorded and never got to say; the toasts that
     // belong to it are about machines that no longer exist.
@@ -450,6 +486,7 @@ export class GameController {
     const held = this.cursor.buildTool;
     const entries: BuildMenuEntry[] = [];
 
+    const entryFor = new Map<string, BuildMenuEntry>();
     this.simulation.buildings.all().forEach((definition) => {
       const slot = this.hotbar.indexOf(definition.id);
       const cost: BuildMenuCost[] = definition.buildCost.map((stack) =>
@@ -472,14 +509,52 @@ export class GameController {
           hotkey: slot < 0 ? null : slot + 1,
         }),
       );
+      const entry = entries[entries.length - 1];
+      if (entry !== undefined) entryFor.set(definition.id, entry);
     });
 
     return freeze({
       entries: freeze(entries),
-      hotbar: freeze(this.hotbar.map((id) => entries.find((entry) => entry.buildingId === id) ?? null)),
+      hotbar: this.hotbarView(entryFor),
+      heldItemId: this.cursor.heldItem?.itemId ?? null,
       selectedBuildingId: held?.buildingId ?? null,
       rotation: this.cursor.buildRotation,
     });
+  }
+
+  /**
+   * The hotbar, slot by slot, with the stack each slot stands for.
+   *
+   * **One slot is one stack.** The bag is counts, not slots (C08), so the
+   * stacks are dealt out in slot order: the first slot holding iron plate
+   * shows the first 100, the second the next 100, and a slot past what is
+   * carried shows 0. Nothing is reserved or moved — the slots are a way of
+   * looking at the bag, and what they show always adds up to what it holds.
+   */
+  private hotbarView(entryFor: ReadonlyMap<string, BuildMenuEntry>): readonly (HotbarSlotView | null)[] {
+    const items = this.simulation.items;
+    const bag = this.simulation.inventory;
+    const handItem = this.cursor.heldItem?.itemId ?? this.cursor.buildTool?.buildingId ?? null;
+    const dealt = new Map<string, number>();
+
+    const slots = this.hotbar.map((itemId, index): HotbarSlotView | null => {
+      if (itemId === null || !items.has(itemId)) return null;
+      const definition = items.get(itemId);
+      const before = dealt.get(itemId) ?? 0;
+      dealt.set(itemId, before + 1);
+      const total = bag.count(itemId);
+      const count = Math.max(0, Math.min(definition.stackSize, total - before * definition.stackSize));
+      const selected = handItem === itemId && this.selectedSlotIndex(itemId) === index;
+      return freeze({
+        itemId,
+        name: definition.name,
+        count,
+        stackSize: definition.stackSize,
+        building: entryFor.get(this.buildingForItem(itemId) ?? '') ?? null,
+        selected,
+      });
+    });
+    return freeze(slots);
   }
 
   /**
@@ -1015,8 +1090,10 @@ export class GameController {
    * reaching for Escape.
    */
   selectBuilding(buildingId: string | null): void {
+    this.heldSlot = null;
     if (buildingId === null || !this.simulation.buildings.has(buildingId)) {
       this.cursor.setBuildTool(null);
+      this.cursor.setHeldItem(null);
       return;
     }
     if (this.cursor.buildTool?.buildingId === buildingId) {
@@ -1031,28 +1108,85 @@ export class GameController {
     });
   }
 
-  /**
-   * Select hotbar slot `slot` (1-based). An empty slot empties the hand.
-   *
-   * What a slot holds is the player's arrangement (`assignSlot`), starting
-   * from the first nine buildings in content order.
-   */
-  selectSlot(slot: number): void {
-    if (!isHotbarSlot(slot)) return;
-    this.selectBuilding(this.hotbar[slot - 1] ?? null);
+  /** The material in the hand, by content id — null when the hand is empty or holds a building. */
+  getHeldItem(): string | null {
+    return this.cursor.heldItem?.itemId ?? null;
   }
 
   /**
-   * Put a building on hotbar slot `slot` (1-based) — an item dragged there
-   * from the inventory. A building already on another slot moves rather than
-   * appearing twice, so a number key always means one thing.
+   * Take an item into the hand: its building if it places one, otherwise the
+   * material itself, ready to feed a machine. Unknown ids empty the hand.
+   *
+   * Unlike `selectBuilding` this never puts down what is already held, so a
+   * second click on the same bag cell keeps it in hand.
    */
-  assignSlot(slot: number, buildingId: string): void {
-    if (!isHotbarSlot(slot) || !this.simulation.buildings.has(buildingId)) return;
-    const previous = this.hotbar.indexOf(buildingId);
-    if (previous === slot - 1) return;
-    if (previous >= 0) this.hotbar[previous] = null;
-    this.hotbar[slot - 1] = buildingId;
+  holdItem(itemId: string): void {
+    this.heldSlot = null;
+    this.fillHand(itemId);
+  }
+
+  private fillHand(itemId: string | null): void {
+    if (itemId === null || !this.simulation.items.has(itemId)) {
+      this.cursor.setBuildTool(null);
+      this.cursor.setHeldItem(null);
+      return;
+    }
+    const buildingId = this.buildingForItem(itemId);
+    if (buildingId !== null) {
+      if (this.cursor.buildTool?.buildingId !== buildingId) this.selectBuilding(buildingId);
+      return;
+    }
+    if (this.cursor.heldItem?.itemId === itemId) return;
+    this.cursor.setHeldItem({ itemId, amount: this.simulation.items.get(itemId).stackSize });
+  }
+
+  /** Is `itemId` what the hand holds, as a building or as a material? */
+  private isInHand(itemId: string): boolean {
+    return this.cursor.heldItem?.itemId === itemId || this.cursor.buildTool?.buildingId === itemId;
+  }
+
+  /**
+   * Select hotbar slot `slot` (1-based). An empty slot empties the hand, and
+   * pressing the slot already in hand puts it down.
+   *
+   * What a slot holds is the player's arrangement (`assignSlot`), starting
+   * from the first nine buildings in content order. A building's slot holds
+   * the building; any other item's slot holds the material, to feed a machine
+   * with.
+   */
+  selectSlot(slot: number): void {
+    if (!isHotbarSlot(slot)) return;
+    const index = slot - 1;
+    const itemId = this.hotbar[index] ?? null;
+    if (itemId !== null && this.isInHand(itemId) && this.selectedSlotIndex(itemId) === index) {
+      this.fillHand(null);
+      this.heldSlot = null;
+      return;
+    }
+    this.fillHand(itemId);
+    this.heldSlot = itemId === null ? null : index;
+    // Announced here, because the highlight moving between two slots of the
+    // same item is the one change the signature cannot see; the signature is
+    // brought up to date so the next `pump` does not announce it twice.
+    this.menuSignature = this.buildMenuSignature();
+    this.emit({ type: 'buildMenuChanged' });
+  }
+
+  /** The slot lit for `itemId`: the one pressed, or its first slot when it came from the bag. */
+  private selectedSlotIndex(itemId: string): number {
+    if (this.heldSlot !== null && this.hotbar[this.heldSlot] === itemId) return this.heldSlot;
+    return this.hotbar.indexOf(itemId);
+  }
+
+  /**
+   * Put an item on hotbar slot `slot` (1-based) — dragged there from the
+   * inventory. Any item may go on the bar, and the same one may go on several
+   * slots: each is one stack of it (see `hotbarView`).
+   */
+  assignSlot(slot: number, itemId: string): void {
+    if (!isHotbarSlot(slot) || !this.simulation.items.has(itemId)) return;
+    if (this.hotbar[slot - 1] === itemId) return;
+    this.hotbar[slot - 1] = itemId;
     this.emit({ type: 'buildMenuChanged' });
   }
 
@@ -1060,10 +1194,11 @@ export class GameController {
   clearSlot(slot: number): void {
     if (!isHotbarSlot(slot) || this.hotbar[slot - 1] === null) return;
     this.hotbar[slot - 1] = null;
+    if (this.heldSlot === slot - 1) this.heldSlot = null;
     this.emit({ type: 'buildMenuChanged' });
   }
 
-  /** The hotbar as building ids, for the save's metadata. */
+  /** The hotbar as item ids, for the save's metadata. */
   getHotbarLayout(): readonly (string | null)[] {
     return freeze([...this.hotbar]);
   }
@@ -1072,12 +1207,13 @@ export class GameController {
   setHotbarLayout(layout: readonly (string | null)[] | null): void {
     const next = this.resolveHotbar(layout);
     for (let slot = 0; slot < HOTBAR_SLOTS; slot++) this.hotbar[slot] = next[slot] ?? null;
+    this.heldSlot = null;
     this.emit({ type: 'buildMenuChanged' });
   }
 
   /**
-   * Swap two hotbar slots (1-based) — one slot's building dragged onto
-   * another. Dropped on an empty slot, it simply moves.
+   * Swap two hotbar slots (1-based) — one slot's item dragged onto another.
+   * Dropped on an empty slot, it simply moves.
    */
   moveSlot(from: number, to: number): void {
     if (!isHotbarSlot(from) || !isHotbarSlot(to) || from === to) return;
@@ -1085,20 +1221,18 @@ export class GameController {
     if (moving === null) return;
     this.hotbar[from - 1] = this.hotbar[to - 1] ?? null;
     this.hotbar[to - 1] = moving;
+    if (this.heldSlot === from - 1) this.heldSlot = to - 1;
+    else if (this.heldSlot === to - 1) this.heldSlot = from - 1;
     this.emit({ type: 'buildMenuChanged' });
   }
 
-  /** A layout as nine slots of known buildings; `null` is the first nine in content order. */
+  /** A layout as nine slots of known items; `null` is the first nine buildings in content order. */
   private resolveHotbar(layout: readonly (string | null)[] | null): (string | null)[] {
     const buildings = this.simulation.buildings;
-    const seen = new Set<string>();
+    const items = this.simulation.items;
     return Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
       const id = layout === null ? (buildings.all()[index]?.id ?? null) : (layout[index] ?? null);
-      // One slot per building, as `assignSlot` keeps it: a file edited by
-      // hand to say otherwise keeps the first.
-      if (id === null || !buildings.has(id) || seen.has(id)) return null;
-      seen.add(id);
-      return id;
+      return id !== null && items.has(id) ? id : null;
     });
   }
 
@@ -1271,7 +1405,15 @@ export class GameController {
    * belongs in this string too.
    */
   private buildMenuSignature(): string {
-    const parts: string[] = [this.cursor.buildTool?.buildingId ?? '-', String(this.cursor.buildRotation)];
+    const parts: string[] = [
+      this.cursor.buildTool?.buildingId ?? '-',
+      this.cursor.heldItem?.itemId ?? '-',
+      String(this.cursor.buildRotation),
+    ];
+    // The hotbar's stacks: ore on the bar changes count as it is mined.
+    for (const itemId of this.hotbar) {
+      parts.push(itemId === null ? '-' : String(this.simulation.inventory.count(itemId)));
+    }
     for (const definition of this.simulation.buildings.all()) {
       parts.push(definition.id);
       // C22. Without this the menu would learn about a completed technology

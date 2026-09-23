@@ -226,8 +226,10 @@ export interface SaveMetadata {
   /** A data URL, or null. C25 decides whether it ever fills this in. */
   readonly thumbnail: string | null;
   /**
-   * The player's hotbar, slot by slot: a building id or `null` for an empty
-   * slot. `null` as a whole means the default layout (v2, 2026-09-23).
+   * The player's hotbar, slot by slot: an item id or `null` for an empty
+   * slot. `null` as a whole means the default layout (v2, 2026-09-23). It
+   * held only buildings until later that day; a building's id is its item's
+   * id (§15), so those layouts read the same and the schema did not move.
    *
    * In the metadata rather than the state because it is not simulation state:
    * no system reads it and it changes while the game is paused, which a

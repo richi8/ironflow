@@ -327,7 +327,12 @@ body {
   opacity: 0.45;
 }
 
-/* A building being dragged over a slot it would land on. */
+/* A material slot whose stack has run out: kept, and dimmed. */
+.if-slot.is-spent .if-slot__count {
+  color: var(--if-text-dim);
+}
+
+/* An item being dragged over a slot it would land on. */
 .if-slot.is-drop-target {
   border-color: var(--if-accent-high);
   border-style: dashed;
@@ -696,13 +701,13 @@ body {
   background: var(--if-bg);
 }
 
-/* A carried building: click to hold it, or drag it onto the hotbar. */
-.if-bag-cell.is-placeable {
+/* Any carried item: click to hold it, or drag it onto the hotbar. */
+.if-bag-cell {
   cursor: grab;
 }
 
-.if-bag-cell.is-placeable:hover,
-.if-bag-cell.is-placeable:focus-visible {
+.if-bag-cell:hover,
+.if-bag-cell:focus-visible {
   outline: 1px solid var(--if-blue);
 }
 

@@ -206,7 +206,7 @@ describe('GameController build tool', () => {
     expect(controller.getSelectedBuilding()).toBeNull();
   });
 
-  it('lets the player arrange the hotbar, one slot per building', () => {
+  it('lets the player arrange the hotbar, with any item on any number of slots', () => {
     const { game } = makeGame();
     const controller = new GameController({ game });
     let changes = 0;
@@ -215,19 +215,75 @@ describe('GameController build tool', () => {
     controller.assignSlot(9, 'splitter');
     controller.selectSlot(9);
     expect(controller.getSelectedBuilding()).toBe('splitter');
-    // Moved, not copied: slot 3 held the splitter by default.
-    expect(controller.getHotbarLayout()[2]).toBeNull();
-    expect(controller.getBuildMenuView().entries.find((entry) => entry.buildingId === 'splitter')?.hotkey).toBe(9);
+    // Copied, not moved: slot 3 still holds the splitter it had by default.
+    expect(controller.getHotbarLayout()[2]).toBe('splitter');
 
     controller.clearSlot(9);
     expect(controller.getBuildMenuView().hotbar[8]).toBeNull();
-    expect(changes).toBe(2);
+    expect(changes).toBe(3);
 
     // Nonsense is ignored rather than thrown, and announces nothing.
     controller.assignSlot(0, 'chest');
-    controller.assignSlot(4, 'no_such_building');
+    controller.assignSlot(4, 'no_such_item');
     controller.clearSlot(HOTBAR_SLOTS + 1);
-    expect(changes).toBe(2);
+    expect(changes).toBe(3);
+  });
+
+  it('shows one stack per slot, dealt out in slot order', () => {
+    const { game, simulation } = makeGame();
+    const controller = new GameController({ game });
+    controller.assignSlot(7, 'iron_ore');
+    controller.assignSlot(8, 'iron_ore');
+    controller.assignSlot(9, 'iron_ore');
+    simulation.inventory.add('iron_ore', 70);
+
+    const hotbar = controller.getBuildMenuView().hotbar;
+    // Iron ore stacks at 50.
+    expect(hotbar.slice(6).map((slot) => slot?.count)).toEqual([50, 20, 0]);
+    expect(hotbar[6]?.building).toBeNull();
+    expect(hotbar[0]?.building?.buildingId).toBe('miner');
+  });
+
+  it('holds a material from its slot, and lights only the slot pressed', () => {
+    const { game } = makeGame();
+    const cursor = new DetachedCursor();
+    const controller = new GameController({ game, cursor });
+    controller.assignSlot(8, 'coal');
+    controller.assignSlot(9, 'coal');
+
+    controller.selectSlot(9);
+    expect(controller.getHeldItem()).toBe('coal');
+    expect(cursor.heldItem).toEqual({ itemId: 'coal', amount: 50 });
+    expect(cursor.buildTool).toBeNull();
+    let selected = controller.getBuildMenuView().hotbar.map((slot) => slot?.selected ?? false);
+    expect(selected.slice(7)).toEqual([false, true]);
+
+    // The other coal slot keeps coal in hand and moves the light.
+    controller.selectSlot(8);
+    expect(controller.getHeldItem()).toBe('coal');
+    selected = controller.getBuildMenuView().hotbar.map((slot) => slot?.selected ?? false);
+    expect(selected.slice(7)).toEqual([true, false]);
+
+    // A building slot swaps the material for the building; pressing it again empties the hand.
+    controller.selectSlot(1);
+    expect(controller.getHeldItem()).toBeNull();
+    expect(controller.getSelectedBuilding()).toBe('miner');
+    controller.selectSlot(1);
+    expect(controller.getSelectedBuilding()).toBeNull();
+  });
+
+  it('holds what the bag offers: the building an item places, or the item itself', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game });
+    controller.holdItem('chest');
+    expect(controller.getSelectedBuilding()).toBe('chest');
+    controller.holdItem('chest');
+    expect(controller.getSelectedBuilding()).toBe('chest');
+    controller.holdItem('iron_plate');
+    expect(controller.getSelectedBuilding()).toBeNull();
+    expect(controller.getHeldItem()).toBe('iron_plate');
+    controller.holdItem('no_such_item');
+    expect(controller.getHeldItem()).toBeNull();
   });
 
   it('starts from a remembered hotbar, forgetting buildings that no longer exist', () => {
@@ -253,9 +309,9 @@ describe('GameController build tool', () => {
   it('takes a whole layout from a loaded save, or the default for null', () => {
     const { game } = makeGame();
     const controller = new GameController({ game });
-    controller.setHotbarLayout(['chest', 'chest', 'belt']);
-    // One slot per building, even from a file that says otherwise.
-    expect(controller.getHotbarLayout().slice(0, 3)).toEqual(['chest', null, 'belt']);
+    controller.setHotbarLayout(['chest', 'chest', 'iron_ore']);
+    // Any item, on as many slots as the file says.
+    expect(controller.getHotbarLayout().slice(0, 3)).toEqual(['chest', 'chest', 'iron_ore']);
     controller.setHotbarLayout(null);
     expect(controller.getHotbarLayout()[0]).toBe('miner');
   });

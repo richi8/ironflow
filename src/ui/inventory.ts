@@ -23,13 +23,14 @@
  * The queue is the one varying-length list, and it is a fixed pool too —
  * `QUEUE_ROWS` of them, which is more orders than the simulation will hold.
  *
- * ## It is where building starts
+ * ## It is where building, and feeding, starts
  *
- * A carried building — a miner, a belt, a chest — is a cell that can be
- * picked up: a click puts it in the player's hand and closes the panel, so
- * the next click lands on the world, and a drag carries it onto a hotbar slot.
- * That is the whole of what the build menu used to do, from the place the
- * player already looks to see what they have.
+ * Every carried item is a cell that can be picked up: a click puts it in the
+ * player's hand and closes the panel, so the next click lands on the world,
+ * and a drag carries it onto a hotbar slot. A building in hand is placed; a
+ * material in hand — ore, coal, plates — is fed to the machine it is clicked
+ * on. That is the whole of what the build menu used to do, and more, from the
+ * place the player already looks to see what they have.
  *
  * ## It cannot change anything
  *
@@ -48,7 +49,7 @@ import type {
 } from '../game/views/inventory-view.js';
 
 import { createIcon } from './icons.js';
-import { BUILDING_DRAG_TYPE } from './toolbar.js';
+import { ITEM_DRAG_TYPE } from './toolbar.js';
 
 /**
  * Queue rows drawn. More than `MAX_CRAFT_ORDERS`, which is the simulation's
@@ -87,8 +88,8 @@ export interface InventoryPanelOptions {
   readonly onCraft: (recipeId: string, count: number) => void;
   /** Drop the order at `index`, refunding it. */
   readonly onCancel: (index: number) => void;
-  /** A carried building was clicked: hold it, ready to place. */
-  readonly onPickBuilding: (buildingId: string) => void;
+  /** A carried item was clicked: hold it, ready to place or to feed a machine. */
+  readonly onPickItem: (itemId: string) => void;
   readonly onClose: () => void;
 }
 
@@ -217,20 +218,20 @@ export class InventoryPanel {
     this.options.onCraft(recipeId, batch);
   };
 
-  /** A click on a carried building picks it up. Other cells ignore it. */
+  /** A click on a carried item picks it up. */
   private readonly handlePick = (event: Event): void => {
-    const buildingId = buildingOf(event);
-    if (buildingId !== null) this.options.onPickBuilding(buildingId);
+    const itemId = itemOf(event);
+    if (itemId !== null) this.options.onPickItem(itemId);
   };
 
-  /** A drag of a carried building, on its way to a hotbar slot. */
+  /** A drag of a carried item, on its way to a hotbar slot. */
   private readonly handleDragStart = (event: DragEvent): void => {
-    const buildingId = buildingOf(event);
-    if (buildingId === null || event.dataTransfer === null) {
+    const itemId = itemOf(event);
+    if (itemId === null || event.dataTransfer === null) {
       event.preventDefault();
       return;
     }
-    event.dataTransfer.setData(BUILDING_DRAG_TYPE, buildingId);
+    event.dataTransfer.setData(ITEM_DRAG_TYPE, itemId);
     event.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -289,17 +290,15 @@ export class InventoryPanel {
     const slots = document.createElement('span');
     slots.className = 'if-bag-cell__slots';
 
-    // Whether an item places a building is content and never changes, so it
-    // is decided once, here, rather than repainted.
-    if (item.buildingId !== null) {
-      root.classList.add('is-placeable');
-      root.dataset['building'] = item.buildingId;
-      root.draggable = true;
-      root.tabIndex = 0;
-      root.setAttribute('role', 'button');
-      root.addEventListener('click', this.handlePick);
-      root.addEventListener('dragstart', this.handleDragStart);
-    }
+    // Every item can be picked up and put on the hotbar. Whether it places a
+    // building is content and never changes, so it is decided once, here.
+    root.dataset['item'] = item.itemId;
+    root.draggable = true;
+    root.tabIndex = 0;
+    root.setAttribute('role', 'button');
+    root.addEventListener('click', this.handlePick);
+    root.addEventListener('dragstart', this.handleDragStart);
+    if (item.buildingId !== null) root.classList.add('is-placeable');
 
     root.append(name, count, slots);
     this.cells.set(item.itemId, { root, name, count, slots });
@@ -363,7 +362,10 @@ export class InventoryPanel {
     // The slot cost, which is what the "27 / 30" at the top is made of — and
     // the answer to a bag that is full while reading as half empty.
     setText(cell.slots, item.slots === 1 ? '1 slot' : `${item.slots} slots`);
-    const use = item.buildingId === null ? '' : ' — click to build, or drag onto the hotbar';
+    const use =
+      item.buildingId === null
+        ? ' — click to hold and feed a machine, or drag onto the hotbar'
+        : ' — click to build, or drag onto the hotbar';
     cell.root.title = `${item.name} — ${item.count}, ${item.stackSize} per slot${use}`;
   }
 
@@ -425,11 +427,11 @@ function label(text: string): HTMLElement {
   return element;
 }
 
-/** The building a cell places, read off the element the listener is bound to. */
-function buildingOf(event: Event): string | null {
+/** The item a cell holds, read off the element the listener is bound to. */
+function itemOf(event: Event): string | null {
   const target = event.currentTarget;
   if (!(target instanceof HTMLElement)) return null;
-  return target.dataset['building'] ?? null;
+  return target.dataset['item'] ?? null;
 }
 
 function setText(element: HTMLElement, text: string): void {

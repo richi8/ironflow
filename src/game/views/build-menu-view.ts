@@ -55,15 +55,36 @@ export interface BuildMenuEntry {
   readonly hotkey: number | null;
 }
 
+/**
+ * One hotbar slot: an item the player put there, and **one stack** of it.
+ *
+ * Any item may sit on the bar, and the same item on several slots. The bag
+ * counts items rather than keeping slots (C08), so the stacks are dealt out in
+ * slot order — see `GameController.hotbarView`.
+ */
+export interface HotbarSlotView {
+  readonly itemId: string;
+  readonly name: string;
+  /** This slot's stack: at most `stackSize`, and 0 when the bag has run out. */
+  readonly count: number;
+  readonly stackSize: number;
+  /** The building this item places, or null for a material. */
+  readonly building: BuildMenuEntry | null;
+  /** This is the slot the hand was filled from. */
+  readonly selected: boolean;
+}
+
 export interface BuildMenuView {
   readonly entries: readonly BuildMenuEntry[];
   /**
-   * The hotbar, slot by slot: the entry the player put there, or `null` for
-   * an empty slot. Always `HOTBAR_SLOTS` long.
+   * The hotbar, slot by slot: what the player put there, or `null` for an
+   * empty slot. Always `HOTBAR_SLOTS` long.
    */
-  readonly hotbar: readonly (BuildMenuEntry | null)[];
-  /** What the cursor is holding, or null for an empty hand. */
+  readonly hotbar: readonly (HotbarSlotView | null)[];
+  /** The building the cursor is holding, or null. */
   readonly selectedBuildingId: string | null;
+  /** The material in the hand, to feed a machine with, or null. */
+  readonly heldItemId: string | null;
   /** The rotation the held building would be placed with. */
   readonly rotation: Rotation;
 }

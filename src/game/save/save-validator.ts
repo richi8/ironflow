@@ -392,8 +392,8 @@ function readMetadata(value: unknown): SaveMetadata {
 }
 
 /**
- * The hotbar layout (v2). Ids are only checked to be short strings: whether a
- * building exists is content, and the controller turns an unknown one into an
+ * The hotbar layout (v2). Ids are only checked to be short strings: whether an
+ * item exists is content, and the controller turns an unknown one into an
  * empty slot rather than refusing a whole save over a preference.
  */
 function readHotbar(value: unknown): readonly (string | null)[] | null {

@@ -95,10 +95,10 @@ function dragEvent(type: string, dataType: string, data: string): Event {
   return event;
 }
 
-/** Drag a building over a slot and let go. */
-function drop(target: Element, buildingId: string): void {
-  target.dispatchEvent(dragEvent('dragover', 'application/x-ironflow-building', buildingId));
-  target.dispatchEvent(dragEvent('drop', 'application/x-ironflow-building', buildingId));
+/** Drag an item over a slot and let go. */
+function drop(target: Element, itemId: string): void {
+  target.dispatchEvent(dragEvent('dragover', 'application/x-ironflow-item', itemId));
+  target.dispatchEvent(dragEvent('drop', 'application/x-ironflow-item', itemId));
 }
 
 function tileValue(root: ParentNode, label: string): string {
@@ -188,7 +188,7 @@ describe('the toolbar drives the game through commands only', () => {
     expect(controller.getSelectedBuilding()).toBeNull();
   });
 
-  it('takes a building dropped from the bag onto a slot, and moves it rather than copying it', () => {
+  it('takes a building dropped from the bag onto a slot, and lets it sit on two slots', () => {
     const { root, controller } = harness;
     const target = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
 
@@ -197,9 +197,34 @@ describe('the toolbar drives the game through commands only', () => {
     target.click();
     expect(controller.getSelectedBuilding()).toBe('splitter');
 
-    // Splitter was on slot 3 by default; a number key means one thing.
+    // Splitter is still on slot 3 from the default layout: one stack each.
     const three = query<HTMLButtonElement>(root, '.if-slot[data-slot="3"]');
-    expect(three.classList.contains('is-empty')).toBe(true);
+    expect(query<HTMLElement>(three, '.if-slot__name').textContent).toBe('Splitter');
+    // Only the slot that was pressed lights up.
+    expect(target.classList.contains('is-selected')).toBe(true);
+    expect(three.classList.contains('is-selected')).toBe(false);
+  });
+
+  it('takes a material, one stack per slot, and holds it to feed a machine', () => {
+    const { root, controller, simulation } = harness;
+    simulation.inventory.add('iron_ore', 70);
+    const eight = query<HTMLButtonElement>(root, '.if-slot[data-slot="8"]');
+    const nine = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
+
+    drop(eight, 'iron_ore');
+    drop(nine, 'iron_ore');
+    // Iron ore stacks at 50: the first slot shows a full stack, the second the rest.
+    expect(query<HTMLElement>(eight, '.if-slot__count').textContent).toBe('50');
+    expect(query<HTMLElement>(nine, '.if-slot__count').textContent).toBe('20');
+
+    nine.click();
+    expect(controller.getHeldItem()).toBe('iron_ore');
+    expect(controller.getSelectedBuilding()).toBeNull();
+    expect(nine.classList.contains('is-selected')).toBe(true);
+    expect(eight.classList.contains('is-selected')).toBe(false);
+
+    nine.click();
+    expect(controller.getHeldItem()).toBeNull();
   });
 
   it('swaps two slots when one is dragged onto the other', () => {
@@ -229,7 +254,7 @@ describe('the toolbar drives the game through commands only', () => {
     ]);
   });
 
-  it('ignores a drag of anything that is not a building', () => {
+  it('ignores a drag of anything that is not an item', () => {
     const { root } = harness;
     const target = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
     const over = dragEvent('dragover', 'text/plain', 'hello');

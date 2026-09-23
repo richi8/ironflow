@@ -106,6 +106,18 @@ export interface BuildTool {
   readonly lineBuild: boolean;
 }
 
+/**
+ * A material in the hand — ore, plates, coal — to feed machines with.
+ *
+ * `amount` is how many one click offers, which is one stack: the controller
+ * knows the stack size and this layer may not read content data (§4). The
+ * machine takes what fits and the simulation says why when it takes nothing.
+ */
+export interface HandItem {
+  readonly itemId: string;
+  readonly amount: number;
+}
+
 /** One tile of a drag-built line: where it goes and which way it faces. */
 export interface LineSegment {
   readonly x: number;
@@ -326,6 +338,13 @@ export class InputManager {
   private readonly laid = new Map<number, Rotation>();
   private tool: BuildTool | null = null;
   private toolRotation: Rotation = NORTH;
+  /** A material in the hand. Never set together with `tool`. */
+  private item: HandItem | null = null;
+  /**
+   * Machines this drag has already fed. A drag across a row of furnaces feeds
+   * each one once, however many of its tiles the pointer crosses.
+   */
+  private readonly fed = new Set<EntityId>();
   /**
    * The last walk direction sent to the simulation.
    *
@@ -444,12 +463,24 @@ export class InputManager {
    * east-facing belts expects: picking the belt up again must not turn it.
    */
   setBuildTool(tool: BuildTool | null): void {
+    if (tool !== null) this.item = null;
     if (tool !== null && this.tool?.buildingId === tool.buildingId) {
       this.tool = tool;
       return;
     }
     this.tool = tool;
     this.toolRotation = NORTH;
+  }
+
+  /** The material in the hand, or null. */
+  get heldItem(): HandItem | null {
+    return this.item;
+  }
+
+  /** Hold a material, or `null` to empty that hand. Holding one puts any building down. */
+  setHeldItem(item: HandItem | null): void {
+    this.item = item;
+    if (item !== null) this.setBuildTool(null);
   }
 
   /** True while the camera is being dragged. For the debug readout. */
@@ -546,6 +577,7 @@ export class InputManager {
       if (this.tool === null) this.selection = this.hoveredEntity;
       this.lastActedTile = null;
       this.laid.clear();
+      this.fed.clear();
       // A belt drags out a *line* anchored where the button went down (C13
       // task 7); everything else places one building per tile crossed.
       this.lineDrag = this.tool?.lineBuild === true;
@@ -569,8 +601,9 @@ export class InputManager {
       // universal "cancel", and the reason it does not also demolish: the
       // click that cancels a misplaced ghost must never be the click that
       // removes the building underneath it.
-      if (this.tool !== null) {
+      if (this.tool !== null || this.item !== null) {
         this.setBuildTool(null);
+        this.item = null;
         return;
       }
       this.selection = null;
@@ -648,6 +681,7 @@ export class InputManager {
     this.lineDrag = false;
     this.lineHead = null;
     this.laid.clear();
+    this.fed.clear();
     this.mouse.release(drag.pointerId);
     this.canvas.classList.remove(DRAGGING_CLASS);
     this.stopMining();
@@ -677,6 +711,7 @@ export class InputManager {
         // building as well as the selection, so Escape is always the way out.
         this.selection = null;
         this.setBuildTool(null);
+        this.item = null;
       }
       if (action === 'build.rotate') this.rotateTool();
       // Picking up a building while mining stops the mining: the two gestures
@@ -759,6 +794,11 @@ export class InputManager {
     this.lastActedTile = tile;
 
     const tool = this.tool;
+    const item = this.item;
+    if (tool === null && item !== null && this.hoveredEntity !== null) {
+      this.feed(this.hoveredEntity, item);
+      return;
+    }
     if (tool === null) {
       // Clicking a machine inspects it; it does not try to mine the ground
       // underneath it (C12 task 4). Without this a miner sitting on ore — the
@@ -884,7 +924,22 @@ export class InputManager {
     if (last !== undefined) this.toolRotation = last.rotation;
   }
 
-  /** Ask the simulation to demolish whatever stands on a tile (C06 task 6). */
+  /**
+   * Hand a machine one stack of the held material.
+   *
+   * Nothing is pre-checked: whether a furnace takes copper ore is the
+   * building's answer (`hand-system.ts`), and a refusal is a toast. The
+   * machine is selected as well, so the inspector shows it filling up —
+   * dragging across a row leaves the last one open.
+   */
+  private feed(entityId: EntityId, item: HandItem): void {
+    this.stopMining();
+    this.selection = entityId;
+    if (this.fed.has(entityId)) return;
+    this.fed.add(entityId);
+    this.commands.enqueue({ type: 'insertItems', entityId, itemId: item.itemId, amount: item.amount });
+  }
+
   /**
    * Remember what the machine under the cursor is making (C20 task 5).
    *
@@ -914,6 +969,7 @@ export class InputManager {
     this.commands.enqueue({ type: 'setRecipe', entityId, recipeId: this.copiedRecipe });
   }
 
+  /** Ask the simulation to demolish whatever stands on a tile (C06 task 6). */
   private removeAt(tile: TileCoord | null): void {
     if (tile === null) return;
     this.commands.enqueue({ type: 'remove', x: tile.x, y: tile.y });

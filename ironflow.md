@@ -1191,9 +1191,9 @@ to arrange. What each change means:
 
 - **The hotbar belongs to the player.** A carried building in the inventory is
   a cell you can pick up. Dragging it onto a hotbar slot puts it there,
-  right-clicking a slot empties it, and a building dragged onto a second slot
-  moves rather than appears twice, so a number key always means one thing.
-  The nine slots start as the first nine buildings in content order, which is
+  right-clicking a slot empties it. *(A building dragged onto a second slot
+  used to move rather than appear twice; superseded below — a slot is now one
+  stack.)* The nine slots start as the first nine buildings in content order, which is
   what the hotbar was before. `GameController` owns the arrangement
   (`assignSlot`, `clearSlot`) and emits `buildMenuChanged`, and
   `BuildMenuView.hotbar` is what the toolbar paints.
@@ -1204,8 +1204,27 @@ to arrange. What each change means:
   save gets the default, and a new world starts from the default. *(For a day
   it lived in `localStorage` instead; replaced on request so a factory keeps
   its own hotbar.)*
-- **Slots rearrange by dragging.** A slot's building dragged onto another slot
+- **Slots rearrange by dragging.** A slot's item dragged onto another slot
   swaps the two, or moves it if the target is empty (`moveSlot`).
+- **Any item goes on the hotbar, and a slot is one stack** *(2026-09-23, on
+  request)*. Every bag cell can be dragged to a slot, not only buildings, and
+  the same item may sit on several slots. The bag counts items rather than
+  keeping slots (C08), so the controller deals the stacks out in slot order:
+  with 70 iron ore (stack 50) on two slots, the first shows 50 and the second
+  20, and a third would show 0. Nothing is reserved or moved; the slots are a
+  way of looking at the bag. This replaces "a building dragged onto a second
+  slot moves" above. `BuildMenuView.hotbar` is now `HotbarSlotView`, which
+  carries the stack and, for a building, its `BuildMenuEntry`. Layouts are item
+  ids, and a building's id is its item's id (§15), so saved v2 layouts read
+  unchanged and the schema stays v2.
+- **A material in hand feeds machines** *(same request)*. Selecting a
+  material's slot, or clicking it in the bag, puts it in the hand
+  (`Cursor.heldItem`, never together with a held building). Left-clicking a
+  building then sends `insertItems` for one stack, and selects the machine so
+  the inspector shows it filling. A drag feeds each machine it crosses once.
+  Bare ground still mines. Right-click and Escape put it down. The building
+  decides what it accepts, as C12 and C15 set up. This is the first UI for
+  `insertItems`, which the simulation has supported since C15.
 - **Clicking a carried building in the inventory holds it and closes the
   panel**, so the next click lands on the world. `InventorySlotView.buildingId`
   says which items place something. It is derived from §15's rule that a
