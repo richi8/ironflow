@@ -3,8 +3,8 @@
  *
  * Nine slots along the bottom, bound to the number row, beside the buttons
  * that open the other panels. What each slot holds is the player's: a
- * building is dragged onto a slot from the inventory and taken off it with a
- * right-click. The toolbar only reports those gestures — the controller keeps
+ * building is dragged onto a slot from the inventory, dragged from one slot
+ * to another to swap the two, and taken off with a right-click. The toolbar only reports those gestures — the controller keeps
  * the arrangement, and slot *n* means the same thing to a click here and to
  * the number key, because both go through `GameController.selectSlot`.
  *
@@ -21,6 +21,9 @@ import { HOTBAR_SLOTS } from '../game/game-controller.js';
  */
 export const BUILDING_DRAG_TYPE = 'application/x-ironflow-building';
 
+/** The drag payload for a slot's building on its way to another slot: the source slot, 1-based. */
+export const SLOT_DRAG_TYPE = 'application/x-ironflow-slot';
+
 interface Slot {
   readonly button: HTMLButtonElement;
   readonly name: HTMLElement;
@@ -34,6 +37,8 @@ export interface ToolbarOptions {
   readonly onAssignSlot: (slot: number, buildingId: string) => void;
   /** Slot `slot` (1-based) was right-clicked: empty it. */
   readonly onClearSlot: (slot: number) => void;
+  /** Slot `from`'s building was dropped on slot `to` (both 1-based): swap them. */
+  readonly onMoveSlot: (from: number, to: number) => void;
   /** Open or close the inventory panel (C21A). */
   readonly onToggleInventory: () => void;
   /** Open or close the technology tree (C22). */
@@ -153,6 +158,7 @@ export class Toolbar {
     for (const slot of this.slots) {
       slot.button.removeEventListener('click', this.handleSlot);
       slot.button.removeEventListener('contextmenu', this.handleClear);
+      slot.button.removeEventListener('dragstart', this.handleDragStart);
       slot.button.removeEventListener('dragover', this.handleDragOver);
       slot.button.removeEventListener('dragleave', this.handleDragLeave);
       slot.button.removeEventListener('drop', this.handleDrop);
@@ -200,7 +206,9 @@ export class Toolbar {
   private readonly handleDragOver = (event: DragEvent): void => {
     if (!carriesBuilding(event)) return;
     event.preventDefault();
-    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.dropEffect = Array.from(event.dataTransfer.types).includes(SLOT_DRAG_TYPE) ? 'move' : 'copy';
+    }
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.add('is-drop-target');
   };
 
@@ -210,11 +218,33 @@ export class Toolbar {
 
   private readonly handleDrop = (event: DragEvent): void => {
     if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
-    const buildingId = event.dataTransfer?.getData(BUILDING_DRAG_TYPE) ?? '';
     const slot = slotOf(event);
-    if (buildingId === '' || slot === null) return;
+    if (slot === null) return;
+
+    // From another slot: a swap, which keeps both buildings on the bar.
+    const from = Number(event.dataTransfer?.getData(SLOT_DRAG_TYPE) ?? '');
+    if (Number.isInteger(from) && from > 0) {
+      event.preventDefault();
+      this.options.onMoveSlot(from, slot);
+      return;
+    }
+
+    const buildingId = event.dataTransfer?.getData(BUILDING_DRAG_TYPE) ?? '';
+    if (buildingId === '') return;
     event.preventDefault();
     this.options.onAssignSlot(slot, buildingId);
+  };
+
+  /** Pick a slot's building up to move it. An empty slot has nothing to drag. */
+  private readonly handleDragStart = (event: DragEvent): void => {
+    const slot = slotOf(event);
+    const target = event.currentTarget;
+    if (slot === null || event.dataTransfer === null || !(target instanceof HTMLElement) || !target.draggable) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.setData(SLOT_DRAG_TYPE, String(slot));
+    event.dataTransfer.effectAllowed = 'move';
   };
 
   private createSlot(slot: number): HTMLElement {
@@ -224,6 +254,7 @@ export class Toolbar {
     button.dataset['slot'] = String(slot);
     button.addEventListener('click', this.handleSlot);
     button.addEventListener('contextmenu', this.handleClear);
+    button.addEventListener('dragstart', this.handleDragStart);
     button.addEventListener('dragover', this.handleDragOver);
     button.addEventListener('dragleave', this.handleDragLeave);
     button.addEventListener('drop', this.handleDrop);
@@ -253,6 +284,7 @@ export class Toolbar {
       setText(count, '');
       button.classList.add('is-empty');
       button.classList.remove('is-selected', 'is-unaffordable', 'is-locked');
+      button.draggable = false;
       // Not disabled: a disabled button receives no drag events, and an empty
       // slot is exactly where a building gets dropped.
       button.title = 'Empty — drag a building here from your inventory';
@@ -262,13 +294,14 @@ export class Toolbar {
     setText(name, entry.name);
     setText(count, String(stockOf(entry)));
     button.classList.remove('is-empty');
+    button.draggable = true;
     button.classList.toggle('is-selected', entry.selected);
     button.classList.toggle('is-unaffordable', !entry.affordable);
     button.classList.toggle('is-locked', !entry.unlocked);
     // C22's lock, said where the building is: the build menu that used to say
     // it is gone.
     const lock = entry.unlocked ? '' : ` — locked, research ${entry.unlockedBy ?? 'required'}`;
-    button.title = `${entry.name} — ${describeCost(entry)}${lock}. Right-click to remove.`;
+    button.title = `${entry.name} — ${describeCost(entry)}${lock}. Drag to move, right-click to remove.`;
   }
 }
 
@@ -302,10 +335,12 @@ function slotOf(event: Event): number | null {
   return Number.isInteger(slot) ? slot : null;
 }
 
-/** Is this drag carrying a building? The type list is readable during a drag; the data is not. */
+/** Is this drag carrying a building, from the bag or another slot? The type list is readable during a drag; the data is not. */
 function carriesBuilding(event: DragEvent): boolean {
   const types = event.dataTransfer?.types;
-  return types !== undefined && Array.from(types).includes(BUILDING_DRAG_TYPE);
+  if (types === undefined) return false;
+  const list = Array.from(types);
+  return list.includes(BUILDING_DRAG_TYPE) || list.includes(SLOT_DRAG_TYPE);
 }
 
 function setText(element: HTMLElement, text: string): void {

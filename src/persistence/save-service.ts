@@ -40,6 +40,8 @@ export interface SaveRequest {
   readonly state: SerializedGameState;
   /** The tick the snapshot was taken at — §14's playtime. */
   readonly playtimeTicks: number;
+  /** The player's hotbar, or `null` for the default (v2). */
+  readonly hotbar: readonly (string | null)[] | null;
 }
 
 export interface SaveServiceOptions {
@@ -123,6 +125,7 @@ export class SaveService {
         // against a whole factory's 150 kB, it cannot be produced from
         // `game/` at all, and the save menu reads perfectly well without one.
         thumbnail: null,
+        hotbar: request.hotbar,
       },
       state: request.state,
     };

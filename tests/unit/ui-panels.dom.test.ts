@@ -202,6 +202,33 @@ describe('the toolbar drives the game through commands only', () => {
     expect(three.classList.contains('is-empty')).toBe(true);
   });
 
+  it('swaps two slots when one is dragged onto the other', () => {
+    const { root, controller } = harness;
+    const one = query<HTMLButtonElement>(root, '.if-slot[data-slot="1"]');
+    const seven = query<HTMLButtonElement>(root, '.if-slot[data-slot="7"]');
+    expect(one.draggable).toBe(true);
+
+    const start = new Event('dragstart', { bubbles: true, cancelable: true });
+    const stored: Record<string, string> = {};
+    Object.defineProperty(start, 'dataTransfer', {
+      value: { types: [], setData: (type: string, value: string) => (stored[type] = value), effectAllowed: 'none' },
+    });
+    one.dispatchEvent(start);
+    expect(stored['application/x-ironflow-slot']).toBe('1');
+
+    seven.dispatchEvent(dragEvent('dragover', 'application/x-ironflow-slot', '1'));
+    seven.dispatchEvent(dragEvent('drop', 'application/x-ironflow-slot', '1'));
+    expect(controller.getHotbarLayout().slice(0, 7)).toEqual([
+      'chest',
+      'belt',
+      'splitter',
+      'inserter',
+      'furnace',
+      'assembler',
+      'miner',
+    ]);
+  });
+
   it('ignores a drag of anything that is not a building', () => {
     const { root } = harness;
     const target = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
@@ -278,10 +305,26 @@ describe('pause and Escape', () => {
     }
   });
 
-  it('lets Escape through to the game when no panel is open', () => {
-    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    window.dispatchEvent(escape);
-    expect(escape.defaultPrevented).toBe(false);
+  it('lets Escape through to drop what is held, and pauses when nothing is', () => {
+    const { ui, controller } = harness;
+    const press = (): KeyboardEvent => {
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      window.dispatchEvent(escape);
+      return escape;
+    };
+
+    controller.selectBuilding('chest');
+    // Not consumed: the input layer's Escape is what empties the hand.
+    expect(press().defaultPrevented).toBe(false);
+    expect(ui.isSaveMenuOpen()).toBe(false);
+
+    controller.selectBuilding(null);
+    expect(press().defaultPrevented).toBe(true);
+    expect(ui.isSaveMenuOpen()).toBe(true);
+
+    // And Escape again closes the game menu.
+    press();
+    expect(ui.isSaveMenuOpen()).toBe(false);
   });
 });
 

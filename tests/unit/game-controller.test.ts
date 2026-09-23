@@ -236,6 +236,30 @@ describe('GameController build tool', () => {
     expect(controller.getHotbarLayout()).toEqual(['chest', null, null, null, null, null, null, null, null]);
   });
 
+  it('swaps two slots, and moves onto an empty one', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game });
+    controller.moveSlot(1, 2);
+    expect(controller.getHotbarLayout().slice(0, 2)).toEqual(['belt', 'miner']);
+    controller.clearSlot(9);
+    controller.moveSlot(1, 9);
+    expect(controller.getHotbarLayout()[0]).toBeNull();
+    expect(controller.getHotbarLayout()[8]).toBe('belt');
+    // An empty slot has nothing to move.
+    controller.moveSlot(1, 3);
+    expect(controller.getHotbarLayout()[2]).toBe('splitter');
+  });
+
+  it('takes a whole layout from a loaded save, or the default for null', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game });
+    controller.setHotbarLayout(['chest', 'chest', 'belt']);
+    // One slot per building, even from a file that says otherwise.
+    expect(controller.getHotbarLayout().slice(0, 3)).toEqual(['chest', null, 'belt']);
+    controller.setHotbarLayout(null);
+    expect(controller.getHotbarLayout()[0]).toBe('miner');
+  });
+
   it('knows which building an item places', () => {
     const { game } = makeGame();
     const controller = new GameController({ game });

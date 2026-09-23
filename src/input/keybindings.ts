@@ -163,6 +163,10 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyE: 'ui.toggleInventory',
   KeyT: 'ui.toggleResearch',
   KeyM: 'ui.toggleMap',
+  // Tab too, where this genre keeps its map. A bound key's default is
+  // prevented, so Tab no longer walks focus around the page while playing —
+  // and it still does in a text field, which the keyboard layer ignores.
+  Tab: 'ui.toggleMap',
   // Both alts, because which one is under the player's thumb depends on the
   // keyboard, and `KeyV` beside it for the platforms that swallow alt entirely.
   AltLeft: 'ui.toggleAltMode',

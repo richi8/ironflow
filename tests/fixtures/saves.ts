@@ -98,7 +98,7 @@ export function sampleSave(name = 'Test factory', simulation = sampleSimulation(
   return {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
-    metadata: { name, createdAt: 1_700_000_000_000, playtimeTicks: simulation.getTick(), thumbnail: null },
+    metadata: { name, createdAt: 1_700_000_000_000, playtimeTicks: simulation.getTick(), thumbnail: null, hotbar: null },
     state: serialize(simulation),
   };
 }

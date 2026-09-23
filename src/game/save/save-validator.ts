@@ -109,6 +109,8 @@ export const MAX_ITEM_MAP_ENTRIES = 4_096;
 export const MAX_STRING_LENGTH = 256;
 /** How deep a nested value inside an entity may go before it is not one. */
 export const MAX_DEPTH = 8;
+/** More hotbar slots than the game has, and far fewer than would cost anything. */
+export const MAX_HOTBAR_SLOTS = 32;
 /**
  * The largest count anything may hold.
  *
@@ -385,7 +387,20 @@ function readMetadata(value: unknown): SaveMetadata {
     // so the cap is generous rather than considered. What matters is that it
     // is a string or it is null, and never a script-bearing object.
     thumbnail: thumbnail === null ? null : readString(thumbnail, 'the thumbnail', 4 * 1024 * 1024),
+    hotbar: readHotbar(metadata['hotbar']),
   };
+}
+
+/**
+ * The hotbar layout (v2). Ids are only checked to be short strings: whether a
+ * building exists is content, and the controller turns an unknown one into an
+ * empty slot rather than refusing a whole save over a preference.
+ */
+function readHotbar(value: unknown): readonly (string | null)[] | null {
+  if (value === null) return null;
+  return readArray(value, 'the hotbar', MAX_HOTBAR_SLOTS).map((slot, index) =>
+    slot === null ? null : readString(slot, `hotbar slot ${index + 1}`, MAX_STRING_LENGTH),
+  );
 }
 
 /* -------------------------------------------------------------------------- *

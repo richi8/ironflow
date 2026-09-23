@@ -52,7 +52,7 @@ import type { ItemIdMapping } from '../registries/item-registry.js';
  * alters what the file says. A save carries both because neither answers the
  * other's question.
  */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 /** The magic string that marks a file as one of ours. §14, and C26's header. */
 export const SAVE_FORMAT = 'ironflow-save';
@@ -225,6 +225,16 @@ export interface SaveMetadata {
   readonly playtimeTicks: number;
   /** A data URL, or null. C25 decides whether it ever fills this in. */
   readonly thumbnail: string | null;
+  /**
+   * The player's hotbar, slot by slot: a building id or `null` for an empty
+   * slot. `null` as a whole means the default layout (v2, 2026-09-23).
+   *
+   * In the metadata rather than the state because it is not simulation state:
+   * no system reads it and it changes while the game is paused, which a
+   * command could not do (§7). It travels with the save because the player
+   * arranged it for this factory.
+   */
+  readonly hotbar: readonly (string | null)[] | null;
 }
 
 /**

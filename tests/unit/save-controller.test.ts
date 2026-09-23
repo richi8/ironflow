@@ -48,7 +48,7 @@ function harness(
 
   const controller = new SaveController({
     service,
-    capture: () => ({ state: serialize(world), playtimeTicks: world.getTick() }),
+    capture: () => ({ state: serialize(world), playtimeTicks: world.getTick(), hotbar: null }),
     apply: (state: SerializedGameState) => {
       world = deserialize(state, { worldGenerator: () => GENERATOR });
     },
@@ -145,7 +145,7 @@ describe('saving', () => {
     const controller = new SaveController({
       service,
       autosave,
-      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick() }),
+      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick(), hotbar: null }),
       apply: () => undefined,
       onChange: () => undefined,
     });
@@ -185,7 +185,7 @@ describe('loading', () => {
     const states: SaveSessionState[] = [];
     const controller = new SaveController({
       service,
-      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick() }),
+      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick(), hotbar: null }),
       // What `deserialize` does for a save from a foreign world generator.
       apply: () => {
         throw new Error('this save was written by world generator 99');
@@ -350,7 +350,7 @@ describe('exporting', () => {
     const states: SaveSessionState[] = [];
     const controller = new SaveController({
       service,
-      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick() }),
+      capture: () => ({ state: serialize(world), playtimeTicks: world.getTick(), hotbar: null }),
       apply: () => undefined,
       onChange: (state) => states.push(state),
     });

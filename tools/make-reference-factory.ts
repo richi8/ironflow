@@ -383,6 +383,7 @@ async function main(): Promise<void> {
       createdAt: FIXTURE_CREATED_AT,
       playtimeTicks: simulation.getTick(),
       thumbnail: null,
+      hotbar: null,
     },
     state: serialize(simulation),
   };

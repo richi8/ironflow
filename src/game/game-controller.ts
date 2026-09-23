@@ -166,12 +166,12 @@ export interface GameControllerOptions {
    * `null` for an empty slot. Defaults to the first nine buildings in content
    * order, which is what the hotbar was before the player could arrange it.
    *
-   * The arrangement is a preference, not game state: it is not in the save
-   * (§10), it survives a load, and the composition root keeps it wherever it
-   * keeps preferences. An id the content table no longer has is an empty
-   * slot rather than an error.
+   * The arrangement is not simulation state (§10) — no system reads it, and
+   * it changes while paused, which a command could not — but it travels in
+   * the save's metadata, so a loaded factory comes back with its hotbar. An id
+   * the content table no longer has is an empty slot rather than an error.
    */
-  readonly hotbar?: readonly (string | null)[] | undefined;
+  readonly hotbar?: readonly (string | null)[] | null | undefined;
 }
 
 /** A `Cursor` with nothing on the other end of it. For tests and headless use. */
@@ -247,11 +247,7 @@ export class GameController {
   constructor(options: GameControllerOptions) {
     this.game = options.game;
     this.cursor = options.cursor ?? new DetachedCursor();
-    const buildings = this.simulation.buildings;
-    this.hotbar = Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
-      const id = options.hotbar === undefined ? (buildings.all()[index]?.id ?? null) : (options.hotbar[index] ?? null);
-      return id !== null && buildings.has(id) ? id : null;
-    });
+    this.hotbar = this.resolveHotbar(options.hotbar ?? null);
     this.menuSignature = this.buildMenuSignature();
     this.lastSelection = this.cursor.selectedEntityId;
   }
@@ -1067,9 +1063,43 @@ export class GameController {
     this.emit({ type: 'buildMenuChanged' });
   }
 
-  /** The hotbar as building ids, for the composition root to remember. */
+  /** The hotbar as building ids, for the save's metadata. */
   getHotbarLayout(): readonly (string | null)[] {
     return freeze([...this.hotbar]);
+  }
+
+  /** Replace the whole hotbar — a loaded save's. `null` is the default layout. */
+  setHotbarLayout(layout: readonly (string | null)[] | null): void {
+    const next = this.resolveHotbar(layout);
+    for (let slot = 0; slot < HOTBAR_SLOTS; slot++) this.hotbar[slot] = next[slot] ?? null;
+    this.emit({ type: 'buildMenuChanged' });
+  }
+
+  /**
+   * Swap two hotbar slots (1-based) — one slot's building dragged onto
+   * another. Dropped on an empty slot, it simply moves.
+   */
+  moveSlot(from: number, to: number): void {
+    if (!isHotbarSlot(from) || !isHotbarSlot(to) || from === to) return;
+    const moving = this.hotbar[from - 1] ?? null;
+    if (moving === null) return;
+    this.hotbar[from - 1] = this.hotbar[to - 1] ?? null;
+    this.hotbar[to - 1] = moving;
+    this.emit({ type: 'buildMenuChanged' });
+  }
+
+  /** A layout as nine slots of known buildings; `null` is the first nine in content order. */
+  private resolveHotbar(layout: readonly (string | null)[] | null): (string | null)[] {
+    const buildings = this.simulation.buildings;
+    const seen = new Set<string>();
+    return Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
+      const id = layout === null ? (buildings.all()[index]?.id ?? null) : (layout[index] ?? null);
+      // One slot per building, as `assignSlot` keeps it: a file edited by
+      // hand to say otherwise keeps the first.
+      if (id === null || !buildings.has(id) || seen.has(id)) return null;
+      seen.add(id);
+      return id;
+    });
   }
 
   /**

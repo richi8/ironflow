@@ -52,10 +52,14 @@
  * A pause with nothing on screen to say why was a state a player could get
  * into by accident and not see the way out of.
  *
- * Escape closes whichever panel is open, before anything else hears the key:
- * a panel on top of the world is the thing the player is looking at, so it is
- * the thing "stop" means. With no panel open, Escape falls through to the
- * input layer and drops the held building and the selection, as it always has.
+ * Escape backs out one layer at a time, the way the genre does:
+ *
+ * ```text
+ *   a panel is open                  close it (the game menu: and play on)
+ *   a building or machine is held    let the input layer drop it
+ *   nothing                          pause into the game menu
+ * ```
+ *
  * It is caught on `window` in the capture phase so that it works with the
  * cursor in the save menu's name field, where the keyboard layer deliberately
  * hears nothing.
@@ -183,6 +187,7 @@ export class GameUI {
       onSelectSlot: (slot) => this.controller.selectSlot(slot),
       onAssignSlot: (slot, buildingId) => this.controller.assignSlot(slot, buildingId),
       onClearSlot: (slot) => this.controller.clearSlot(slot),
+      onMoveSlot: (from, to) => this.controller.moveSlot(from, to),
       onToggleInventory: () => this.toggleInventory(),
       onToggleResearch: () => this.toggleResearch(),
       onToggleMap: () => this.toggleMap(),
@@ -487,7 +492,11 @@ export class GameUI {
   /** Escape, before the keyboard layer hears it. See the header and `closeDialog`. */
   private readonly handleEscape = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || event.repeat) return;
-    if (!this.closeDialog()) return;
+    if (!this.closeDialog()) {
+      // Something in hand: the input layer's Escape drops it (see the header).
+      if (this.controller.getSelectedBuilding() !== null || this.controller.getSelection() !== null) return;
+      this.togglePauseMenu();
+    }
     event.preventDefault();
     event.stopPropagation();
   };

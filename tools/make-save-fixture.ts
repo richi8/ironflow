@@ -241,6 +241,9 @@ function main(): void {
       createdAt: FIXTURE_CREATED_AT,
       playtimeTicks: simulation.getTick(),
       thumbnail: null,
+      // A rearranged hotbar rather than the default, so a v2 migration has a
+      // layout to carry: the null a v1 save migrates to is the other shape.
+      hotbar: ['belt', 'miner', null, 'inserter', 'furnace', null, 'chest', null, null],
     },
     state: serialize(simulation),
   };

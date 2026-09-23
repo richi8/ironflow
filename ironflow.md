@@ -1197,10 +1197,15 @@ to arrange. What each change means:
   what the hotbar was before. `GameController` owns the arrangement
   (`assignSlot`, `clearSlot`) and emits `buildMenuChanged`, and
   `BuildMenuView.hotbar` is what the toolbar paints.
-- **The arrangement is a preference, not game state.** It is not in the save
-  (§10) and it survives a load. The composition root keeps it in
-  `localStorage` (`ironflow.hotbar`), and missing or blocked storage means the
-  default hotbar.
+- **The arrangement travels with the save, but outside the simulation.** It is
+  in the save's *metadata* (`SaveMetadata.hotbar`, schema v2 — see §14), not
+  in `state`. No system reads it, and it changes while the game is paused,
+  which a command could not do (§7). A loaded save restores its layout, a v1
+  save gets the default, and a new world starts from the default. *(For a day
+  it lived in `localStorage` instead; replaced on request so a factory keeps
+  its own hotbar.)*
+- **Slots rearrange by dragging.** A slot's building dragged onto another slot
+  swaps the two, or moves it if the target is empty (`moveSlot`).
 - **Clicking a carried building in the inventory holds it and closes the
   panel**, so the next click lands on the world. `InventorySlotView.buildingId`
   says which items place something. It is derived from §15's rule that a
@@ -1212,10 +1217,12 @@ to arrange. What each change means:
   menu, which is the game menu for now. §8 already pauses the loop behind it,
   and closing it resumes. A bare pause with nothing on screen to explain it is
   gone. `B` is unbound.
-- **Escape closes whichever panel is open**, before the input layer hears it.
-  It is caught on `window` in the capture phase, so it also works from the save
-  menu's name field. With no panel open it falls through as before: it drops
-  the held building and the selection.
+- **Escape backs out one layer at a time.** An open panel closes first (the
+  game menu closing resumes the game). Otherwise, a held building or a
+  selection is dropped by the input layer as before. With nothing to drop,
+  Escape pauses into the game menu. It is caught on `window` in the capture
+  phase, so it also works from the save menu's name field.
+- **Tab opens the map**, as well as `M`.
 
 ### Rules
 
@@ -1554,6 +1561,15 @@ is the same code: the validator is called from `decodeSave`, so a stored save
 is distrusted exactly as far as an imported one. And *keeping* a corrupt blob
 became something a player can act on — `SaveRepository.loadRaw` reads a slot
 without understanding it, which is what lets C26 export one.
+
+**Schema v2 (2026-09-23).** `SaveMetadata` gained `hotbar`: the player's
+hotbar layout, or `null` for the default (§13). It is metadata because it is
+not simulation state, so nothing in `game/` reads it and it never enters the
+determinism hash. `migrations/v1-to-v2.ts` gives a v1 save `null`. The v1
+fixture is unchanged, `v2.json` joins it with a rearranged layout, and the
+reference-factory fixture stays v1 so every benchmark load also exercises the
+migration. A slot record in IndexedDB does not carry the hotbar; it is read
+from the body on load.
 
 **Implementation note (C27).** The sentence above about migrations — "pure
 functions `vN -> vN+1`, chained, each independently unit-tested against a

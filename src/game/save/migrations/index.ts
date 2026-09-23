@@ -2,11 +2,11 @@
  * Every migration this build has, oldest first. See ironflow.md C27.
  *
  * ```text
- *   SAVE_VERSION = 1        MIGRATIONS = []
+ *   SAVE_VERSION = 2        MIGRATIONS = [v1 -> v2]
  * ```
  *
- * The list is empty because the save schema has had exactly one version. That
- * is not a placeholder: `save-migrator.ts` checks that the chain reaches
+ * v2 (2026-09-23) added the player's hotbar layout to the metadata. The
+ * registry is not decoration: `save-migrator.ts` checks that the chain reaches
  * `SAVE_VERSION`, and `tests/integration/save-fixtures.test.ts` checks that
  * every version from 1 up has a committed fixture — so the day `SAVE_VERSION`
  * becomes 2 with nothing here, the suite says so.
@@ -65,5 +65,7 @@
 
 import type { Migration } from '../save-migrator.js';
 
+import { v1ToV2 } from './v1-to-v2.js';
+
 /** Oldest first, contiguous, ending at `SAVE_VERSION`. */
-export const MIGRATIONS: readonly Migration[] = Object.freeze([]);
+export const MIGRATIONS: readonly Migration[] = Object.freeze([v1ToV2]);

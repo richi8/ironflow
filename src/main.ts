@@ -261,34 +261,6 @@ function saveMenuView(state: SaveSessionState): SaveMenuView {
   });
 }
 
-/** Where the hotbar arrangement is kept between sessions. */
-const HOTBAR_KEY = 'ironflow.hotbar';
-
-/**
- * The hotbar the player left, or `undefined` for the default.
- *
- * Storage that is missing, blocked or holding something else is the default
- * rather than an error: a preference lost is a hotbar to fill again, and a
- * private window is allowed to forget.
- */
-function loadHotbar(): readonly (string | null)[] | undefined {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(HOTBAR_KEY) ?? 'null');
-    if (!Array.isArray(parsed)) return undefined;
-    return parsed.map((value) => (typeof value === 'string' ? value : null));
-  } catch {
-    return undefined;
-  }
-}
-
-function saveHotbar(layout: readonly (string | null)[]): void {
-  try {
-    localStorage.setItem(HOTBAR_KEY, JSON.stringify(layout));
-  } catch {
-    // See `loadHotbar`: a hotbar that is not remembered still works.
-  }
-}
-
 async function bootstrap(): Promise<void> {
   const canvas = requireElement<HTMLCanvasElement>('#game');
   const uiRoot = requireElement<HTMLElement>('#ui');
@@ -343,7 +315,11 @@ async function bootstrap(): Promise<void> {
 
   let bootWarning = storage.warning;
   let bootSlots: readonly SaveSlot[] = [];
-  let resumed: { readonly id: string; readonly simulation: Simulation } | null = null;
+  let resumed: {
+    readonly id: string;
+    readonly simulation: Simulation;
+    readonly hotbar: readonly (string | null)[] | null;
+  } | null = null;
   try {
     bootSlots = await service.list();
     const newest = bootSlots[0];
@@ -354,7 +330,7 @@ async function bootstrap(): Promise<void> {
       // way the world arrived, rather than including an IndexedDB read one
       // time and not the other.
       const loadStarted = performance.now();
-      resumed = { id: newest.id, simulation: deserialize(file.state) };
+      resumed = { id: newest.id, simulation: deserialize(file.state), hotbar: file.metadata.hotbar };
       milestones.load = performance.now() - loadStarted;
     }
   } catch (cause) {
@@ -715,13 +691,9 @@ async function bootstrap(): Promise<void> {
   // `InputManager` satisfies `BuildCursor` structurally and has never heard of
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
-  const controller: GameController = new GameController({ game, cursor: input, hotbar: loadHotbar() });
-  // The hotbar is the player's arrangement, remembered between sessions. It
-  // is a preference rather than game state (§10), so it lives beside the
-  // browser's other preferences and not in the save; every change to it is a
-  // `buildMenuChanged`, and writing nine short strings is cheaper than
-  // working out whether this one was the hotbar.
-  controller.subscribe('buildMenuChanged', () => saveHotbar(controller.getHotbarLayout()));
+  // The hotbar comes back with the save it was arranged in (v2 metadata); a
+  // new world starts from the default.
+  const controller: GameController = new GameController({ game, cursor: input, hotbar: resumed?.hotbar ?? null });
 
   /* ------------------------------------------------------------------ *
    * Saving and loading (C25).
@@ -752,7 +724,7 @@ async function bootstrap(): Promise<void> {
       const started = performance.now();
       const state = serialize(simulation);
       milestones.serialize = performance.now() - started;
-      return { state, playtimeTicks: simulation.getTick() };
+      return { state, playtimeTicks: simulation.getTick(), hotbar: controller.getHotbarLayout() };
     } finally {
       game.setPaused(wasPaused);
     }
@@ -776,7 +748,7 @@ async function bootstrap(): Promise<void> {
    * changed nothing, so the caller can say so and the player keeps playing the
    * factory they were in.
    */
-  function applyLoadedState(state: SerializedGameState): void {
+  function applyLoadedState(state: SerializedGameState, hotbar: readonly (string | null)[] | null): void {
     const started = performance.now();
     const loaded = deserialize(state);
     milestones.load = performance.now() - started;
@@ -785,6 +757,8 @@ async function bootstrap(): Promise<void> {
     syncProfiler();
     game.replaceSimulation(loaded);
     controller.reload();
+    // The save's own hotbar (v2), or the default for one that has none.
+    controller.setHotbarLayout(hotbar);
     // The terrain cache is keyed by world chunk and revision, and a loaded
     // world starts both again from where the old one did — see
     // `TerrainLayer.invalidate`.
@@ -802,6 +776,7 @@ async function bootstrap(): Promise<void> {
         kind: 'auto',
         state: snapshot.state,
         playtimeTicks: snapshot.playtimeTicks,
+        hotbar: snapshot.hotbar,
       });
       saves.noteAutosave();
     },

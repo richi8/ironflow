@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS } from '../../src/game/save/migrations/index.js';
+import { v1ToV2 } from '../../src/game/save/migrations/v1-to-v2.js';
 import { SAVE_FORMAT, SAVE_VERSION } from '../../src/game/save/save-format.js';
 import {
   SaveMigrationError,
@@ -199,3 +200,15 @@ function attempt(run: () => unknown): SaveMigrationError {
   }
   throw new Error('nothing was thrown.');
 }
+
+describe('v1 -> v2: the hotbar layout', () => {
+  it('gives a v1 save the default hotbar and keeps everything else', () => {
+    const v1 = { format: 'ironflow-save', version: 1, metadata: { name: 'old', thumbnail: null }, state: { tick: 5 } };
+    const v2 = v1ToV2.migrate(v1);
+    expect(v2).toEqual({ ...v1, version: 2, metadata: { name: 'old', thumbnail: null, hotbar: null } });
+  });
+
+  it('leaves a malformed metadata for the validator to refuse', () => {
+    expect(v1ToV2.migrate({ version: 1, metadata: 'nope' })).toEqual({ version: 2, metadata: 'nope' });
+  });
+});

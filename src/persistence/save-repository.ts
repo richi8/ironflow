@@ -57,8 +57,12 @@ export interface SaveSlot {
   readonly thumbnail: string | null;
 }
 
-/** The metadata half of a slot, for building a `SaveFile` out of a record. */
-export function slotMetadata(slot: SaveSlot): SaveMetadata {
+/**
+ * The metadata half of a slot, laid over the stored body's on load, so a
+ * rename is seen without rewriting the body. The hotbar (v2) is not in a
+ * slot — the list never needs it — so it comes from the body untouched.
+ */
+export function slotMetadata(slot: SaveSlot): Omit<SaveMetadata, 'hotbar'> {
   return {
     name: slot.name,
     createdAt: slot.createdAt,
