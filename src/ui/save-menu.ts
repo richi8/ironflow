@@ -158,7 +158,7 @@ export class SaveMenu {
     title.textContent = 'SAVES';
     this.closeButton.type = 'button';
     this.closeButton.className = 'if-inspector__close';
-    this.closeButton.title = 'Close (F2)';
+    this.closeButton.title = 'Close (Esc)';
     this.closeButton.setAttribute('aria-label', 'Close the save menu');
     this.closeButton.textContent = '×';
     this.closeButton.addEventListener('click', this.handleClose);

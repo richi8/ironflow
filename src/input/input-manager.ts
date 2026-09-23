@@ -500,6 +500,11 @@ export class InputManager {
     this.toolRotation = NORTH;
   }
 
+  /** Turn the held building, as the pipette does (2026-09-23). Ignored past its `rotationCount`. */
+  setBuildRotation(rotation: Rotation): void {
+    if (this.tool !== null && rotation < this.tool.rotationCount) this.toolRotation = rotation;
+  }
+
   /** The material in the hand, or null. */
   get heldItem(): HandItem | null {
     return this.item;
@@ -761,6 +766,9 @@ export class InputManager {
       // Picking something up from the number row, or turning it, is the moment
       // a keyboard player wants to see where it would go (C30).
       if (action === 'build.rotate' || action.startsWith('build.slot')) this.aimWithKeyboard();
+      // The pipette reads what is hovered, and the composition root acts on it
+      // through `onAction`; this layer does not know what a bag holds (§4).
+      if (action === 'build.pipette') this.stopMining();
       if (action === 'world.interact') this.interact();
       if (action === 'world.remove') this.removeInFront();
     } else if (action === 'world.interact') {

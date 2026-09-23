@@ -140,7 +140,7 @@ describe('mounting', () => {
   it('keeps the HUD to what a player acts on, and a MENU button', () => {
     const { root } = harness;
     const labels = [...root.querySelectorAll('.if-hud__label')].map((label) => label.textContent);
-    expect(labels).toEqual(['ITEMS', 'POWER', 'RESEARCH', 'ALERTS', 'TIME']);
+    expect(labels).toEqual(['ITEMS', 'RESEARCH', 'POWER', 'ALERTS', 'TIME']);
     expect(query<HTMLButtonElement>(root, '.if-hud__menu').textContent).toBe('MENU');
     expect(root.querySelector('.if-hud__pause')).toBeNull();
   });

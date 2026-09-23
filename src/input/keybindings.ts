@@ -55,6 +55,12 @@ export type InputAction =
   /** Cycle the held building's rotation (C06 task 5). */
   | 'build.rotate'
   /**
+   * The pipette (2026-09-23): hold another of the building under the cursor,
+   * facing the same way, if the bag has one. Over bare ground it empties the
+   * hand. `Q`, as in the genre.
+   */
+  | 'build.pipette'
+  /**
    * Held, not tapped: turns a right-click into "copy this machine's recipe"
    * and a left-click into "paste it here" (C20 task 5).
    *
@@ -110,22 +116,6 @@ export type InputAction =
    */
   | 'ui.toggleAltMode'
   /**
-   * Open and close the save menu (C25).
-   *
-   * `F2`, beside `F3`'s debug overlay and for the same reason: the function
-   * row is nowhere near the hand that is building, so a save menu cannot open
-   * mid-drag — and `F2` is one of the few function keys no browser claims.
-   * The letter keys are not free any more, and the letter a save menu would
-   * want (`S`) is the key that walks the player south.
-   */
-  | 'ui.toggleSaveMenu'
-  /**
-   * Pause, or play on (C07, §8). Until 2026-09-23 this opened the save menu,
-   * which holds the loop still behind it; now the menu is Escape's, and P
-   * only pauses.
-   */
-  | 'game.togglePause'
-  /**
    * Act on the tile in front of the player (C30): place what is held, feed
    * the machine there, open it, or mine the ground. Held, like the mouse
    * button it stands in for, so mining stops when it is let go.
@@ -137,8 +127,6 @@ export type InputAction =
   | 'world.interact'
   /** Demolish what stands in front of the player (C30). A right-click's other half. */
   | 'world.remove'
-  /** Open and close the settings panel (C30). */
-  | 'ui.toggleSettings'
   /** Run the simulation faster or slower (C30 task 5: "a speed control for testing"). */
   | 'game.speedUp'
   | 'game.speedDown'
@@ -160,6 +148,7 @@ export const ACTION_LABELS: Readonly<Record<InputAction, string>> = Object.freez
   'world.interact': 'Use the tile in front: build, feed, open, mine',
   'world.remove': 'Remove the building in front',
   'build.rotate': 'Rotate the held building',
+  'build.pipette': 'Pick up the building under the cursor',
   'build.slot1': 'Hotbar slot 1',
   'build.slot2': 'Hotbar slot 2',
   'build.slot3': 'Hotbar slot 3',
@@ -182,9 +171,6 @@ export const ACTION_LABELS: Readonly<Record<InputAction, string>> = Object.freez
   'ui.toggleResearch': 'Technology tree',
   'ui.toggleMap': 'Map',
   'ui.toggleAltMode': 'Show what machines make',
-  'ui.toggleSaveMenu': 'Save menu',
-  'ui.toggleSettings': 'Menu',
-  'game.togglePause': 'Pause',
   'game.speedUp': 'Game speed up',
   'game.speedDown': 'Game speed down',
   'debug.toggleOverlay': 'Debug overlay',
@@ -249,9 +235,9 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
  * withdrawn is worse than one that was never offered. Space is the drag modifier for the same reason it is in
  * every map editor: it is the largest key and it is not a letter anyone needs
  * while dragging. `R` rotates and the number row selects, which is what every
- * game in this genre has trained the player's left hand to expect. `P` pauses
- * into the game menu, and is free: it is not reachable by the left hand while
- * it is on the number row, so it cannot be hit by accident mid-drag. `I` and `E` both open the bag (C21A) — see the action.
+ * game in this genre has trained the player's left hand to expect. `Q` is the
+ * pipette. Escape opens the menu, which pauses; there is no pause key, save
+ * key or menu key (2026-09-23). `I` and `E` both open the bag (C21A) — see the action.
  */
 export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ArrowUp: 'camera.panUp',
@@ -269,6 +255,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyD: 'player.moveRight',
   Escape: 'selection.clear',
   KeyR: 'build.rotate',
+  KeyQ: 'build.pipette',
   ShiftLeft: 'machine.copyModifier',
   ShiftRight: 'machine.copyModifier',
   KeyI: 'ui.toggleInventory',
@@ -283,17 +270,13 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   AltLeft: 'ui.toggleAltMode',
   AltRight: 'ui.toggleAltMode',
   KeyV: 'ui.toggleAltMode',
-  F2: 'ui.toggleSaveMenu',
-  KeyP: 'game.togglePause',
-  Pause: 'game.togglePause',
   // C30. Enter acts on the tile in front of the player and Delete clears it;
   // X beside the left hand's WASD, so a keyboard player need not reach
-  // across. O for options. The brackets are the genre's speed keys.
+  // across. The brackets are the genre's speed keys.
   Enter: 'world.interact',
   NumpadEnter: 'world.interact',
   Delete: 'world.remove',
   KeyX: 'world.remove',
-  KeyO: 'ui.toggleSettings',
   BracketRight: 'game.speedUp',
   BracketLeft: 'game.speedDown',
   Digit1: 'build.slot1',

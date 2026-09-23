@@ -60,9 +60,9 @@ function query<T extends Element>(selector: string): T {
  * it still believes is held — which is how a held build hotkey stays one
  * selection rather than sixty (C04).
  */
-function press(code: string): void {
-  document.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
-  document.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
+/** Escape as the UI hears it: by `key`, on `window`. */
+function escape(): void {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
 }
 
 function action(label: string): HTMLButtonElement {
@@ -90,7 +90,7 @@ describe('the game as main.ts starts it', () => {
     expect(status.classList.contains('is-warn')).toBe(true);
   });
 
-  it('opens the save menu from the menu and from F2', () => {
+  it('opens the save menu from the menu, and pauses the game behind both', () => {
     const panel = query<HTMLElement>('.if-saves');
     expect(panel.hidden).toBe(true);
 
@@ -102,12 +102,17 @@ describe('the game as main.ts starts it', () => {
     button?.click();
     expect(panel.hidden).toBe(false);
     expect(query<HTMLElement>('.if-settings').hidden).toBe(true);
+    expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(true);
 
-    press('F2');
+    escape();
     expect(panel.hidden).toBe(true);
+    expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(false);
 
-    press('F2');
-    expect(panel.hidden).toBe(false);
+    escape();
+    expect(query<HTMLElement>('.if-settings').hidden).toBe(false);
+    expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(true);
+    escape();
+    expect(query<HTMLElement>('.if-hud').classList.contains('is-paused')).toBe(false);
   });
 
   it('settles into being the tab that saves', async () => {

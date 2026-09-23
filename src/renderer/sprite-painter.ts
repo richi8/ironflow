@@ -40,6 +40,8 @@ import { FONT_STACK, color, shade } from './palette.js';
 import type { ItemShape, PlayerActivity, SpriteDescriptor } from './sprite-atlas.js';
 import {
   BELT_CHEVRON_PHASES,
+  BELT_DECK,
+  BELT_RAIL_TOP,
   DETAIL_ZOOM,
   EAST_STEP,
   INSERTER_SWING_STEPS,
@@ -816,12 +818,12 @@ function lanePoint(rotation: Rotation, a: number, c: number): void {
   LV = forward.y * a + side.y * c;
 }
 
-/** Stroke a line across or along a lane at height 0. */
-function laneLine(rotation: Rotation, a0: number, c0: number, a1: number, c1: number): void {
+/** Stroke a line across or along a lane at height `h`. */
+function laneLine(rotation: Rotation, a0: number, c0: number, a1: number, c1: number, h = 0): void {
   lanePoint(rotation, a0, c0);
-  C.moveTo(X(LU, LV), Y(LU, LV, 0));
+  C.moveTo(X(LU, LV), Y(LU, LV, h));
   lanePoint(rotation, a1, c1);
-  C.lineTo(X(LU, LV), Y(LU, LV, 0));
+  C.lineTo(X(LU, LV), Y(LU, LV, h));
 }
 
 /** The axis-aligned tile-space rectangle covering a lane-space one. */
@@ -836,48 +838,132 @@ function laneRect(rotation: Rotation, a0: number, a1: number, c0: number, c1: nu
 /** Slats per tile. Their spacing divides the tile, so the pattern tiles. */
 const SLATS = 4;
 
+/** How wide a side rail is, in tiles. */
+const RAIL_WIDTH = 0.1;
+
+/** A box's near face and top with no outline, so tiles of one belt join without a seam. */
+function slab(u0: number, v0: number, u1: number, v1: number, h0: number, h1: number, face: string, top: string): void {
+  faceQuad(u0, u1, v1, h0, h1);
+  paint(face, false);
+  topQuad(u0, v0, u1, v1, h1);
+  paint(top, false);
+}
+
 /**
- * One lane of belt, `across` tiles to the side of the anchor: dark rails,
- * slats that move with the phase, and a chevron that says which way.
+ * One lane of belt, `across` tiles to the side of the anchor.
+ *
+ * Raised since 2026-09-23, when the flat version was said to look flat: a
+ * steel frame from the ground to `BELT_DECK`, a dark tread on top of it with
+ * slats that move with the phase, and a rail along each side up to
+ * `BELT_RAIL_TOP` that throws a groove of shade onto the tread. Nothing is
+ * outlined per tile, so a line of belts reads as one conveyor. Only near faces
+ * are drawn, as for every box here: a belt running east shows its frame's
+ * side, and one running south shows its end only where the line stops.
  *
  * The slats are the animation — the reference sheet's belts are a tread, not
  * an arrow — and the chevron stays because a still belt (below `DETAIL_ZOOM`,
  * or a ghost) has to say which way it runs too (pillar 3).
  */
+/**
+ * A belt tile's shadow: its footprint pushed south-east, but only across the
+ * flow. `shadowBox`'s hull would reach into the next tile along, and two
+ * translucent shadows overlapping there would notch a line of belts at every
+ * seam.
+ */
+function laneShadow(rotation: Rotation, u0: number, v0: number, u1: number, v1: number): void {
+  const d = BELT_RAIL_TOP * RISE * SHADOW_SLANT;
+  const alongU = rotation === 1 || rotation === 3;
+  const dx = alongU ? 0 : d;
+  const dy = alongU ? d : 0;
+  C.beginPath();
+  C.moveTo(X(u0, v0) + dx, Y(u0, v0, 0) + dy);
+  C.lineTo(X(u1, v0) + dx, Y(u1, v0, 0) + dy);
+  C.lineTo(X(u1, v1) + dx, Y(u1, v1, 0) + dy);
+  C.lineTo(X(u0, v1) + dx, Y(u0, v1, 0) + dy);
+  C.closePath();
+  const previousAlpha = C.globalAlpha;
+  C.globalAlpha = previousAlpha * SHADOW_ALPHA;
+  C.fillStyle = color('bg-deep');
+  C.fill();
+  C.globalAlpha = previousAlpha;
+}
+
 function lane(rotation: Rotation, phase: number, across: number): void {
-  const rails = shade(color('blue'), 0.62);
-  for (const edge of [-0.5, 0.36]) {
-    const [u0, v0, u1, v1] = laneRect(rotation, -0.5, 0.5, across + edge, across + edge + 0.14);
-    topQuad(u0, v0, u1, v1, 0);
-    paint(rails, false);
-  }
+  const frame = shade(color('blue'), 0.45);
+  const [f0, g0, f1, g1] = laneRect(rotation, -0.5, 0.5, across - 0.5, across + 0.5);
+  laneShadow(rotation, f0, g0, f1, g1);
+  slab(f0, g0, f1, g1, 0, BELT_DECK, shade(frame, FACE_TONE), frame);
+
+  // The tread, between the rails: dark at the edges, lighter down the middle,
+  // so it reads as a band curving over rollers rather than a painted strip.
+  const inner = 0.5 - RAIL_WIDTH;
+  const tread = shade(color('panel'), 0.8);
+  const [t0, s0, t1, s1] = laneRect(rotation, -0.5, 0.5, across - inner, across + inner);
+  topQuad(t0, s0, t1, s1, BELT_DECK);
+  paint(tread, false);
+  const [m0, n0, m1, n1] = laneRect(rotation, -0.5, 0.5, across - inner * 0.55, across + inner * 0.55);
+  topQuad(m0, n0, m1, n1, BELT_DECK);
+  paint(shade(tread, 1.18), false);
 
   if (DETAIL) {
-    C.beginPath();
+    // Slats as ridges: a lit edge and, just behind it, its shadow.
     const slide = (phase / BELT_CHEVRON_PHASES) / SLATS;
-    for (let i = 0; i < SLATS; i++) {
-      // Wrapped, so the slat sliding off the front edge comes back at the rear.
-      const a = ((i + 0.5) / SLATS + slide) % 1 - 0.5;
-      laneLine(rotation, a, across - 0.32, a, across + 0.32);
+    const width = Math.max(1, 0.045 * EX);
+    for (const [offset, tone] of [
+      [0.035, color('bg-deep')],
+      [0, shade(color('panel-high'), 1.45)],
+    ] as const) {
+      C.beginPath();
+      for (let i = 0; i < SLATS; i++) {
+        // Wrapped, so the slat sliding off the front edge comes back at the rear.
+        const a = Math.min(0.5, (((i + 0.5) / SLATS + slide) % 1) - 0.5 + offset);
+        laneLine(rotation, a, across - inner + 0.03, a, across + inner - 0.03, BELT_DECK);
+      }
+      C.strokeStyle = tone;
+      C.lineWidth = width;
+      C.stroke();
     }
-    C.strokeStyle = shade(color('panel-high'), 1.3);
-    C.lineWidth = Math.max(1, 0.05 * EX);
-    C.stroke();
+
+    // The groove: the rails' shade on the tread beside them.
+    const previousAlpha = C.globalAlpha;
+    C.globalAlpha = previousAlpha * 0.55;
+    C.fillStyle = color('bg-deep');
+    for (const [c0, c1] of [
+      [-inner, -inner + 0.1],
+      [inner - 0.05, inner],
+    ] as const) {
+      const [q0, r0, q1, r1] = laneRect(rotation, -0.5, 0.5, across + c0, across + c1);
+      topQuad(q0, r0, q1, r1, BELT_DECK);
+      C.fill();
+    }
+    C.globalAlpha = previousAlpha;
   }
 
   C.beginPath();
-  laneLine(rotation, -0.08, across - 0.16, 0.1, across);
+  laneLine(rotation, -0.08, across - 0.16, 0.1, across, BELT_DECK);
   lanePoint(rotation, -0.08, across + 0.16);
-  C.lineTo(X(LU, LV), Y(LU, LV, 0));
-  C.strokeStyle = color('accent-dim');
-  C.lineWidth = Math.max(1, 0.05 * EX);
+  C.lineTo(X(LU, LV), Y(LU, LV, BELT_DECK));
+  C.strokeStyle = color('accent');
+  C.lineWidth = Math.max(1, 0.06 * EX);
   C.stroke();
+
+  // The rails, last, so the near one stands in front of the tread.
+  const rail = shade(color('blue'), 0.85);
+  for (const edge of [-0.5, inner]) {
+    const [u0, v0, u1, v1] = laneRect(rotation, -0.5, 0.5, across + edge, across + edge + RAIL_WIDTH);
+    slab(u0, v0, u1, v1, BELT_DECK, BELT_RAIL_TOP, shade(rail, 0.55), rail);
+    if (DETAIL) {
+      // A lit edge along the top, which is what makes a rail read as a rail.
+      C.beginPath();
+      laneLine(rotation, -0.5, across + edge + RAIL_WIDTH * 0.35, 0.5, across + edge + RAIL_WIDTH * 0.35, BELT_RAIL_TOP);
+      C.strokeStyle = color('blue-high');
+      C.lineWidth = Math.max(1, 0.03 * EX);
+      C.stroke();
+    }
+  }
 }
 
 function paintBelt(rotation: Rotation, phase: number): void {
-  topQuad(-0.5, -0.5, 0.5, 0.5, 0);
-  C.fillStyle = color('panel');
-  C.fill();
   lane(rotation, phase, 0);
 }
 
@@ -923,7 +1009,7 @@ function paintUnderground(rotation: Rotation, entrance: boolean): void {
   const sign = entrance ? 1 : -1;
   // The dark opening, then the hood over its outer part.
   const [h0, i0, h1, i1] = laneRect(rotation, sign * 0.02, sign * 0.5, -0.38, 0.38);
-  topQuad(h0, i0, h1, i1, 0);
+  topQuad(h0, i0, h1, i1, BELT_DECK);
   paint(color('bg-deep'), false);
   const [u0, v0, u1, v1] = laneRect(rotation, sign * 0.2, sign * 0.5, -0.44, 0.44);
   box(u0, v0, u1, v1, 0, 0.42, color('underground_belt'), shade(color('underground_belt'), 1.3));
@@ -995,6 +1081,15 @@ const ITEM_HALF = 0.14;
  * readable to a player who cannot tell the colours apart (C30).
  */
 function paintItem(fill: string, shape: ItemShape): void {
+  // Every item drawn is riding a belt, a splitter or a tunnel mouth, so it
+  // sits on the tread (2026-09-23): the whole drawing moves up by the deck.
+  const lift = BELT_DECK * RISE;
+  OY -= lift;
+  paintItemShape(fill, shape);
+  OY += lift;
+}
+
+function paintItemShape(fill: string, shape: ItemShape): void {
   const s = ITEM_HALF;
   const lift = shape === 'plate' || shape === 'chip' ? 0.08 : 0.24;
   shadowBox(-s, -s, s, s, lift);

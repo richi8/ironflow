@@ -1321,22 +1321,33 @@ to arrange. What each change means:
 - **The menu, and a smaller HUD and hotbar** *(2026-09-23, on request)*.
   - The settings panel is now **the menu** (title MENU). Its first row is
     **SAVE & LOAD**, which opens the save menu in its place. The HUD's **MENU**
-    button (settings icon plus the word), Escape and `O` open it. It does not
-    pause the game.
-  - **The pause button is gone.** `P` is a plain pause toggle. While paused,
-    the HUD's TIME tile reads PAUSED in the accent colour. `P` does nothing
-    while the save menu is open, because §8 already holds the loop still
-    behind that menu and closing it resumes. The save menu still opens on
-    `F2` too.
-  - **The hotbar is the nine slots and the facing, and nothing else.** BAG,
-    TECH, MAP, SAVE and the settings icon are gone. The bag and the tech tree
-    open from their HUD tiles and from `I` and `T`. The map opens from `M`.
-  - **The HUD is ITEMS, POWER, RESEARCH, ALERTS and TIME, then MENU.** BUILT
+    button (settings icon plus the word) and Escape open it.
+  - **The menu pauses the game.** §8's pause behind the save dialog now
+    covers the menu too: `GameUI` reports `onMenuVisibility` once when the
+    menu or the save menu comes up and once when both are gone, and the
+    composition root pauses, remembering whether it was already paused. The
+    HUD's TIME tile reads PAUSED in the accent colour meanwhile.
+  - **No pause, save or menu key.** The pause button is gone, and `P`, `F2`
+    and `O` are unbound; their actions (`game.togglePause`,
+    `ui.toggleSaveMenu`, `ui.toggleSettings`) no longer exist, and stored
+    rebinds of them are dropped as unknown actions. *(For an hour `P` was a
+    plain pause, `O` opened the menu and `F2` the save menu.)*
+  - **The hotbar is the nine slots and nothing else.** BAG, TECH, MAP, SAVE,
+    the settings icon and the facing marker are gone; the ghost shows the
+    facing. The bag and the tech tree open from their HUD tiles and from `I`
+    and `T`. The map opens from `M`.
+  - **The HUD is ITEMS, RESEARCH, POWER, ALERTS and TIME, then MENU.** BUILT
     and CHUNKS are gone, because the F3 overlay's world section already has
     both counts. TPS moved to the overlay's session section as `tps`, measured
     over wall time between repaints. C30's speed marker (`×4`) moved onto the
     TIME tile. `HudView` still carries `entityCount`, `exploredChunks` and
     `tick`, but nothing reads them.
+- **The pipette, `Q`** *(2026-09-23, on request, as in Factorio)*. Over a
+  building, `Q` holds another of it, facing the same way, if the bag has at
+  least one; with none in the bag it does nothing. Over bare ground it empties
+  the hand. `GameController.pipette` decides, and `Cursor.setBuildRotation`
+  turns the tool. The input layer only reports the key (`build.pipette`),
+  because it may not read the bag (§4).
 - **The map is `M` only.** Tab opened it too for a day. It was unbound
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.
@@ -7074,6 +7085,17 @@ C30's "never colour alone" for anything on a belt: rock, slab, ingot, gear,
 coil, chip, crystal, or a crate for building items. Terrain gained four texture
 variants each (tufts, grain, cracks, ripples), and ore tiles gained lit rocks.
 
+**Belts raised (2026-09-23, on request: "it is flat now").** A belt is a steel
+frame up to `BELT_DECK` (0.12 bulk units), a tread on top with a lighter
+middle band, slats drawn as ridges (a lit line and its shadow), and a rail
+along each side up to `BELT_RAIL_TOP` (0.4) with a lit top edge and a shade
+groove on the tread beside it. Nothing is outlined per tile, so a line of belts
+reads as one conveyor. Its shadow is pushed south-east **across the flow
+only**, because the usual hull reaches into the next tile and two translucent
+shadows overlapping there notch the line at every seam. Splitters and tunnel
+mouths use the same lane. Every item sprite is lifted by `BELT_DECK`, since
+items are only ever drawn riding one. The atlas extents grew to match.
+
 **Deliberately not drawn:** belt curves. The reference sheet has one, but an
 item on a side-loaded belt travels straight along the lane (§9), so a curve
 drawn under it would show an item leaving the track. A curve needs the items
@@ -7294,8 +7316,8 @@ frames against 1x for 2N and gets the same tick count. It is not saved.
 **Pause** stays what §13 decided on 2026-09-23: the HUD's button (the
 reference sheet's icon) and P open the game menu, and the loop is held behind
 it. C30 added nothing there. *(Changed later on 2026-09-23: the pause button
-is gone, P only pauses, and Escape opens the settings panel as the menu. See
-§13, "The menu, and a smaller HUD and hotbar".)*
+and P are gone, and Escape opens the settings panel as the menu, which
+pauses. See §13, "The menu, and a smaller HUD and hotbar".)*
 
 **The close guard** is `beforeunload`, armed whenever the tick has moved since
 the factory last reached storage or a file: a manual save, an export, an

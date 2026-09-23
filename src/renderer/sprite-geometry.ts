@@ -74,6 +74,15 @@ export const SHADOW_ALPHA = 0.28;
 export const BELT_CHEVRON_PHASES = 8;
 
 /**
+ * How high a belt's tread rides, in bulk units (2026-09-23). Items on a belt
+ * sit on it, so the painter lifts them by the same amount.
+ */
+export const BELT_DECK = 0.12;
+
+/** The top of a belt's side rails, in bulk units. */
+export const BELT_RAIL_TOP = 0.4;
+
+/**
  * How many arm positions one inserter swing is quantised to. C14 task 7.
  *
  * Not a cycle but a sweep from one end to the other, so there are

@@ -11,9 +11,9 @@
  * BUILT, CHUNKS and TPS were counters a player never acted on. The building
  * and chunk counts are in the F3 readout's world section already, and the
  * tick rate moved there too — it is a question about the machine the game is
- * running on, not about the factory. The pause button went with them: P still
- * pauses, and the TIME tile says PAUSED while it is. The settings button took
- * its place as MENU, which Escape also opens.
+ * running on, not about the factory. The pause button went with them: the menu
+ * pauses the game, and the TIME tile says PAUSED while it is. The settings
+ * button took its place as MENU, which Escape also opens.
  *
  * ## The two tiles that had no data, and now have
  *
@@ -86,15 +86,15 @@ export class Hud {
 
     this.addTile('items', 'inventory', 'ITEMS');
     this.makeButton('items', 'ITEMS — open your inventory (I)', this.onOpenInventory);
-    this.addTile('power', 'power', 'POWER');
     this.addTile('research', 'research', 'RESEARCH');
     this.makeButton('research', 'RESEARCH — open the technology tree (T)', this.onOpenResearch);
+    this.addTile('power', 'power', 'POWER');
     this.addTile('alerts', 'alert', 'ALERTS');
     this.addTile('time', null, 'TIME');
 
     this.menuButton.type = 'button';
     this.menuButton.className = 'if-hud__menu';
-    this.menuButton.title = 'Menu: save and load, sound, size, motion and keys (Esc)';
+    this.menuButton.title = 'Menu: save and load, sound, size, motion and keys. Pauses the game (Esc)';
     const label = document.createElement('span');
     label.textContent = 'MENU';
     this.menuButton.append(createIcon('settings'), label);
@@ -124,8 +124,8 @@ export class Hud {
       time.root.classList.toggle('is-paused', view.paused);
       time.root.classList.toggle('is-fast', view.speed !== 1);
       time.root.title = view.paused
-        ? 'PAUSED — P resumes'
-        : `TIME — simulated play time${view.speed === 1 ? '' : `, at ${view.speed}x speed`}. P pauses, [ and ] change the speed`;
+        ? 'PAUSED — closing the menu resumes'
+        : `TIME — simulated play time${view.speed === 1 ? '' : `, at ${view.speed}x speed`}. [ and ] change the speed`;
     }
   }
 

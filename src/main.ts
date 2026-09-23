@@ -397,7 +397,7 @@ async function bootstrap(): Promise<void> {
    */
   let wired = false;
 
-  /** Was the game running when the save menu opened? §8's modal pause. */
+  /** Was the game running when the menu opened? §8's modal pause. */
   let pausedByMenu = false;
 
   /* ------------------------------------------------------------------ *
@@ -621,22 +621,12 @@ async function bootstrap(): Promise<void> {
       ui.toggleMap();
       return;
     }
-    if (action === 'ui.toggleSaveMenu') {
-      ui.toggleSaveMenu();
-      return;
-    }
     if (action === 'ui.toggleAltMode') {
       altMode = !altMode;
       return;
     }
-    if (action === 'game.togglePause') {
-      // A plain pause (2026-09-23): the menu no longer comes with it. Not while
-      // the save menu holds the game paused itself (§8) — closing it resumes.
-      if (!ui.isSaveMenuOpen()) controller.togglePause();
-      return;
-    }
-    if (action === 'ui.toggleSettings') {
-      ui.toggleSettings();
+    if (action === 'build.pipette') {
+      controller.pipette(input.hoverEntity);
       return;
     }
     if (action === 'game.speedUp' || action === 'game.speedDown') {
@@ -1093,19 +1083,22 @@ async function bootstrap(): Promise<void> {
       onExport: (id, name) => void (id === null ? saves.exportCurrent(name) : saves.exportSlot(id)),
       onImport: (file) => void saves.importFile(file, file.name),
       onTakeOver: () => saves.takeOver(),
-      // §8: "pause the loop outright when a modal save/load dialog is open."
-      // Remembered rather than toggled, so closing the menu does not start a
-      // game the player had deliberately paused before opening it.
+      // The pause behind it is `onMenuVisibility`'s, below.
       onVisibility: (open) => {
-        if (open) {
-          pausedByMenu = !game.isPaused();
-          if (pausedByMenu) controller.setPaused(true);
-          void saves.refresh();
-        } else if (pausedByMenu) {
-          pausedByMenu = false;
-          controller.setPaused(false);
-        }
+        if (open) void saves.refresh();
       },
+    },
+    // §8's pause behind a modal dialog, extended to the whole menu
+    // (2026-09-23): Escape opens it, and the game waits. Remembered rather
+    // than toggled, so closing it does not start a game paused some other way.
+    onMenuVisibility: (open) => {
+      if (open) {
+        pausedByMenu = !game.isPaused();
+        if (pausedByMenu) controller.setPaused(true);
+      } else if (pausedByMenu) {
+        pausedByMenu = false;
+        controller.setPaused(false);
+      }
     },
     // C30. Every change is applied and written at once: a slider that only
     // took effect on a SAVE button would be a slider nobody trusts.

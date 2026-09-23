@@ -279,7 +279,7 @@ describe('the canvas belongs to the game', () => {
     document.dispatchEvent(bound);
     expect(bound.defaultPrevented).toBe(true);
 
-    const unbound = keyEvent('keydown', 'KeyQ');
+    const unbound = keyEvent('keydown', 'KeyJ');
     document.dispatchEvent(unbound);
     expect(unbound.defaultPrevented).toBe(false);
   });

@@ -157,6 +157,8 @@ export interface Cursor {
   /** A material in the hand, or null. Never set at the same time as `buildTool`. */
   readonly heldItem: HeldItem | null;
   setBuildTool(tool: HeldBuilding | null): void;
+  /** Turn the held building. Ignored with nothing held, or past its `rotationCount`. */
+  setBuildRotation(rotation: Rotation): void;
   setHeldItem(item: HeldItem | null): void;
   setSelectedEntity(entityId: EntityId | null): void;
 }
@@ -211,6 +213,10 @@ export class DetachedCursor implements Cursor {
     if (tool === null || this.buildTool?.buildingId !== tool.buildingId) this.buildRotation = NORTH;
     this.buildTool = tool;
     if (tool !== null) this.heldItem = null;
+  }
+
+  setBuildRotation(rotation: Rotation): void {
+    if (this.buildTool !== null && rotation < this.buildTool.rotationCount) this.buildRotation = rotation;
   }
 
   setHeldItem(item: HeldItem | null): void {
@@ -1261,6 +1267,31 @@ export class GameController {
       rotationCount: definition.rotationCount,
       lineBuild: definition.belt !== undefined,
     });
+  }
+
+  /**
+   * The pipette (Q, 2026-09-23): hold another of the building under the
+   * cursor, facing the same way, as the genre's pipette does.
+   *
+   * Only when the bag has one to place: a pipette over a building the player
+   * has none of does nothing. Over bare ground (`null`) it empties the hand,
+   * which is the pipette's other half in the genre. Returns whether the hand
+   * now holds the building.
+   */
+  pipette(entityId: EntityId | null): boolean {
+    const entity = entityId === null ? undefined : this.simulation.entities.get(entityId);
+    if (entity === undefined) {
+      this.selectBuilding(null);
+      return false;
+    }
+    const definition = this.simulation.buildings.forEntityType(entity.type);
+    if (this.simulation.inventory.count(definition.id) <= 0) return false;
+    this.heldSlot = null;
+    if (this.cursor.buildTool?.buildingId !== definition.id) this.selectBuilding(definition.id);
+    this.cursor.setBuildRotation(entity.rotation);
+    this.menuSignature = this.buildMenuSignature();
+    this.emit({ type: 'buildMenuChanged' });
+    return true;
   }
 
   /** The material in the hand, by content id — null when the hand is empty or holds a building. */

@@ -375,6 +375,45 @@ describe('GameController build tool', () => {
   });
 });
 
+describe('the pipette (Q)', () => {
+  function withBelt(): { controller: GameController; cursor: DetachedCursor; simulation: Simulation; beltId: number } {
+    const { game, simulation } = makeGame();
+    simulation.inventory.add('belt', 2);
+    simulation.commands.enqueue({ type: 'build', buildingId: 'belt', x: 3, y: 3, rotation: EAST });
+    simulation.tick();
+    const belt = simulation.entities.at(3, 3);
+    if (belt === undefined) throw new Error('belt not built');
+    const cursor = new DetachedCursor();
+    return { controller: new GameController({ game, cursor }), cursor, simulation, beltId: belt.id };
+  }
+
+  it('holds another of the hovered building, facing the same way', () => {
+    const { controller, cursor, beltId } = withBelt();
+    let changes = 0;
+    controller.subscribe('buildMenuChanged', () => (changes += 1));
+
+    expect(controller.pipette(beltId)).toBe(true);
+    expect(controller.getSelectedBuilding()).toBe('belt');
+    expect(cursor.buildRotation).toBe(EAST);
+    expect(changes).toBe(1);
+    // Again on the same building keeps it in hand rather than putting it down.
+    expect(controller.pipette(beltId)).toBe(true);
+    expect(controller.getSelectedBuilding()).toBe('belt');
+  });
+
+  it('does nothing when the bag has none, and empties the hand over bare ground', () => {
+    const { controller, simulation, beltId } = withBelt();
+    controller.selectBuilding('chest');
+    simulation.inventory.remove('belt', simulation.inventory.count('belt'));
+
+    expect(controller.pipette(beltId)).toBe(false);
+    expect(controller.getSelectedBuilding()).toBe('chest');
+
+    expect(controller.pipette(null)).toBe(false);
+    expect(controller.getSelectedBuilding()).toBeNull();
+  });
+});
+
 describe('GameController events', () => {
   it('announces a build-menu change once, when something behind it moved', () => {
     const { game, simulation } = makeGame();

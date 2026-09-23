@@ -48,10 +48,10 @@
  * ## Escape opens the menu, and closes things
  *
  * The menu is the settings panel with SAVE & LOAD at its top (2026-09-23).
- * The HUD's MENU button and Escape open it; it does not pause. P pauses, and
- * the HUD's clock says PAUSED while it is. The save menu opens from the menu
- * (or F2), and §8 still pauses the loop behind it. Until 2026-09-23 the pause
- * button, P and Escape all opened the save menu instead.
+ * The HUD's MENU button and Escape open it, and the game pauses behind it and
+ * the save menu it opens (`onMenuVisibility`; §8). The HUD's clock says PAUSED
+ * while it is. There is no pause key. Until 2026-09-23 the pause button, P and
+ * Escape all opened the save menu instead.
  *
  * Escape backs out one layer at a time, the way the genre does:
  *
@@ -144,6 +144,12 @@ export interface GameUIOptions {
    * there is no list.
    */
   readonly objectives?: ObjectivesBridge;
+  /**
+   * The menu, or the save menu it opens, came up or went away (2026-09-23).
+   * Reported once per change, not per panel: going from the menu to SAVE &
+   * LOAD is one open. The composition root pauses behind it (§8).
+   */
+  readonly onMenuVisibility?: (open: boolean) => void;
 }
 
 /** What the settings panel reads and asks for (C30). */
@@ -217,11 +223,15 @@ export class GameUI {
   /** The map's own lane while paused. See `update`. */
   private pausedMapAccumulatorMs = 0;
   private mounted = false;
+  /** What `onMenuVisibility` last heard. */
+  private menuReported = false;
+  private readonly onMenuVisibility: ((open: boolean) => void) | undefined;
 
   constructor(options: GameUIOptions) {
     this.root = options.root;
     this.controller = options.controller;
     this.saves = options.saves ?? null;
+    this.onMenuVisibility = options.onMenuVisibility;
     this.settingsBridge = options.settings ?? null;
     this.objectivesBridge = options.objectives ?? null;
     this.objectivesDone = new Set(this.objectivesBridge?.initial.done ?? []);
@@ -727,17 +737,26 @@ export class GameUI {
   private setSaveMenuOpen(open: boolean): boolean {
     if (this.saveMenu.isOpen() === open) return open;
     this.saveMenu.setOpen(open);
-    this.hud.setMenuOpen(this.isMenuOpen());
+    this.syncMenu();
     this.saves?.onVisibility(open);
     this.focusPanel('.if-saves', open);
     return open;
+  }
+
+  /** Light MENU, and tell the composition root when the menu as a whole opens or closes. */
+  private syncMenu(): void {
+    const open = this.isMenuOpen();
+    this.hud.setMenuOpen(open);
+    if (open === this.menuReported) return;
+    this.menuReported = open;
+    this.onMenuVisibility?.(open);
   }
 
   /** Show or hide the settings, repainting on the way in (C30). */
   private setSettingsOpen(open: boolean): boolean {
     if (this.settings === null) return false;
     this.settings.setOpen(open);
-    this.hud.setMenuOpen(this.isMenuOpen());
+    this.syncMenu();
     if (open) this.refreshSettings();
     this.focusPanel('.if-settings', open);
     return open;

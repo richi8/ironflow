@@ -47,7 +47,7 @@ describe('the default bindings', () => {
   });
 
   it('answers with null for a key nobody bound', () => {
-    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyQ')).toBeNull();
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyJ')).toBeNull();
     // Not `undefined` from a prototype walk: `constructor` is a property of
     // every object literal's prototype and would otherwise look like a binding.
     expect(actionFor(DEFAULT_KEYBINDINGS, 'constructor')).toBeNull();
@@ -57,10 +57,10 @@ describe('the default bindings', () => {
 
 describe('rebinding', () => {
   it('returns a new map and leaves the original alone', () => {
-    const next = rebind(DEFAULT_KEYBINDINGS, 'KeyQ', 'debug.toggleOverlay');
+    const next = rebind(DEFAULT_KEYBINDINGS, 'KeyJ', 'debug.toggleOverlay');
 
-    expect(actionFor(next, 'KeyQ')).toBe('debug.toggleOverlay');
-    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyQ')).toBeNull();
+    expect(actionFor(next, 'KeyJ')).toBe('debug.toggleOverlay');
+    expect(actionFor(DEFAULT_KEYBINDINGS, 'KeyJ')).toBeNull();
   });
 
   it('unbinds with null', () => {

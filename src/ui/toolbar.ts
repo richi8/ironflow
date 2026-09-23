@@ -3,7 +3,7 @@
  *
  * Nine slots along the bottom, bound to the number row, and nothing else: the
  * BAG, TECH, MAP, SAVE and settings buttons that sat beside them came off on
- * 2026-09-23. The bag and the tech tree open from their HUD tiles (and I, T),
+ * 2026-09-23, and the facing marker after them (the ghost already shows it). The bag and the tech tree open from their HUD tiles (and I, T),
  * the map from M, and saving from the MENU button or Escape.
  *
  * What each slot holds is the player's: any item — a building or a material — is dragged onto a slot from the
@@ -46,13 +46,9 @@ export interface ToolbarOptions {
   readonly onMoveSlot: (from: number, to: number) => void;
 }
 
-/** Rotation as the player reads it, in tile space (§5 — no isometric words). */
-const ROTATION_LABELS = ['N', 'E', 'S', 'W'] as const;
-
 export class Toolbar {
   private readonly root = document.createElement('div');
   private readonly slots: Slot[] = [];
-  private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
   constructor(options: ToolbarOptions) {
@@ -66,11 +62,6 @@ export class Toolbar {
       this.root.append(this.createSlot(slot));
     }
 
-    this.rotationLabel.className = 'if-toolbar__rotation';
-    this.rotationLabel.title = 'Facing — R rotates';
-    this.rotationLabel.textContent = '';
-    this.root.append(this.rotationLabel);
-
     parent.append(this.root);
   }
 
@@ -79,12 +70,6 @@ export class Toolbar {
     this.slots.forEach((slot, index) => {
       this.paintSlot(slot, view.hotbar[index] ?? undefined);
     });
-
-    // Rotation is a building's; a material in hand has none.
-    const held = view.selectedBuildingId !== null;
-    const label = held ? (ROTATION_LABELS[view.rotation] ?? '') : '';
-    if (this.rotationLabel.textContent !== label) this.rotationLabel.textContent = label;
-    this.rotationLabel.classList.toggle('is-active', held);
   }
 
   destroy(): void {

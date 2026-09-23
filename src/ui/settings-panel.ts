@@ -5,7 +5,7 @@
  * It was the settings panel until 2026-09-23, when it became the menu: the
  * MENU button in the HUD and Escape open it, and SAVE & LOAD at its top opens
  * the save menu, which used to be what Escape and the pause button opened.
- * It does not pause the game; P does that.
+ * The game pauses while it is open (the composition root's `onMenuVisibility`).
  *
  * The tenth panel. It changes nothing in the game — every control is a
  * preference, kept in `localStorage` by the composition root (§4 keeps
@@ -201,7 +201,7 @@ export class SettingsPanel {
     this.savesButton.type = 'button';
     this.savesButton.className = 'if-saves__action';
     this.savesButton.textContent = TEXT.saves;
-    this.savesButton.title = 'Save, load, import and export factories (F2)';
+    this.savesButton.title = 'Save, load, import and export factories';
     this.savesButton.addEventListener('click', this.handleSaves);
     column.append(this.savesButton);
 

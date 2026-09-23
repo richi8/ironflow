@@ -263,19 +263,6 @@ body {
   user-select: none;
 }
 
-.if-toolbar__rotation {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  color: var(--if-text-dim);
-  font-size: 14px;
-}
-
-.if-toolbar__rotation.is-active {
-  color: var(--if-accent-high);
-}
-
 .if-slot {
   position: relative;
   display: flex;
