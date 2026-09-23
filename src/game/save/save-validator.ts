@@ -112,6 +112,8 @@ export const MAX_STRING_LENGTH = 256;
 export const MAX_DEPTH = 8;
 /** More hotbar slots than the game has, and far fewer than would cost anything. */
 export const MAX_HOTBAR_SLOTS = 32;
+/** The quest log's cap, `GameController`'s `MAX_QUEST_LOG`. */
+export const MAX_QUEST_STEPS = 256;
 /**
  * The largest count anything may hold.
  *
@@ -394,6 +396,7 @@ function readMetadata(value: unknown): SaveMetadata {
     // is a string or it is null, and never a script-bearing object.
     thumbnail: thumbnail === null ? null : readString(thumbnail, 'the thumbnail', 4 * 1024 * 1024),
     hotbar: readHotbar(metadata['hotbar']),
+    quests: readQuests(metadata['quests']),
   };
 }
 
@@ -406,6 +409,17 @@ function readHotbar(value: unknown): readonly (string | null)[] | null {
   if (value === null) return null;
   return readArray(value, 'the hotbar', MAX_HOTBAR_SLOTS).map((slot, index) =>
     slot === null ? null : readString(slot, `hotbar slot ${index + 1}`, MAX_STRING_LENGTH),
+  );
+}
+
+/**
+ * The quest log (v6, C31). Short strings, as the hotbar's are: which ids the
+ * chain has is the UI's business, and an unknown one is ignored there.
+ */
+function readQuests(value: unknown): readonly string[] | null {
+  if (value === null) return null;
+  return readArray(value, 'the quest log', MAX_QUEST_STEPS).map((step, index) =>
+    readString(step, `quest step ${index + 1}`, MAX_STRING_LENGTH),
   );
 }
 

@@ -59,10 +59,11 @@ export interface SaveSlot {
 
 /**
  * The metadata half of a slot, laid over the stored body's on load, so a
- * rename is seen without rewriting the body. The hotbar (v2) is not in a
- * slot — the list never needs it — so it comes from the body untouched.
+ * rename is seen without rewriting the body. The hotbar (v2) and the quest
+ * log (v6) are not in a slot — the list never needs them — so they come from
+ * the body untouched.
  */
-export function slotMetadata(slot: SaveSlot): Omit<SaveMetadata, 'hotbar'> {
+export function slotMetadata(slot: SaveSlot): Omit<SaveMetadata, 'hotbar' | 'quests'> {
   return {
     name: slot.name,
     createdAt: slot.createdAt,

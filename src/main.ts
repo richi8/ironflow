@@ -121,54 +121,6 @@ function describeOre(world: World, x: number, y: number): string {
   return `${resourceName(type)} ${chunk.resourceAmount[index] ?? 0}`;
 }
 
-/**
- * What the player starts with (C10, retuned in C20).
- *
- * Every chunk up to C19 grew this list, because a building the player could
- * not make was a building they had to be given: C06 handed out fifty of
- * everything, and C13 through C17 each added their own with a paragraph of
- * arithmetic behind it. C20's building recipes end that. A starting stock is
- * now a decision about **the first five minutes** and nothing else, so it
- * shrank by about three quarters.
- *
- * What it buys, and why each number is the number:
- *
- * ```text
- * 2 miner      one on iron, one on coal — the smallest factory that runs
- *              itself, and one short of the copper the assembler wants
- * 40 belt      twenty tiles each way; enough to reach ore that is not
- *              underfoot, not enough to cross the map (C13)
- * 6 inserter   two per furnace and two spare: ore in, plates out
- * 2 furnace    §15 says a miner feeds 1.6 of them, so two is one miner's
- *              worth and the ratio is visible in the first thing built
- * 1 assembler  the machine that makes everything else, including more of
- *              itself. One, so the second one is earned
- * 4 chest      somewhere to put plates, and the answer to a full bag
- * ```
- *
- * **No splitter.** It is the one building here whose recipe needs a circuit,
- * and C17's layout puzzle is worth more when it arrives as something the
- * player built than as something they woke up holding.
- *
- * The whole kit is worth about 90 iron plates and 20 copper, which at one
- * miner and two furnaces is roughly five minutes of production — so it reads
- * as a head start rather than as a finished factory. All of these are
- * **balance numbers**; the acceptance they are tuned against is C20's "first
- * automated plate within 10 minutes", measured in
- * `tests/balance/first-factory.test.ts`.
- *
- * It is granted in `newSimulation` and nowhere else, so that loading a save
- * does not hand it out a second time (C25).
- */
-const STARTING_MATERIALS: Readonly<Record<string, number>> = Object.freeze({
-  miner: 2,
-  belt: 40,
-  inserter: 6,
-  furnace: 2,
-  assembler: 1,
-  chest: 4,
-});
-
 /** The alt-mode overlay, off. Shared and frozen: every frame the key is not on. */
 const NO_ANNOTATIONS: readonly MachineAnnotation[] = Object.freeze([]);
 
@@ -199,12 +151,11 @@ function freshSeed(): number {
 }
 
 /**
- * A brand-new world, with the player standing in it holding the starter kit.
+ * A brand-new world, with the player standing in it empty-handed (C31).
  *
- * Lifted out of `bootstrap` in C25 because a session now starts in one of two
- * ways, and the other one — a save — must not run a line of this: the starting
- * materials are a decision about the first five minutes, and handing them out
- * again on every load would be an unlimited supply of belts.
+ * Lifted out of `bootstrap` in C25 because a session starts in one of two
+ * ways, and the other one — a save — must not run a line of this. It handed
+ * out a starter kit until C31; it no longer hands out anything.
  */
 function newSimulation(): Simulation {
   // C19: a generated world, validated before the player is put in it. The
@@ -219,9 +170,11 @@ function newSimulation(): Simulation {
   // decisions are wired; it is authoritative state from C18 (§6 R2, §10).
   const simulation = new Simulation({ world: started.world, seed: started.seed });
   simulation.player.setTilePosition(WORLD_SPAWN.x, WORLD_SPAWN.y);
-  for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
-    simulation.inventory.add(buildingId, count);
-  }
+  // No starting kit (C31). The bag is empty: the first furnace is ten stone
+  // mined by hand, and every recipe but smelting can be made by hand. From
+  // C10 to C30 this handed out a working factory — two miners, an assembler,
+  // furnaces, belts — and the quest chain in `ui/objectives.ts` now walks a
+  // new player to all of that from their first swing of the pick.
   return simulation;
 }
 
@@ -426,6 +379,7 @@ async function bootstrap(): Promise<void> {
     readonly id: string;
     readonly simulation: Simulation;
     readonly hotbar: readonly (string | null)[] | null;
+    readonly quests: readonly string[] | null;
   } | null = null;
   try {
     bootSlots = await service.list();
@@ -437,7 +391,12 @@ async function bootstrap(): Promise<void> {
       // way the world arrived, rather than including an IndexedDB read one
       // time and not the other.
       const loadStarted = performance.now();
-      resumed = { id: newest.id, simulation: deserialize(file.state), hotbar: file.metadata.hotbar };
+      resumed = {
+        id: newest.id,
+        simulation: deserialize(file.state),
+        hotbar: file.metadata.hotbar,
+        quests: file.metadata.quests,
+      };
       milestones.load = performance.now() - loadStarted;
     }
   } catch (cause) {
@@ -921,9 +880,15 @@ async function bootstrap(): Promise<void> {
   // `InputManager` satisfies `BuildCursor` structurally and has never heard of
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
-  // The hotbar comes back with the save it was arranged in (v2 metadata); a
-  // new world starts from the default.
-  const controller: GameController = new GameController({ game, cursor: input, hotbar: resumed?.hotbar ?? null });
+  // The hotbar comes back with the save it was arranged in (v2 metadata), and
+  // the quest log with the world it was played in (v6); a new world starts
+  // from the default hotbar and an empty log.
+  const controller: GameController = new GameController({
+    game,
+    cursor: input,
+    hotbar: resumed?.hotbar ?? null,
+    quests: resumed?.quests ?? null,
+  });
 
   /* ------------------------------------------------------------------ *
    * Saving and loading (C25).
@@ -954,7 +919,12 @@ async function bootstrap(): Promise<void> {
       const started = performance.now();
       const state = serialize(simulation);
       milestones.serialize = performance.now() - started;
-      return { state, playtimeTicks: simulation.getTick(), hotbar: controller.getHotbarLayout() };
+      return {
+        state,
+        playtimeTicks: simulation.getTick(),
+        hotbar: controller.getHotbarLayout(),
+        quests: controller.getQuestLog(),
+      };
     } finally {
       game.setPaused(wasPaused);
     }
@@ -978,12 +948,16 @@ async function bootstrap(): Promise<void> {
    * changed nothing, so the caller can say so and the player keeps playing the
    * factory they were in.
    */
-  function applyLoadedState(state: SerializedGameState, hotbar: readonly (string | null)[] | null): void {
+  function applyLoadedState(
+    state: SerializedGameState,
+    hotbar: readonly (string | null)[] | null,
+    quests: readonly string[] | null,
+  ): void {
     const started = performance.now();
     const loaded = deserialize(state);
     milestones.load = performance.now() - started;
     milestones.worldgen = null;
-    play(loaded, hotbar);
+    play(loaded, hotbar, quests);
     origin = 'loaded';
   }
 
@@ -995,7 +969,7 @@ async function bootstrap(): Promise<void> {
   function startNewGame(): void {
     const fresh = timedNewSimulation();
     milestones.load = null;
-    play(fresh, null);
+    play(fresh, null, null);
     origin = 'new';
     saves.setCurrentId(null);
     autosave.reset();
@@ -1003,13 +977,15 @@ async function bootstrap(): Promise<void> {
   }
 
   /** Put a world on screen in place of the one there. Load's and NEW GAME's shared half. */
-  function play(loaded: Simulation, hotbar: readonly (string | null)[] | null): void {
+  function play(loaded: Simulation, hotbar: readonly (string | null)[] | null, quests: readonly string[] | null): void {
     simulation = loaded;
     syncProfiler();
     game.replaceSimulation(loaded);
     controller.reload();
     // The save's own hotbar (v2), or the default for one that has none.
     controller.setHotbarLayout(hotbar);
+    // The save's own quest log (v6), or none for a new world or an older save.
+    controller.setQuestLog(quests);
     // The terrain cache is keyed by world chunk and revision, and a loaded
     // world starts both again from where the old one did — see
     // `TerrainLayer.invalidate`.
@@ -1040,6 +1016,7 @@ async function bootstrap(): Promise<void> {
         state: snapshot.state,
         playtimeTicks: snapshot.playtimeTicks,
         hotbar: snapshot.hotbar,
+        quests: snapshot.quests,
       });
       savedTick = snapshot.playtimeTicks;
       saves.noteAutosave();

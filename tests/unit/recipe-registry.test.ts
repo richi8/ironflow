@@ -185,7 +185,7 @@ describe('the shipped recipe table', () => {
         outputs: ['1 inserter'],
         ticks: 15,
       },
-      { id: 'make_furnace', inputs: ['12 brick'], outputs: ['1 furnace'], ticks: 60 },
+      { id: 'make_furnace', inputs: ['10 stone'], outputs: ['1 furnace'], ticks: 60 },
       {
         id: 'make_assembler',
         inputs: ['8 gear', '4 circuit', '6 iron_plate'],

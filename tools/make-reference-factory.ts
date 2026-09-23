@@ -384,6 +384,7 @@ async function main(): Promise<void> {
       playtimeTicks: simulation.getTick(),
       thumbnail: null,
       hotbar: null,
+      quests: null,
     },
     state: serialize(simulation),
   };

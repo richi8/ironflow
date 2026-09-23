@@ -1430,7 +1430,7 @@ body {
 }
 
 /* -------------------------------------------------------------------------- *
- * First steps (C30 task 4)
+ * Quests (C30 task 4; one step at a time since C31)
  *
  * Top right, under the HUD, where nothing else lives: the inspector has the
  * left, the panels the middle, the toasts the bottom. Narrow, and it takes no
@@ -1516,12 +1516,45 @@ body {
   color: var(--if-ok);
 }
 
-.if-objectives__hint {
+/* C31: one step on screen at a time. The current step is the brightest
+   line and has a marker bar, so it reads as "this one" without a hue. */
+.if-objective.is-current {
+  padding-left: 6px;
+  border-left: 2px solid var(--if-accent);
+  font-weight: 600;
+}
+
+.if-objectives__progress {
+  margin: 0 8px 0 auto;
+  color: var(--if-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.if-objectives__foot {
   margin: 8px 0 0;
   padding-top: 8px;
   border-top: 1px solid var(--if-stroke);
+}
+
+.if-objectives__hint {
+  margin: 0;
   color: var(--if-text-muted);
   line-height: 1.4;
+}
+
+.if-objectives__step-skip {
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--if-text-dim);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.if-objectives__step-skip:hover {
+  color: var(--if-text);
 }
 
 /* -------------------------------------------------------------------------- *

@@ -52,7 +52,7 @@ import type { ItemIdMapping } from '../registries/item-registry.js';
  * alters what the file says. A save carries both because neither answers the
  * other's question.
  */
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 /** The magic string that marks a file as one of ours. §14, and C26's header. */
 export const SAVE_FORMAT = 'ironflow-save';
@@ -246,6 +246,13 @@ export interface SaveMetadata {
    * arranged it for this factory.
    */
   readonly hotbar: readonly (string | null)[] | null;
+  /**
+   * The quest steps met in this world, in the order they were met, or `null`
+   * for none (v6, C31). Metadata for the hotbar's reason: no system reads it,
+   * and it belongs to this factory rather than to the browser. The ids are
+   * `ui/objectives.ts`'s; an id the chain no longer has is ignored there.
+   */
+  readonly quests: readonly string[] | null;
 }
 
 /**

@@ -244,6 +244,10 @@ function main(): void {
       // A rearranged hotbar rather than the default, so a v2 migration has a
       // layout to carry: the null a v1 save migrates to is the other shape.
       hotbar: ['belt', 'miner', null, 'inserter', 'furnace', null, 'chest', null, null],
+      // Two steps met, rather than none, so a later migration of the quest
+      // log (v6, C31) has ids to carry: the null a v5 save migrates to is the
+      // other shape.
+      quests: ['mine-iron', 'mine-stone'],
     },
     state: serialize(simulation),
   };

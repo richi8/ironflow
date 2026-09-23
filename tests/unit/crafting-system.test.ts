@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { ITEMS } from '../../src/game/data/items.js';
+import { RECIPES } from '../../src/game/data/recipes.js';
 import { HAND_CRAFTING_SPEED } from '../../src/game/registries/craft-durations.js';
+import { ItemRegistry } from '../../src/game/registries/item-registry.js';
+import { RecipeRegistry } from '../../src/game/registries/recipe-registry.js';
 import { MAX_CRAFT_ORDERS } from '../../src/game/player/player-state.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { World } from '../../src/game/world/world.js';
@@ -86,13 +90,28 @@ describe('queueing a craft', () => {
     expect(simulation.player.crafts).toHaveLength(0);
   });
 
-  it('refuses a recipe §15 says needs a machine', () => {
-    const simulation = newGame();
+  it('refuses a recipe the content table says needs a machine', () => {
+    // Every shipped crafting recipe is hand-craftable since C31, so the
+    // machine-only row this guards is a later chunk's; one is made up here,
+    // on the same items, with the flag left off.
+    const items = new ItemRegistry(ITEMS);
+    const recipes = new RecipeRegistry(
+      [
+        ...RECIPES,
+        {
+          id: 'make_machine_only',
+          inputs: [{ itemId: 'gear', count: 1 }],
+          outputs: [{ itemId: 'circuit', count: 1 }],
+          seconds: 1,
+          category: 'crafting',
+        },
+      ],
+      items,
+    );
+    const simulation = new Simulation({ world: new World(createPlaygroundGenerator()), items, recipes });
     give(simulation, 'gear', 20);
-    give(simulation, 'circuit', 20);
-    give(simulation, 'iron_plate', 20);
 
-    craft(simulation, 'make_assembler', 1);
+    craft(simulation, 'make_machine_only', 1);
 
     expect(lastRejection(simulation)).toBe('not_craftable');
     expect(simulation.player.crafts).toHaveLength(0);
@@ -318,21 +337,21 @@ describe('the queue is authoritative state', () => {
 });
 
 describe('what §15 says can be made by hand', () => {
-  it('is the five buildings, the gear, and the circuit chain they need', () => {
+  it('is every crafting recipe (C31), and no smelting one', () => {
+    // C21A shipped eight rows. C31 took away the starting kit, and with it
+    // the only other source of an assembler, a lab or a generator, so every
+    // crafting row is flagged now. See the plan's C31.
     const simulation = newGame();
-    expect(simulation.recipes.handCraftable().map((recipe) => recipe.id)).toEqual([
-      'make_gear',
-      'make_wire',
-      'make_circuit',
-      'make_miner',
-      'make_belt',
-      'make_inserter',
-      'make_furnace',
-      'make_chest',
-      // C23 added no ninth, deliberately: the underground belt is behind a
-      // technology, and this list is about what keeps a *new game* from being
-      // soft-locked. See C23's decisions in the plan.
-    ]);
+    expect(simulation.recipes.handCraftable().map((recipe) => recipe.id)).toEqual(
+      simulation.recipes.byCategory('crafting').map((recipe) => recipe.id),
+    );
+  });
+
+  it('starts with a furnace made of stone, which the hands can mine', () => {
+    const simulation = newGame();
+    const furnace = simulation.recipes.get('make_furnace');
+    expect(furnace.handCraftable).toBe(true);
+    expect(furnace.inputs).toEqual([{ itemId: simulation.items.idOf('stone'), count: 10 }]);
   });
 
   it('never includes a smelting recipe, whatever the content table says', () => {

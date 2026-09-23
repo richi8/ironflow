@@ -79,6 +79,14 @@ export interface CraftOptionView {
    * short.
    */
   readonly craftable: number;
+  /**
+   * Has research revealed it (C22)? A locked recipe is in the list anyway and
+   * the panel hides its button, because the panel's buttons are a pool built
+   * from the first view (§13): a recipe left out of that view would never
+   * get one, and researching it would change nothing on screen. C23 noticed
+   * that; C31 made every crafting recipe hand-craftable and so hit it.
+   */
+  readonly unlocked: boolean;
 }
 
 /** One ingredient of a hand-craft, with what the player holds against it. */

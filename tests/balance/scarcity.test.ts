@@ -48,7 +48,7 @@ import type { World } from '../../src/game/world/world.js';
  *                              iron's draw by §15's bills, but a player lays
  *                              miners in whole numbers
  *   coal    2 miners   1.0/s   furnaces and the generator
- *   stone   1 miner    0.5/s   brick, whose only consumer is `make_furnace`
+ *   stone   1 miner    0.5/s   furnaces (C31) and brick for power and labs
  * ```
  *
  * Four iron miners is what §15's ratios make a plausible first factory: one
@@ -84,9 +84,9 @@ const IRON_CEILING_HOURS = 8;
 /**
  * The ceiling on the rest, which is looser on purpose.
  *
- * Stone is consumed by `bake_brick` alone and brick by `make_furnace` alone,
- * so a stone patch that lasts fifteen hours is not a balance failure — it is
- * §15's shortest chain being short. What would be a failure is a patch that
+ * Stone is consumed by `make_furnace` (C31) and `bake_brick`, and brick by
+ * a handful of buildings, so a stone patch that lasts fifteen hours is not a
+ * balance failure — it is §15's shortest chain being short. What would be a failure is a patch that
  * outlasts any plausible game, because then the starting area is not a place
  * anyone leaves, and pillar 2's "a new seed must force a different factory"
  * dies with it. A day is that line.

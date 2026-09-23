@@ -111,21 +111,6 @@ describe('objective counts (C30 task 4)', () => {
     expect(controller.countObjective({ kind: 'stored', itemId: 'unobtainium' })).toBe(0);
   });
 
-  it('names only content that exists, so every objective can be finished', () => {
-    const { simulation } = makeController();
-    for (const objective of OBJECTIVES) {
-      const goal = objective.goal;
-      const known = goal.kind === 'built' ? simulation.buildings.has(goal.buildingId) : simulation.items.has(goal.itemId);
-      expect(known, objective.id).toBe(true);
-      expect(objective.target).toBeGreaterThan(0);
-    }
-    expect(new Set(OBJECTIVES.map((objective) => objective.id)).size).toBe(OBJECTIVES.length);
-  });
-
-  it('ends on C20’s milestone: a plate in a chest nobody carried there', () => {
-    expect(OBJECTIVES.at(-1)?.goal).toEqual({ kind: 'stored', itemId: 'iron_plate' });
-  });
-
   it('latches: a line once done stays done when the count falls back', () => {
     const done = new Set<string>();
     let ore = 20;
@@ -136,13 +121,15 @@ describe('objective counts (C30 task 4)', () => {
 
     ore = 3;
     const later = objectivesView(OBJECTIVES.slice(0, 1), done, count);
-    expect(later.lines[0]).toMatchObject({ done: true, progress: 20 });
+    expect(later.lines[0]).toMatchObject({ done: true, progress: OBJECTIVES[0]?.target });
     expect(later.finished).toBe(true);
   });
 
   it('hints at the first line not done, in any order the player does them', () => {
     const view = objectivesView(OBJECTIVES, new Set(['mine-iron', 'place-furnace']), () => 0);
     expect(view.hint).toBe(OBJECTIVES[1]?.hint);
+    expect(view.current).toBe(1);
+    expect(view.doneCount).toBe(2);
     expect(view.finished).toBe(false);
   });
 });

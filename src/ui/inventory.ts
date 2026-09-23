@@ -491,6 +491,8 @@ export class InventoryPanel {
   }
 
   private paintCraft(button: CraftButton, option: CraftOptionView): void {
+    // A locked recipe keeps its button, hidden, so research can reveal it (C31).
+    if (button.root.hidden === option.unlocked) button.root.hidden = !option.unlocked;
     setText(button.name, option.yield === 1 ? option.name : `${option.yield} ${option.name}`);
     setText(button.time, `${(option.craftTicks / TICKS_PER_SECOND).toFixed(1)}s`);
     setText(button.parts, option.inputs.map((part) => `${part.held}/${part.count} ${part.name}`).join('  '));

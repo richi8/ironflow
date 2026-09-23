@@ -38,14 +38,14 @@ describe('SettingsStore', () => {
     const first = new SettingsStore(storage);
     first.update({ volume: 0.25, muted: true, uiScale: 1.3, motion: 'reduce' });
     first.update({ bindings: { ...rebind(DEFAULT_KEYBINDINGS, 'KeyQ', 'world.interact') } });
-    first.update({ objectives: { visible: false, done: ['mine-iron', 'place-miner'] } });
+    first.update({ objectives: { visible: false } });
 
     const reloaded = new SettingsStore(storage).get();
     expect(reloaded.volume).toBe(0.25);
     expect(reloaded.muted).toBe(true);
     expect(reloaded.uiScale).toBe(1.3);
     expect(reloaded.motion).toBe('reduce');
-    expect(reloaded.objectives).toEqual({ visible: false, done: ['mine-iron', 'place-miner'] });
+    expect(reloaded.objectives).toEqual({ visible: false });
     const bindings = parseBindings(reloaded.bindings);
     expect(bindings === null ? null : actionFor(bindings, 'KeyQ')).toBe('world.interact');
   });
@@ -70,7 +70,8 @@ describe('SettingsStore', () => {
     expect(settings.uiScale).toBe(DEFAULT_SETTINGS.uiScale);
     expect(settings.motion).toBe('system');
     expect(settings.bindings).toBeNull();
-    expect(settings.objectives).toEqual({ visible: true, done: ['mine-iron'] });
+    // A C30 record's `done` is ignored: the ticks belong to a world since C31.
+    expect(settings.objectives).toEqual({ visible: true });
   });
 
   it('survives storage that is not JSON, and storage that throws', () => {

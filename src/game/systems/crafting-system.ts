@@ -11,7 +11,8 @@
  * "the opening is given, not earned". Without it, a new game's first miner
  * *has* to be in the starting kit, because nothing else in the game can make
  * one before an assembler exists. With it, the kit is a head start rather than
- * a finished factory.
+ * a finished factory — and from C31 there is no kit at all: every crafting
+ * recipe is hand-craftable, and a new game starts with an empty bag.
  *
  * It is a system and not three lines in `simulation.ts` for the reason
  * `HandSystem` is one: it owns two commands end to end, including their

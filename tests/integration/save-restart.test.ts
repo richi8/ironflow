@@ -59,7 +59,7 @@ function session(repository: SaveRepository, world: Simulation) {
   let current = world;
   const controller = new SaveController({
     service,
-    capture: () => ({ state: serialize(current), playtimeTicks: current.getTick(), hotbar: null }),
+    capture: () => ({ state: serialize(current), playtimeTicks: current.getTick(), hotbar: null, quests: null }),
     // The generator is pinned for the reason C24's `DeserializeOptions` gives:
     // this world is laid out from a fixed pattern rather than from C19's
     // noise, so without it a save test would also be a test of the octaves.
@@ -168,6 +168,7 @@ describe('the autosave rotation, against a real repository', () => {
           state: serialize(world),
           playtimeTicks: world.getTick(),
           hotbar: null,
+          quests: null,
         });
       },
     });
@@ -217,6 +218,7 @@ describe('what an autosave costs a frame', () => {
           state: serialize(world),
           playtimeTicks: world.getTick(),
           hotbar: null,
+          quests: null,
         });
         compressed = true;
       },

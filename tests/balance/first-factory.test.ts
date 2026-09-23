@@ -28,19 +28,21 @@ import { heldIn } from '../fixtures/chest.js';
  * walking on their own legs and every building placed by a `build` command
  * that the simulation validated — and count the ticks.
  *
- * ## What it found, which is not what C20 expected
+ * ## What it found in C20, and what C31 changed
  *
- * **Thirty seconds.** Both of C20's targets are met by a factor of twenty, and
- * not because the game is fast: because the player is *given* a miner, two
- * furnaces and an assembler, so the first plate costs a walk and four clicks
- * and the first assembler costs nothing at all. The ten- and twenty-five-minute
- * figures were written for a game whose opening is spent hand-crafting the
- * first miner, and hand-crafting is a system C20 is forbidden to add.
+ * C20 measured **thirty seconds**: the player was *given* two miners, two
+ * furnaces and an assembler, so the first plate cost a walk and four clicks.
+ * The ten- and twenty-five-minute targets had been written for an opening
+ * spent hand-crafting the first miner, and C20 could not add hand-crafting.
  *
- * So the milestone was re-derived rather than the number nudged, which is
- * §15's own rule. What the opening is actually *about*, now that §15's
- * building recipes exist, is the moment the factory starts making its own
- * parts — and that is what the second measurement below times:
+ * **C31 is that opening.** The starting kit is gone — a new game starts with
+ * an empty bag — and every crafting recipe can be made by hand, the furnace
+ * from ten stone. So the bot below does what a new player now has to: mine
+ * stone, coal, iron and copper with the pick, craft a furnace, feed it by
+ * hand, take the plates out, craft the gears, wire and circuits, craft the
+ * miner, the inserters and the chest, and only then build the chain. The
+ * second milestone hand-crafts the assembler too, out of plates the chain
+ * itself delivered:
  *
  * ```text
  *   first automated plate      ore -> furnace -> chest, unattended
@@ -48,9 +50,8 @@ import { heldIn } from '../fixtures/chest.js';
  *                              with the assembler making chests
  * ```
  *
- * The second one is the pillar-1 moment §15 names — "the factory eventually
- * builds itself" — and it is the first time in twenty chunks that a building
- * has come out of a machine rather than out of the starting kit.
+ * C20's two targets are the budgets again, and for the first time they are
+ * measuring the opening they were written for.
  *
  * ## What the numbers mean, and what they do not
  *
@@ -72,16 +73,6 @@ import { heldIn } from '../fixtures/chest.js';
  * allowed to reach into state the player could not.
  */
 
-/** The kit `main.ts` hands a new player. Kept in step by the test below. */
-const STARTING_KIT: Readonly<Record<string, number>> = Object.freeze({
-  miner: 2,
-  belt: 40,
-  inserter: 6,
-  furnace: 2,
-  assembler: 1,
-  chest: 4,
-});
-
 /** Seeds to run. Four, so one unlucky map cannot carry the result. */
 const SEEDS: readonly number[] = [0x1f0f10, 1, 4242, 99_999];
 
@@ -93,6 +84,12 @@ const FIRST_PLATE_BUDGET_SECONDS = 10 * 60;
  * *factory* made. See the file header on why the milestone moved.
  */
 const SELF_BUILT_BUDGET_SECONDS = 25 * 60;
+
+/**
+ * The tripwire under the first plate (C31): below this, the opening is being
+ * handed out again rather than earned. See the last test.
+ */
+const FIRST_PLATE_FLOOR_SECONDS = 2 * 60;
 
 /** How long the bot may spend walking to one destination before giving up. */
 const WALK_LIMIT_TICKS = 90 * TPS;
@@ -106,7 +103,7 @@ function newGame(seed: number): Bot {
   const started = createStartingWorld(seed);
   const simulation = new Simulation({ world: started.world, seed: started.seed });
   simulation.player.setTilePosition(WORLD_SPAWN.x, WORLD_SPAWN.y);
-  for (const [itemId, count] of Object.entries(STARTING_KIT)) simulation.inventory.add(itemId, count);
+  // Nothing in the bag: `main.ts`'s `newSimulation` hands out nothing (C31).
   return { simulation, ticks: 0 };
 }
 
@@ -327,77 +324,190 @@ interface Run {
   readonly selfBuiltSeconds: number;
 }
 
-/** How much coal the bot mines by hand before lighting the furnace. */
-const HAND_MINED_COAL = 20;
-
 /**
- * Play a new game up to both milestones, and report when each was reached.
+ * What the bot mines by hand before it builds anything (C31). Each number is
+ * the bill it is about to pay, not a round figure:
  *
  * ```text
+ * stone    10   one furnace (make_furnace)
+ * iron     26   the chain's parts, as plates:
+ *                 6 gear  (miner 4, inserters 2)      12
+ *                 4 circuit                            4
+ *                 miner 4, inserters 2, chest 4       10
+ * copper   15   wire for 4 circuits now (6 plates), and for the 6 that
+ *              the assembler and two more inserters want later (9)
+ * coal     45   41 ores smelted by hand at 3.2 s, 8 s a coal: 17;
+ *              the rest keeps the chain's furnace lit to milestone 2
+ * ```
+ */
+const HAND_MINED: readonly (readonly [ResourceType, string, number])[] = Object.freeze([
+  [ResourceType.Stone, 'stone', 10],
+  [ResourceType.Coal, 'coal', 45],
+  [ResourceType.Iron, 'iron_ore', 26],
+  [ResourceType.Copper, 'copper_ore', 15],
+]);
+
+/** How long the bot waits for one lot of hand mining, before calling it stuck. */
+const MINE_LIMIT_TICKS = 5 * 60 * TPS;
+
+/** The nearest tile of one resource, by straight-line distance from spawn. */
+function nearestTile(world: World, resource: ResourceType, radius = 40): { x: number; y: number } | null {
+  let best: { x: number; y: number } | null = null;
+  let bestDistance = Infinity;
+  for (let y = -radius; y <= radius; y++) {
+    for (let x = -radius; x <= radius; x++) {
+      if (world.getResource(x, y) !== resource) continue;
+      const distance = x * x + y * y;
+      if (distance >= bestDistance) continue;
+      bestDistance = distance;
+      best = { x, y };
+    }
+  }
+  return best;
+}
+
+function carried(bot: Bot, itemId: string): number {
+  return bot.simulation.inventory.count(itemId);
+}
+
+/** Walk to the nearest tile of a resource and hold the pick on it until the bag has `count` more. */
+function mineByHand(bot: Bot, resource: ResourceType, itemId: string, count: number): void {
+  const tile = nearestTile(bot.simulation.world, resource);
+  if (tile === null) throw new Error(`no ${itemId} near spawn`);
+  if (!walkTo(bot, tile.x, tile.y, MINE_RANGE_TILES - 1)) throw new Error(`could not reach ${itemId}`);
+  const want = carried(bot, itemId) + count;
+  bot.simulation.commands.enqueue({ type: 'mineTile', x: tile.x, y: tile.y });
+  for (let i = 0; i < MINE_LIMIT_TICKS && carried(bot, itemId) < want; i++) step(bot);
+  bot.simulation.commands.enqueue({ type: 'stopMining' });
+  step(bot);
+  if (carried(bot, itemId) < want) throw new Error(`mined ${carried(bot, itemId)} of ${want} ${itemId}`);
+}
+
+/** Queue a hand-craft and wait for the queue to empty. Throws with the refusal. */
+function craft(bot: Bot, recipeId: string, count: number): void {
+  bot.simulation.commands.enqueue({ type: 'craftItem', recipeId, count });
+  step(bot);
+  const rejections = bot.simulation.commands.takeRejections();
+  if (rejections.length > 0) throw new Error(`craft ${recipeId}: ${rejections.map((r) => r.reason).join(', ')}`);
+  waitFor(bot, () => bot.simulation.player.crafts.length === 0, `${recipeId} never finished`);
+}
+
+/** Put items from the bag into a building, walking into reach first. */
+function insert(bot: Bot, entityId: number, x: number, y: number, itemId: string, amount: number): void {
+  if (!walkTo(bot, x, y, MINE_RANGE_TILES - 1)) throw new Error(`could not reach ${x},${y}`);
+  bot.simulation.commands.enqueue({ type: 'insertItems', entityId, itemId, amount });
+  step(bot);
+  const rejections = bot.simulation.commands.takeRejections();
+  if (rejections.length > 0) throw new Error(`insert ${itemId}: ${rejections.map((r) => r.reason).join(', ')}`);
+}
+
+/**
+ * Stand by a building and take `itemId` out of it as it comes, until the bag
+ * holds `total`. A player waiting at a furnace does exactly this.
+ */
+function collect(bot: Bot, entityId: number, x: number, y: number, itemId: string, total: number): void {
+  if (!walkTo(bot, x, y, MINE_RANGE_TILES - 1)) throw new Error(`could not reach ${x},${y}`);
+  waitFor(
+    bot,
+    () => {
+      if (carried(bot, itemId) >= total) return true;
+      if (bot.ticks % TPS === 0) {
+        bot.simulation.commands.enqueue({
+          type: 'takeItems',
+          entityId,
+          itemId,
+          amount: total - carried(bot, itemId),
+        });
+      }
+      return false;
+    },
+    `never collected ${total} ${itemId}`,
+  );
+  // "Nothing to take yet" is the normal answer while waiting, not a failure.
+  bot.simulation.commands.takeRejections();
+}
+
+/**
+ * Play a new game from an empty bag up to both milestones (C31).
+ *
+ * ```text
+ *   by hand     stone, coal, iron ore, copper ore
+ *               furnace (crafted), placed where the chain will need it,
+ *               hand-fed, plates taken out
+ *               gears, wire, circuits, a miner, two inserters, a chest
+ *
  *   iron miner 2x2                        (on the nearest solid 2x2 of iron)
  *        | inserter
- *      furnace 2x2                        smelt_iron, hand-fed coal
+ *      furnace 2x2                        the one smelted by hand, still lit
  *        | inserter
  *      chest                     <-- milestone 1: a plate arrived unattended
  *        | inserter
- *      assembler 3x3                      make_chest: 4 iron_plate -> 1 chest
- *        | inserter
+ *      assembler 3x3                      hand-crafted from the chest's plates
+ *        | inserter                       make_chest: 4 iron_plate -> 1 chest
  *      chest                     <-- milestone 2: a *building* arrived
  * ```
  *
- * `make_chest` is the recipe that closes the loop with the one assembler the
- * starting kit contains: every other building recipe wants a gear or a
- * circuit, and making those *and* spending them needs two assemblers. Four
- * iron plates into a chest is the whole of "the factory builds itself", and it
- * is reachable from a single ore patch.
- *
- * No belt is laid, and that is a finding rather than a shortcut: a miner's
- * output tile is adjacent to an inserter's, so the shortest automated chain in
- * the game has no belt in it at all. The forty belts in the starting kit are
- * for the second thing the player builds.
+ * The hand-smelting furnace is placed on the chain's own tile, so the first
+ * furnace the player makes is the one the factory runs on. It smelts the
+ * iron, then the copper: a furnace takes one ore at a time, which a new
+ * player meets here too. No belt is laid: a miner's
+ * output tile is adjacent to an inserter's, so the shortest automated chain
+ * in the game still has no belt in it (C20's finding).
  */
 function playOpening(bot: Bot): Run {
   const world = bot.simulation.world;
   const iron = nearestPatch(world, ResourceType.Iron);
-  const coal = nearestPatch(world, ResourceType.Coal);
-  if (iron === null || coal === null) throw new Error('the start has no solid 2x2 of iron or coal');
+  if (iron === null) throw new Error('the start has no solid 2x2 of iron');
 
   // The chain runs south from the iron: inserter, furnace, inserter, chest,
   // inserter, assembler, inserter, chest. Nine tiles deep and three wide.
   const site = { x: iron.x, y: iron.y + 2 };
   if (!clearRun(world, site.x, site.y, 3, 11)) throw new Error('no room south of the iron');
 
-  build(bot, 'miner', iron.x, iron.y, SOUTH);
-  build(bot, 'inserter', site.x, site.y, SOUTH);
+  for (const [resource, itemId, count] of HAND_MINED) mineByHand(bot, resource, itemId, count);
+
+  craft(bot, 'make_furnace', 1);
   build(bot, 'furnace', site.x, site.y + 1, NORTH);
-  build(bot, 'inserter', site.x, site.y + 3, SOUTH);
-  build(bot, 'chest', site.x, site.y + 4, NORTH);
-
-  // Coal by hand, which is what a player does before they have a second miner
-  // on a coal patch. §15's manual rate is 0.5 items/s, so twenty coal is forty
-  // seconds of mining and 160 seconds of furnace.
-  if (!walkTo(bot, coal.x, coal.y, MINE_RANGE_TILES - 1)) throw new Error('could not reach coal');
-  bot.simulation.commands.enqueue({ type: 'mineTile', x: coal.x, y: coal.y });
-  step(bot, HAND_MINED_COAL * 2 * TPS);
-  bot.simulation.commands.enqueue({ type: 'stopMining' });
-  step(bot);
-
   const furnace = bot.simulation.entities.at(site.x, site.y + 1);
   if (furnace === undefined) throw new Error('the furnace is not there');
-  if (!walkTo(bot, site.x, site.y + 1, MINE_RANGE_TILES - 1)) throw new Error('could not reach the furnace');
-  bot.simulation.commands.enqueue({
-    type: 'insertItems',
-    entityId: furnace.id,
-    itemId: 'coal',
-    amount: HAND_MINED_COAL,
-  });
-  step(bot);
+  const furnaceAt = [site.x, site.y + 1] as const;
+  insert(bot, furnace.id, ...furnaceAt, 'coal', 45);
+  insert(bot, furnace.id, ...furnaceAt, 'iron_ore', 26);
+  collect(bot, furnace.id, ...furnaceAt, 'iron_plate', 26);
+  // One ore at a time: a furnace running `smelt_iron` accepts only iron ore
+  // (`MachineInputPort.wants`), and lets the recipe go once it runs dry.
+  insert(bot, furnace.id, ...furnaceAt, 'copper_ore', 15);
+  collect(bot, furnace.id, ...furnaceAt, 'copper_plate', 15);
+
+  craft(bot, 'make_gear', 6);
+  craft(bot, 'make_wire', 6);
+  craft(bot, 'make_circuit', 4);
+  craft(bot, 'make_miner', 1);
+  craft(bot, 'make_inserter', 2);
+  craft(bot, 'make_chest', 1);
+
+  build(bot, 'miner', iron.x, iron.y, SOUTH);
+  build(bot, 'inserter', site.x, site.y, SOUTH);
+  build(bot, 'inserter', site.x, site.y + 3, SOUTH);
+  build(bot, 'chest', site.x, site.y + 4, NORTH);
 
   const plateChest = chestAt(bot, site.x, site.y + 4);
   const plate = bot.simulation.items.idOf('iron_plate');
   const firstPlateSeconds = waitFor(bot, () => held(plateChest, plate) > 0, 'a plate never reached the chest');
 
-  // Milestone 2: the assembler, fed from that same chest, making chests.
+  // Milestone 2. The assembler is hand-crafted too now, and so are the two
+  // inserters and the chest around it: 38 plates the chain delivers, and the
+  // nine copper plates kept back for their wire.
+  const plateChestEntity = bot.simulation.entities.at(site.x, site.y + 4);
+  if (plateChestEntity === undefined) throw new Error('the plate chest is not there');
+  collect(bot, plateChestEntity.id, site.x, site.y + 4, 'iron_plate', 26 + 4 + 2 + 4 + 2);
+  craft(bot, 'make_gear', 10);
+  craft(bot, 'make_wire', 9);
+  craft(bot, 'make_circuit', 6);
+  craft(bot, 'make_assembler', 1);
+  craft(bot, 'make_inserter', 2);
+  craft(bot, 'make_chest', 1);
+
   build(bot, 'inserter', site.x, site.y + 5, SOUTH);
   build(bot, 'assembler', site.x, site.y + 6, NORTH);
   build(bot, 'inserter', site.x, site.y + 9, SOUTH);
@@ -463,44 +573,44 @@ describe('a new game reaches C20’s milestones inside its budget', () => {
   });
 
   /**
-   * The opening is *fast*, and the assertion says so on purpose.
+   * The opening is *earned* now, and the assertion says so on purpose.
    *
-   * C20 asks for an early game that is "neither a grind nor trivially fast",
-   * and the honest report is that it is closer to the second — the starting
-   * kit is a working factory in a bag. The floor below is not a target to
-   * reach; it is a tripwire. If a later chunk makes the first plate take five
-   * minutes, that is a real change to how the game opens and it should be a
-   * decision, not something noticed in a playtest six chunks later.
+   * C20's floor was a tripwire on an opening that was too fast — thirty
+   * seconds, because the kit was a factory in a bag. C31 made it an opening
+   * of mining and crafting, and this band is the tripwire on that one. It is
+   * not a target: it is there so that a later change which makes the first
+   * plate take thirty seconds again (a kit creeping back) or twenty minutes
+   * (a recipe made dear) is a decision rather than a playtest surprise.
    */
-  it('is fast rather than slow, which is C20’s finding and not its goal', () => {
+  it('is earned rather than given, which is C31’s change', () => {
     expect(runs.size).toBe(SEEDS.length);
     for (const [seed, run] of runs) {
-      expect(run.firstPlateSeconds, `seed ${seed}`).toBeLessThan(3 * 60);
-      expect(run.firstPlateSeconds, `seed ${seed}`).toBeGreaterThan(10);
+      expect(run.firstPlateSeconds, `seed ${seed}`).toBeGreaterThan(FIRST_PLATE_FLOOR_SECONDS);
+      expect(run.firstPlateSeconds, `seed ${seed}`).toBeLessThan(FIRST_PLATE_BUDGET_SECONDS);
     }
   });
 });
 
-describe('the starting kit is what the game actually hands out', () => {
+describe('a new game is started with nothing (C31)', () => {
   /**
-   * The kit above is a copy of `main.ts`'s, and a copy that drifts makes the
-   * measurement above a measurement of something nobody plays. There is no
-   * seam to import it through — `main.ts` is the composition root and boots a
-   * browser — so this asserts the two properties that matter about it rather
-   * than the numbers: it is all buildings, and it contains everything the
-   * chain above needs.
+   * `main.ts` is the composition root and boots a browser, so its
+   * `newSimulation` cannot be imported here. What the opening above depends
+   * on can be, and it is these two facts: the first furnace is made of
+   * something the hands can mine, and the hands can make it.
    */
-  it('is buildings only, and enough for the first factory', () => {
+  it('can make its first furnace from the ground', () => {
     const simulation = new Simulation({ world: createStartingWorld(1).world });
-    for (const [itemId, count] of Object.entries(STARTING_KIT)) {
-      expect(simulation.buildings.has(itemId), `${itemId} is not a building`).toBe(true);
-      expect(count).toBeGreaterThan(0);
+    const furnace = simulation.recipes.get('make_furnace');
+    expect(furnace.handCraftable).toBe(true);
+    for (const input of furnace.inputs) {
+      expect(simulation.items.byId(input.itemId).id).toBe('stone');
     }
-    for (const needed of ['miner', 'inserter', 'furnace', 'chest']) {
-      expect(STARTING_KIT[needed] ?? 0, `${needed} missing from the kit`).toBeGreaterThan(0);
+  });
+
+  it('can make every crafting recipe by hand', () => {
+    const simulation = new Simulation({ world: createStartingWorld(1).world });
+    for (const recipe of simulation.recipes.byCategory('crafting')) {
+      expect(recipe.handCraftable, recipe.id).toBe(true);
     }
-    // One assembler, and no splitter: the two decisions C20 made about the kit.
-    expect(STARTING_KIT['assembler']).toBe(1);
-    expect(STARTING_KIT['splitter']).toBeUndefined();
   });
 });

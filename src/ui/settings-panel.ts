@@ -74,7 +74,7 @@ const TEXT = Object.freeze({
   motionReduce: 'Reduced — belts, arms and machines hold still',
   motionFull: 'Full',
   help: 'HELP',
-  objectives: 'Show the first-steps list',
+  objectives: 'Show the quest guide',
   keys: 'KEYS',
   change: 'Change',
   listening: 'Press a key…',

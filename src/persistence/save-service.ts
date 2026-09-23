@@ -42,6 +42,8 @@ export interface SaveRequest {
   readonly playtimeTicks: number;
   /** The player's hotbar, or `null` for the default (v2). */
   readonly hotbar: readonly (string | null)[] | null;
+  /** The quest steps met in this world, or `null` for none (v6, C31). */
+  readonly quests: readonly string[] | null;
 }
 
 export interface SaveServiceOptions {
@@ -126,6 +128,7 @@ export class SaveService {
         // `game/` at all, and the save menu reads perfectly well without one.
         thumbnail: null,
         hotbar: request.hotbar,
+        quests: request.quests,
       },
       state: request.state,
     };

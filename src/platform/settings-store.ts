@@ -4,7 +4,7 @@
  * C30 says it in as many words: volume and mute are "persisted in
  * `localStorage` (UI preference — **not** game state)". Everything here is
  * the same kind of thing — how loud, how big, how much motion, which keys,
- * whether the first-run objectives are still showing — so it is one record in
+ * whether the quest guide is showing — so it is one record in
  * one key, and none of it goes near a save file. A factory moved to another
  * machine keeps its hotbar (§13), because that is part of the factory; it
  * does not take the old machine's volume with it.
@@ -34,15 +34,19 @@ export interface Settings {
   readonly motion: MotionPreference;
   /** `KeyboardEvent.code` to action name, or null for the shipped defaults. */
   readonly bindings: Readonly<Record<string, string>> | null;
-  /** The first-run objectives: shown, and which are done. */
+  /** The quest guide: whether it is showing. */
   readonly objectives: ObjectiveProgress;
 }
 
+/**
+ * Whether the quest guide is on screen. Which steps are done is **not** here
+ * any more: from C31 that belongs to a world and rides in its save (§14, v6).
+ * C30 kept it in this record, which made a second world open with the first
+ * one's ticks; a stored `done` from then is ignored.
+ */
 export interface ObjectiveProgress {
-  /** False once skipped or finished. The settings panel can turn it back on. */
+  /** False once hidden or finished. The settings panel can turn it back on. */
   readonly visible: boolean;
-  /** Ids of the objectives already met, in the order they were met. */
-  readonly done: readonly string[];
 }
 
 /** The scales the settings panel offers. 1 is the layout as designed. */
@@ -54,7 +58,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   uiScale: 1,
   motion: 'system',
   bindings: null,
-  objectives: Object.freeze({ visible: true, done: Object.freeze([]) }),
+  objectives: Object.freeze({ visible: true }),
 });
 
 /** The key everything is stored under. Versioned, so a later shape can start fresh. */
@@ -148,8 +152,5 @@ function readObjectives(raw: unknown): ObjectiveProgress {
   if (raw === null || typeof raw !== 'object') return DEFAULT_SETTINGS.objectives;
   const input = raw as Record<string, unknown>;
   const visible = typeof input['visible'] === 'boolean' ? input['visible'] : true;
-  const done = Array.isArray(input['done'])
-    ? input['done'].filter((id): id is string => typeof id === 'string' && id.length <= 64).slice(0, 64)
-    : [];
-  return Object.freeze({ visible, done: Object.freeze([...new Set(done)]) });
+  return Object.freeze({ visible });
 }

@@ -432,18 +432,17 @@ describe('the menu', () => {
     expect(ui.isMenuOpen()).toBe(false);
   });
 
-  it('puts the first steps back, unticked, on NEW GAME', () => {
+  it('puts the quest guide back on NEW GAME', () => {
     const { root, ui, progress } = mountUi({
       settings: true,
-      objectives: { visible: false, done: ['mine-iron'] },
+      objectives: { visible: false },
       onNewGame: () => {},
     });
     ui.toggleMenu();
     menuButton(root, 'NEW GAME')?.click();
     menuButton(root, 'NEW GAME? Click again')?.click();
     expect(ui.isObjectivesOpen()).toBe(true);
-    // Reset, then recounted against the world: this bag already holds ore.
-    expect(progress).toContainEqual({ visible: true, done: [] });
+    expect(progress).toContainEqual({ visible: true });
   });
 
   it('has no NEW GAME when nothing can start one', () => {
@@ -453,31 +452,45 @@ describe('the menu', () => {
   });
 });
 
-describe('the first-run objectives', () => {
-  it('show on a first run, tick what is already true, and remember it', () => {
-    const { root, ui, progress } = mountUi({ objectives: { visible: true, done: [] } });
+describe('the quest guide (C30 task 4, C31)', () => {
+  it('shows on a first run, ticks what is already true, and logs it with the world', () => {
+    const { root, ui, controller } = mountUi({ objectives: { visible: true } });
     expect(ui.isObjectivesOpen()).toBe(true);
-    // The harness carries 30 iron ore: the first line is already met.
+    // The harness carries 30 iron ore: the first step is already met.
     const first = root.querySelector('.if-objective[data-id="mine-iron"]');
     expect(first?.classList.contains('is-done')).toBe(true);
-    expect(progress.at(-1)?.done).toContain('mine-iron');
+    expect(controller.getQuestLog()).toContain('mine-iron');
   });
 
-  it('stay away once skipped, and say so to whoever remembers it', () => {
-    const { root, ui, progress } = mountUi({ objectives: { visible: true, done: [] } });
+  it('shows three steps at a time: the one before, the current one, and the next', () => {
+    const { root } = mountUi({ objectives: { visible: true } });
+    const shown = [...root.querySelectorAll<HTMLElement>('.if-objective')].filter((line) => !line.hidden);
+    expect(shown.map((line) => line.dataset['id'])).toEqual(['mine-iron', 'mine-stone', 'mine-coal']);
+    expect(root.querySelector('.if-objective.is-current')?.getAttribute('data-id')).toBe('mine-stone');
+  });
+
+  it('skips a step on request, and the world keeps the tick', () => {
+    const { root, controller } = mountUi({ objectives: { visible: true } });
+    root.querySelector<HTMLButtonElement>('.if-objectives__step-skip')?.click();
+    expect(controller.getQuestLog()).toContain('mine-stone');
+    expect(root.querySelector('.if-objective.is-current')?.getAttribute('data-id')).toBe('mine-coal');
+  });
+
+  it('stays away once hidden, and says so to whoever remembers it', () => {
+    const { root, ui, progress } = mountUi({ objectives: { visible: true } });
     root.querySelector<HTMLButtonElement>('.if-objectives__skip')?.click();
     expect(ui.isObjectivesOpen()).toBe(false);
     expect(progress.at(-1)?.visible).toBe(false);
   });
 
-  it('do not appear for a player who already dismissed them', () => {
-    const { ui } = mountUi({ objectives: { visible: false, done: ['mine-iron'] } });
+  it('does not appear for a player who already hid it', () => {
+    const { ui } = mountUi({ objectives: { visible: false } });
     expect(ui.isObjectivesOpen()).toBe(false);
   });
 
-  it('never take focus: the list is one tab stop, its button', () => {
-    const { root } = mountUi({ objectives: { visible: true, done: [] } });
+  it('never takes focus: the guide is two tab stops, its buttons', () => {
+    const { root } = mountUi({ objectives: { visible: true } });
     const panel = root.querySelector('.if-objectives');
-    expect(panel?.querySelectorAll('button, [tabindex]').length).toBe(1);
+    expect(panel?.querySelectorAll('button, [tabindex]').length).toBe(2);
   });
 });

@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C30 complete — Part II is finished, and v1 is feature-complete.** The game has sound, synthesised with `AudioContext` under a hard cap of 16 sources: four hum voices follow the nearest working machines, and the rest are culled by distance. It can be played entirely from the keyboard: Enter acts on the tile in front of the player, Delete removes, and every panel has Tab and arrow navigation. Keys can be rebound in a new settings panel. Reduced motion (system or setting) stops belts, machines and the player, and snaps inserter arms to an end. Every status colour now has a shape beside it. UI text is at least 14 px, with a UI scale from 85% to 150%. A skippable first-run list of five objectives ends at C20's first automated plate. A 1x-8x speed control and a close guard for unsaved play complete it. Preferences live in `localStorage`, never in a save. One acceptance line stays open: nobody has yet watched a first-time player follow the objectives. Next: nothing is scheduled. |
+| **Status** | **C31 complete — the quest guide, and a game that starts empty-handed.** A new game starts with an empty bag: no starting kit. Every crafting recipe can now be made by hand. Smelting still needs a furnace, and the furnace is crafted from 10 stone, which the player can mine by hand. C30's five-line first-run list is now a chain of 37 steps, from the first iron ore mined to a running Assembler Mk2. Together the steps use every building and every technology. The guide shows one step at a time with a hint, and ticks any step the world already satisfies, in any order. It can be skipped a step at a time or hidden. Progress belongs to the world and is saved in its metadata (save schema v6). Measured by the bot in `first-factory.test.ts`, the first automated plate now takes 6.5 minutes and the first self-built building 9.4, against C20's 10- and 25-minute budgets. Open: no first-time player has been watched following the guide. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | None scheduled. Part II ends at C30. The open item is a first-time playtest of C30's objectives. |
+| **First action** | None scheduled. Part II ends at C31. The open item is a first-time playtest of C31's quest guide from an empty bag. |
 
 ---
 
@@ -22,7 +22,7 @@ Part I   — Contracts        Read once, fully, before writing any code.
                             not a style choice.
 
 Part II  — Build chunks     Read one chunk at a time, immediately before
-                            implementing it. C00 -> C30, in order.
+                            implementing it. C00 -> C31, in order.
 
 Part III — Reference        Consult on demand: balance numbers, performance
                             budgets, determinism hazards, risks, done-criteria.
@@ -38,7 +38,7 @@ Part III — Reference        Consult on demand: balance numbers, performance
 | *authoritative state* | State that is simulated and persisted. |
 | *derived state* | State recomputed from authoritative state. Never persisted. |
 | *chunk* (world) | A 32×32 tile block of world storage. |
-| *chunk* (build) | A unit of implementation work in Part II. Prefixed `C00`–`C30` to avoid confusion. |
+| *chunk* (build) | A unit of implementation work in Part II. Prefixed `C00`–`C31` to avoid confusion. |
 
 Build chunks are always written `C07`, world chunks always "world chunk".
 
@@ -1216,7 +1216,7 @@ GameUI
  +-- MapPanel      the explored world, and where the camera is looking
  +-- SaveMenu      list, save, load, delete, export, import
  +-- SettingsPanel sound, UI scale, motion, key bindings        (C30)
- +-- Objectives    the first-run list, top right, non-modal     (C30)
+ +-- Objectives    the quest guide, top right, non-modal   (C30, C31)
  +-- Notifications  transient toasts, including command rejections
 ```
 
@@ -1361,7 +1361,8 @@ to arrange. What each change means:
   - **NEW GAME** takes two clicks, like DELETE (the first arms it for
     `DELETE_ARM_MS`), because it throws away the factory on screen. The
     composition root builds `newSimulation()` — the same fixed `WORLD_SEED`
-    and starter kit as a first boot — and swaps it in through `play`, the
+    and starter kit as a first boot *(an empty bag since C31)* — and swaps
+    it in through `play`, the
     half of `applyLoadedState` that re-points the game, controller, renderer
     and sound at a world. The new world belongs to no slot
     (`setCurrentId(null)`), the autosave interval restarts, and the hotbar
@@ -1768,6 +1769,16 @@ any array on a storage building as a grid, bounded by its slot count.
 `migrations/v3-to-v4.ts` deals old totals into slots exactly as v2 -> v3 did
 for the bag, with the same frozen stack sizes. The v4 fixture joins the
 others.
+
+**Schema v6 (C31).** `SaveMetadata` gained `quests`: the quest steps met in
+this world, in order, or `null` for none. It is metadata for the hotbar's
+reason (no system reads it, so it never enters the determinism hash), and it
+is in the save at all because it belongs to a factory. C30 kept it in
+`localStorage`, which made a second world open with the first one's ticks.
+`migrations/v5-to-v6.ts` gives a v5 save `null`. That loses nothing: a step
+latches the first time the world satisfies it, so the first repaint after
+loading ticks everything an old factory has already done. The validator
+caps the log at 256 short strings. The v6 fixture carries two ids.
 
 **Implementation note (C27).** The sentence above about migrations — "pure
 functions `vN -> vN+1`, chained, each independently unit-tested against a
@@ -5841,6 +5852,7 @@ existing one would — and adds the underground belt as a second unlock on
   both until now, and C23 kept it that way by making the underground belt
   machine-only *for its own reasons*. The day one genuinely needs to be both,
   the fix is to pool from `recipes.handCraftable()` and hide the locked rows.
+  *(C31 needed it, and did exactly that: `CraftOptionView.unlocked`.)*
 - **An inserter cannot reach into an underground belt**, because `asBelt` tests
   the entity type. That is the same answer C17 gave for the splitter and it is
   right for the same reason — a mouth is a belt fitting, not a place items are
@@ -7348,6 +7360,10 @@ three layout changes, recorded here so a later chunk does not undo them:
 - at a large scale the HUD labels shorten with an ellipsis before anything
   leaves the screen, and the toolbar wraps to a second row.
 
+*(C31 replaced the five lines below with a 37-step quest chain. The done
+set moved from `localStorage` into the save, and SKIP became HIDE plus a
+per-step SKIP STEP. See C31.)*
+
 **The first-run objectives** (`ui/objectives.ts`) are five lines: mine 20 iron
 ore, place a miner, place a furnace, connect a belt, and get an iron plate
 into a chest untouched. The last is C20's own milestone, read the way
@@ -7410,6 +7426,163 @@ plate without external instruction         names real content (test); not yet
 The last line is the one a test cannot close. The objectives make the path
 visible and each step checkable, but whether a stranger follows them is a
 playtest, and none has been run.
+
+---
+
+## C31 — Quest guide & an empty-handed start
+
+**Goal.** A new player starts with nothing and is guided, one step at a time,
+from the first ore mined by hand to having used every building and every
+technology. The game stays a sandbox: the guide can be skipped a step at a
+time, hidden, or ignored.
+
+**Depends on.** C30 (the first-run list, the settings toggle), C21A
+(hand-crafting), C22 (research and locks), C27 (migrations).
+
+**Why, in one paragraph.** C20's honest finding was that the opening was
+given, not earned: the kit was a working factory in a bag, and the first plate
+cost thirty seconds. C21A added hand-crafting but kept the kit, because
+without it the first furnace (twelve brick, and brick comes out of a furnace)
+could not be made. C31 closes that loop and takes the kit away, and C30's
+five-line list grows into a chain that teaches the whole game.
+
+**Deliverables.**
+
+```text
+src/game/data/recipes.ts           every crafting row hand-craftable;
+                                   make_furnace = 10 stone
+src/main.ts                        no starting kit; quest log to and from saves
+src/game/views/objective-view.ts   goal kinds `running`, `researched`
+src/game/game-controller.ts        countObjective for both; the quest log
+                                   (getQuestLog / setQuestLog / noteQuestDone)
+src/game/views/inventory-view.ts   CraftOptionView.unlocked
+src/game/save/*                    SAVE_VERSION 6, metadata.quests, v5 -> v6
+src/persistence/*                  quests carried like the hotbar
+src/platform/settings-store.ts     objectives = { visible } only
+src/ui/objectives.ts               the 37-step chain, one step on screen
+src/ui/ui.ts, inventory.ts, ...    wiring, SKIP STEP, hidden locked crafts
+tests/unit/quests.test.ts          new
+tests/balance/first-factory.test.ts  the bot opens from an empty bag
+tests/fixtures/saves/v6.json       new
+```
+
+**Tasks.**
+
+1. Make every crafting recipe hand-craftable. Smelting stays refused
+   (`RecipeRegistry`), and the flag stays a column where absent means no, so
+   a future machine-only recipe is one row that leaves it off.
+2. Make the first furnace makeable from the ground: `make_furnace` takes
+   10 `stone`.
+3. Remove the starting kit.
+4. Grow the objectives into a chain that starts at "mine 10 iron ore" and ends
+   when every building has been placed or run and every technology
+   researched. Add the goal kinds that needs.
+5. Show one step at a time. Tick steps done out of order. Offer SKIP STEP and
+   HIDE.
+6. Keep progress per world, in the save.
+
+**Decisions.**
+
+- **Two new goal kinds, and no counters.** `running` (how many of a building
+  are working now, optionally on one recipe; `running` or `low_power` both
+  count) and `researched` (1 once the technology is done). Both are answered
+  from state the save already holds: a machine's status and the completed
+  set. "Craft a furnace" is `carried furnace`, not a craft counter. A step
+  latches, so a condition that is true for one repaint is enough, and the
+  simulation learned nothing about quests (§4, §19 rule 17).
+- **The log belongs to the world.** `GameController` keeps it beside the
+  hotbar and for the hotbar's reason: it rides in `SaveMetadata` (schema v6,
+  §14), no system reads it, and it never enters the determinism hash. The UI
+  owns the words and the ids; the controller only remembers which ids have
+  latched, capped at 256. Whether the guide is *showing* stays a preference in
+  `localStorage`. C30 kept the ticks there too, which made a second world open
+  with the first one's ticks. A stored C30 `done` is ignored.
+- **One step at a time, but any order.** The current step is the first not
+  ticked, and it alone carries the hint. The panel shows it, the step before
+  it (ticked) and the step after it. Every step is still a pooled line built
+  once in `mount()` (§13), and three are unhidden. A step the player did early
+  is already ticked when the guide reaches it. Only open steps ask the world
+  anything, so a finished chain costs nothing to repaint.
+- **SKIP STEP and HIDE.** SKIP STEP ticks the current step without the world
+  agreeing, for a player who knows better or has a different plan. HIDE (was
+  SKIP) puts the guide away, and the settings checkbox brings it back. NEW GAME
+  shows it again with an empty log.
+- **The chain (37 steps).** Mine iron, stone and coal. Craft and place a
+  furnace. Smelt plates by hand. Craft gears. Mine and smelt copper. Craft
+  circuits. Craft and place a miner. Place an inserter and a chest. First
+  automated plate. Lay a belt. Place an assembler and have it make gears. Bake
+  bricks. Place a generator and a pole. Have an assembler make data cores.
+  Place a lab. Research Logistics 1. Place a splitter and an underground belt.
+  Research Smelting 2. Make steel. Research Power 1. Run an electric furnace.
+  Research Exploration 1. Run a radar. Research Mining 2. Place a Miner Mk2.
+  Research Construction 1. Make frames. Run an Assembler Mk2. Where a step has
+  a number, it is the next craft's bill: four gears and two circuits are a
+  miner's.
+- **A locked hand-craftable recipe now gets its button** when research reveals
+  it. C23 noted that the bag's craft pool was sized from the first view and
+  left locked recipes out, so they would never get a button. With every
+  crafting recipe hand-craftable, the splitter is the first such recipe. The
+  view now lists every hand-craftable recipe with `unlocked`, and the panel
+  hides the locked ones.
+
+**Deviations.**
+
+- **§15's hand-craft list and its soft-lock reasoning are superseded**, and §15
+  now says so. The guarantee rests on hand mining (C19 guarantees stone and
+  coal near spawn) and full demolition refunds, not on a kit.
+- **The furnace's bill changed from 12 brick to 10 stone.** Ten is a
+  **balance number**: twenty seconds of mining for the first craft in the
+  game. Brick keeps five consumers.
+- **Hand-crafting now bypasses automation for anyone patient enough**, a lab's
+  data cores included. That was accepted: hand-crafting runs at an assembler's
+  speed (0.5), so the limit is raw material, and every plate still has to be
+  mined and smelted. The guide teaches the automated way (an assembler making
+  cores, fed into a lab) rather than "research X".
+- **`first-factory.test.ts` measures a different opening.** Its bot mines
+  10 stone, 45 coal, 26 iron ore and 15 copper ore by hand. It crafts a
+  furnace and places it where the chain will need it, hand-feeds it iron and
+  then copper (a furnace takes one ore at a time), and crafts the miner, the
+  inserters and the chest. Only then does it build the chain. For milestone 2
+  it hand-crafts the assembler out of plates the chain delivered.
+
+**Acceptance, as verified.**
+
+```text
+every crafting recipe hand-craftable,      crafting-system.test.ts,
+smelting still refused                     recipe-registry.test.ts,
+                                           first-factory.test.ts
+a new game starts with an empty bag        main.ts; by hand in headless Chrome
+                                           (bag 0/30, no console errors)
+the chain names only real content,         tests/unit/quests.test.ts
+reaches every building and technology,
+and never asks for a locked thing before
+the step that researches it
+one step shown; out-of-order ticks;        quests.test.ts, keyboard-access.dom.test.ts
+skip step; hide; NEW GAME shows it again
+progress per world, in the save (v6)       quests.test.ts (migration), save
+                                           fixtures v1..v6, save-restart tests
+C20's budgets from an empty bag            first plate 386-391 s, self-built
+                                           building 563-568 s on four seeds
+                                           (budgets 600 s and 1500 s); a
+                                           tripwire fails under 120 s
+locked recipes appear once researched      inventory-panel.dom.test.ts
+```
+
+The bot knows the route, so 6.5 minutes is a floor on a human's time, not an
+estimate of it. A first-time player may well take longer than C20's ten
+minutes, and only a playtest can tell. That is the same line C30 left open,
+now on a harder opening.
+
+**Noticed, not fixed.**
+
+- **The chain cannot check *where* a miner stands.** "Place the miner on iron
+  ore" ticks for a miner on coal too. There is no goal kind for "on resource
+  X", and a wrong one is the player's own sandbox.
+- **`carried` steps can tick from a chest's worth taken out**, not only from
+  crafting. That is a way of meeting them, not a hole in them.
+- **The chain is long for a panel that shows three lines.** 37 steps is a
+  counter reading 0/37 for a long time. If a playtest says it discourages
+  players, the fix is chapters (grouped headings), not fewer steps.
 
 ---
 ---
@@ -7597,12 +7770,15 @@ a building's craft time tracks the size of its bill rather than being flat:
 | id | time | why |
 |---|---|---|
 | `make_splitter` | 1.0 s | twice a belt's pair-worth, plus a circuit |
-| `make_furnace` | 2.0 s | a miner's, and its twelve bricks are the real cost |
+| `make_furnace` | 2.0 s | a miner's. Its ten stone (twelve brick until C31) are the real cost |
 | `make_assembler` | 4.0 s | the biggest bill; at speed 0.5 it is eight seconds, the longest single craft in the game |
 | `make_chest` | 0.5 s | four plates, the cheapest thing in the table |
 
 `make_furnace` is the only consumer `brick` has, and therefore the only reason
-to bake one — which is the only reason to mine `stone`.
+to bake one — which is the only reason to mine `stone`. *(Out of date twice:
+C21 and C22 gave brick four more consumers, and C31 made the furnace itself
+out of raw stone, so a new game's first craft is the first reason to mine
+it.)*
 
 **`steel` has one from C21.** C20 listed it as a dead end and predicted C22's
 `make_frame` would close it; `make_electric_furnace` got there first, which is
@@ -7668,8 +7844,8 @@ with room in it.
 ### Buildings
 
 Buildings are **placed by consuming their item** from the player's inventory.
-That item is crafted by the corresponding recipe above (or hand-crafted early
-game). So `buildCost` is always a single stack of the building's own item — the
+That item is crafted by the corresponding recipe above (or by hand, which
+every crafting recipe allows since C31). So `buildCost` is always a single stack of the building's own item — the
 interesting cost lives in the recipe, and the factory eventually builds itself.
 
 | id | size | crafted from | power | notes |
@@ -7679,7 +7855,7 @@ interesting cost lives in the recipe, and the factory eventually builds itself.
 | `splitter` | 1×2 | 2 gear, 1 circuit, 2 iron_plate | — | 4 rotations, deterministic round-robin, 8 items/s per lane (C17), **walkable** |
 | `inserter` | 1×1 | 1 gear, 1 circuit, 1 iron_plate | — *(see below)* | 4 rotations, 1 item/s |
 | `chest` | 1×1 | 4 iron_plate | — | 24 slots |
-| `furnace` | 2×2 | 12 brick | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
+| `furnace` | 2×2 | 10 stone *(C31; 12 brick until then)* | — | burns coal, 8 s per coal; buffers 50 in / 50 fuel / 50 out, 4 rotations (C15) |
 | `assembler` | 3×3 | 8 gear, 4 circuit, 6 iron_plate | — *(see below)* | recipe selectable, speed 0.5; buffers 50 in / 50 out, 4 rotations (C16) |
 | `generator` | 3×3 | 8 gear, 10 iron_plate, 6 brick | **−900 kW** | burns 0.75 coal/s **at full load**, pro rata below it (C21) |
 | `power_pole` | 1×1 | 1 copper_wire, 2 iron_plate | — | wire reach 8 (a radius), supply area 5 (a square) |
@@ -7726,6 +7902,20 @@ two. The soft-lock guarantee still rests on the starting kit and on demolition
 refunding in full, exactly as C20 said it already did. What hand-crafting
 removes is the dependence on the kit's **assembler**, which is the gate this
 section actually cares about.
+
+**Widened in C31: every crafting recipe is hand-craftable, and the furnace is
+made of stone.** The two paragraphs above are history. C31 removed the
+starting kit, so the player's hands are the only machine until they build
+one, and all twenty crafting rows carry `handCraftable`. The column stays,
+and absent still means **no**: the first machine-only recipe a later chunk
+adds says so by leaving the flag off. Smelting is still refused by hand, so
+plates are the one thing the player cannot make without a furnace. What
+closes the loop is `make_furnace` taking **10 `stone`** instead of 12 brick:
+stone and coal are mined by hand, C19 puts both within 30 tiles of spawn on
+every seed, and everything else follows from plates. **The soft-lock
+guarantee now rests on hand mining and on demolition refunding in full**,
+not on a kit. Research still gates by hand what it gates in a machine: a
+locked recipe is refused with `locked` either way (C22).
 
 **Hand-craft speed is `HAND_CRAFTING_SPEED` = 0.5** — the same as a tier-1
 assembler, so the assembler's whole value is automation rather than speed. See
@@ -7938,7 +8128,8 @@ Four iron miners is what §15's ratios make a plausible first factory: one
 miner feeds 1.6 plate furnaces, so four feed six — about the smelting column a
 player has built by the time they are researching. Copper's draw is half
 iron's because copper only reaches wire and circuits; stone's is a quarter
-because brick's only consumer is `make_furnace`.
+because brick's only consumer is `make_furnace` *(no longer true: see the
+recipe notes above; C31's furnace takes stone directly)*.
 
 **Iron is the binding resource, and that is the point.** It runs out first by a
 wide margin, because it is the material every recipe in §15 eventually reaches
@@ -8212,6 +8403,7 @@ Recommended next chunk
 | After C24 | The save round-trip determinism test passes. |
 | After C29 | Every §12 budget is met on the reference factory. **Passed**, in headless Chromium at 1920x1080. Render 1.7 ms, 60 fps, 5,000 entities on screen at max zoom-out in 3.2 ms, tick 2.5 ms, load 155 ms, serialize 114 ms, 0.19 MB save, worldgen 199 ms, cold start under 70 ms. The longest frame interval is 20-26 ms, which is under the 50 ms hard fail and was not chased (see C29). |
 | After C30 | v1 is feature-complete: every C30 acceptance line verified. **Passed, with one open line** — the first-run objectives lead to the first automated plate, but no first-time player has yet been watched following them (see C30). |
+| After C31 | A new game starts empty-handed and the quest guide reaches every building and technology. **Passed, with the same open line** — a bot opens from an empty bag to the first automated plate in 6.5 minutes on four seeds, but no first-time player has yet followed the guide (see C31). |
 
 ---
 

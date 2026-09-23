@@ -61,6 +61,8 @@ export interface SaveSnapshot {
   readonly playtimeTicks: number;
   /** The hotbar, which rides in the metadata (v2). */
   readonly hotbar: readonly (string | null)[] | null;
+  /** The quest log, which rides in the metadata too (v6, C31). */
+  readonly quests: readonly string[] | null;
 }
 
 export interface SaveControllerOptions {
@@ -72,7 +74,11 @@ export interface SaveControllerOptions {
    */
   readonly capture: () => SaveSnapshot;
   /** Put a loaded world into the running game. The composition root's. */
-  readonly apply: (state: SerializedGameState, hotbar: readonly (string | null)[] | null) => void;
+  readonly apply: (
+    state: SerializedGameState,
+    hotbar: readonly (string | null)[] | null,
+    quests: readonly string[] | null,
+  ) => void;
   /** Told whenever the published state changes, so the UI can repaint. */
   readonly onChange: (state: SaveSessionState) => void;
   /** The rotation, so a manual save can reset its timer. */
@@ -191,7 +197,7 @@ export class SaveController {
     }
 
     try {
-      this.options.apply(file.state, file.metadata.hotbar);
+      this.options.apply(file.state, file.metadata.hotbar, file.metadata.quests);
     } catch (cause) {
       // A save that decoded and then would not load: a foreign generator
       // version, or state C27 has not migrated yet. The running game is
@@ -324,6 +330,7 @@ export class SaveController {
         state: snapshot.state,
         playtimeTicks: snapshot.playtimeTicks,
         hotbar: snapshot.hotbar,
+        quests: snapshot.quests,
       });
       this.hand(await encodeSaveFile(file), name);
     } catch (error) {
@@ -364,7 +371,7 @@ export class SaveController {
     }
 
     try {
-      this.options.apply(file.state, file.metadata.hotbar);
+      this.options.apply(file.state, file.metadata.hotbar, file.metadata.quests);
     } catch (cause) {
       this.busy = false;
       const detail = cause instanceof Error ? cause.message : String(cause);
@@ -381,6 +388,7 @@ export class SaveController {
         state: file.state,
         playtimeTicks: file.metadata.playtimeTicks,
         hotbar: file.metadata.hotbar,
+        quests: file.metadata.quests,
       });
     } catch (error) {
       this.busy = false;
@@ -459,6 +467,7 @@ export class SaveController {
         state: snapshot.state,
         playtimeTicks: snapshot.playtimeTicks,
         hotbar: snapshot.hotbar,
+        quests: snapshot.quests,
       });
     } catch (error) {
       this.busy = false;

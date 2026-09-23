@@ -262,12 +262,19 @@ describe('what the player is carrying', () => {
 describe('crafting by hand', () => {
   it('lists what §15 says the hands can make, and nothing else', () => {
     harness.ui.toggleInventory();
-    const ids = [...harness.root.querySelectorAll<HTMLElement>('.if-craft')].map(
-      (button) => button.dataset['recipe'],
+    const ids = [...harness.root.querySelectorAll<HTMLElement>('.if-craft')]
+      .filter((button) => !button.hidden)
+      .map((button) => button.dataset['recipe']);
+    // What research has revealed (C22); the locked rest are hidden, not absent.
+    expect(ids).toEqual(
+      harness.simulation.recipes
+        .handCraftable()
+        .filter((recipe) => harness.simulation.unlocks.isRecipeUnlocked(recipe.recipeId))
+        .map((recipe) => recipe.id),
     );
-    expect(ids).toEqual(harness.simulation.recipes.handCraftable().map((recipe) => recipe.id));
     expect(ids).not.toContain('smelt_iron');
-    expect(ids).not.toContain('make_assembler');
+    // Every crafting recipe since C31, the assembler's included.
+    expect(ids).toContain('make_assembler');
   });
 
   it('prints the time the simulation will actually take', () => {

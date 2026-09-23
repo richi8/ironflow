@@ -64,28 +64,30 @@
  * that is `smelt_steel` and `make_frame`. Everything this table declares and
  * no technology claims is available from the first frame.
  *
- * ## `handCraftable` (C21A)
+ * ## `handCraftable` (C21A, widened in C31)
  *
- * §15: "Hand-craftable without a machine (so a new game is never soft-locked):
- * `belt`, `chest`, `inserter`, `miner`, `furnace`, and the plates/gears they
- * need. Everything else requires an assembler."
+ * C21A flagged eight rows: §15's five hand-craftable buildings plus the
+ * gear, wire and circuit they are made of. **C31 flags every crafting row**,
+ * because a new game now starts with an empty bag (see the plan's C31): the
+ * player's hands are the only machine there is until they have built one, and
+ * an assembler, a lab or a generator the player had to be given would be the
+ * starting kit coming back by the side door.
  *
- * Eight rows carry the flag: §15's five, plus `make_gear` — which is the
- * "gears they need" said out loud — plus `make_wire` and `make_circuit`,
- * because the inserter and the miner each want a circuit and a list that
- * stops one ingredient short of its own entries is not a list. **The plates
- * are not among them**, and cannot be: a plate is smelted, smelting is what a
- * furnace is for, and `RecipeRegistry` refuses a hand-craftable smelting
- * recipe outright.
+ * The flag stays a column, and absent still means **no** — so the first
+ * machine-only recipe a later chunk adds says so by leaving it off, rather
+ * than every existing row having to opt in. **The plates are still not among
+ * them**, and cannot be: a plate is smelted, smelting is what a furnace is
+ * for, and `RecipeRegistry` refuses a hand-craftable smelting recipe outright.
  *
- * The consequence, written down because it is the one thing §15's sentence
- * does not survive contact with: **hand-crafting alone does not bootstrap a
- * factory from nothing.** `make_furnace` takes brick, brick is baked in a
- * furnace, and the loop closes only because the player is *given* two. The
- * soft-lock guarantee therefore rests on the starting kit and on demolition
- * refunding in full, exactly as C20 said it already did — hand-crafting makes
- * the opening playable without the kit's *assembler*, which is the gate §15
- * actually cares about, and not without its furnace.
+ * What makes an empty bag playable, then, is `make_furnace` taking **stone**
+ * rather than brick: stone and coal are mined by hand, a furnace is crafted
+ * from the first, burns the second, and everything else follows from plates.
+ * C19 guarantees a stone and a coal patch within thirty tiles of spawn on
+ * every seed. The soft-lock guarantee therefore rests on hand mining and on
+ * demolition refunding in full, and no longer on a kit.
+ *
+ * Research still gates by hand what it gates in a machine: a locked recipe is
+ * refused with `locked` whichever does the making (C22).
  */
 
 import type { RecipeDefinition } from '../registries/recipe-registry.js';
@@ -186,6 +188,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'splitter', count: 1 }],
     seconds: 1.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_inserter',
@@ -200,10 +203,14 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     handCraftable: true,
   },
   {
-    // The only building made of brick, and therefore the only consumer stone
-    // has: `bake_brick` made bricks in C15 and nothing has wanted one since.
+    // Raw stone, not brick (C31). A new game starts with an empty bag, and
+    // brick is baked in a furnace, so a furnace made of brick is a furnace
+    // nobody can make first. Ten stone is twenty seconds of hand mining — the
+    // first thing a player crafts, and cheap enough that the second furnace
+    // is not a decision. A **balance number**, timed by
+    // `tests/balance/first-factory.test.ts`. Brick keeps five consumers.
     id: 'make_furnace',
-    inputs: [{ itemId: 'brick', count: 12 }],
+    inputs: [{ itemId: 'stone', count: 10 }],
     outputs: [{ itemId: 'furnace', count: 1 }],
     seconds: 2.0,
     category: 'crafting',
@@ -219,6 +226,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'assembler', count: 1 }],
     seconds: 4.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_chest',
@@ -245,6 +253,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     // Three seconds: a bill the size of the assembler's without its circuits.
     seconds: 3.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     id: 'make_power_pole',
@@ -257,6 +266,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     // and poles are laid by the dozen.
     seconds: 0.5,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // §15 gives this no row, because §15 has no electric furnace. The bill is
@@ -276,6 +286,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'electric_furnace', count: 1 }],
     seconds: 3.0,
     category: 'crafting',
+    handCraftable: true,
   },
 
   /* ---------------------------------------------------------------------- *
@@ -297,6 +308,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'frame', count: 1 }],
     seconds: 4.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // §15's row, transcribed, and the most load-bearing 2.5 in the game: at a
@@ -311,6 +323,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'data_core', count: 1 }],
     seconds: 2.5,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // §15's building table says 10 gear, 10 circuit, **4 frame**, and the
@@ -318,8 +331,8 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     // unlocks, and `smelting_2` is a technology — so a lab made of frames
     // would be a lab you needed research to build and research you needed a
     // lab to do. Nothing on the path to the *first* technology may be behind
-    // one (C22's entry-path rule); the twelve brick are the furnace's own
-    // material and cost the same detour through stone that a furnace does.
+    // one (C22's entry-path rule); the twelve brick cost a detour through
+    // stone and a furnace, which is where the game starts anyway.
     id: 'make_lab',
     inputs: [
       { itemId: 'gear', count: 10 },
@@ -333,6 +346,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     // the biggest in the game.
     seconds: 5.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // The tier-1 miner's bill with its plates turned to steel and two more
@@ -348,6 +362,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'miner_2', count: 1 }],
     seconds: 3.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // The tier-1 assembler's bill, grown, with the frames that are the other
@@ -361,6 +376,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'assembler_2', count: 1 }],
     seconds: 5.0,
     category: 'crafting',
+    handCraftable: true,
   },
 
   /* ---------------------------------------------------------------------- *
@@ -380,6 +396,7 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'radar', count: 1 }],
     seconds: 3.0,
     category: 'crafting',
+    handCraftable: true,
   },
   {
     // **Two at a time**, like `make_belt`, and for a reason stronger than
@@ -389,11 +406,9 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     // the two mouths, four plates for the casing they are sunk in, and twice
     // `make_belt`'s half-second — all **balance numbers**.
     //
-    // **Not** hand-craftable, though `make_belt` is. §15's hand-craft column
-    // exists so that a new game is never soft-locked, and nothing behind a
-    // technology can be on that path by definition — which is why the other
-    // half of `logistics_1`, the splitter, needs an assembler too. See C23's
-    // decisions in the plan.
+    // Hand-craftable since C31, like every crafting row; it was not from C23
+    // until then. A locked recipe is still refused by hand until
+    // `logistics_1` is researched (C22's `locked`).
     id: 'make_underground_belt',
     inputs: [
       { itemId: 'gear', count: 2 },
@@ -402,5 +417,6 @@ export const RECIPES: readonly RecipeDefinition[] = Object.freeze([
     outputs: [{ itemId: 'underground_belt', count: 2 }],
     seconds: 1.0,
     category: 'crafting',
+    handCraftable: true,
   },
 ] satisfies readonly RecipeDefinition[]);

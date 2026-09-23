@@ -141,9 +141,10 @@ export interface GameUIOptions {
    */
   readonly settings?: SettingsBridge;
   /**
-   * The first-run objectives (C30 task 4): whether they are showing, which
-   * are done, and where to report a change so it outlives the tab. Omitted,
-   * there is no list.
+   * The quest guide (C30 task 4, C31): whether it is showing, and where to
+   * report a change so it outlives the tab. Which steps are done is the
+   * world's, kept by the controller and saved with it. Omitted, there is no
+   * guide.
    */
   readonly objectives?: ObjectivesBridge;
   /**
@@ -154,7 +155,7 @@ export interface GameUIOptions {
   readonly onMenuVisibility?: (open: boolean) => void;
   /**
    * The menu's NEW GAME (2026-09-23): replace the running world with a new
-   * one. The UI resets its own progress, the first-steps list, after it.
+   * one. The UI shows the quest guide again after it, as on a first launch.
    * Omitted, the menu has no NEW GAME.
    */
   readonly onNewGame?: () => void;
@@ -171,10 +172,9 @@ export interface SettingsBridge {
   readonly onResetBindings: () => void;
 }
 
-/** The objectives' remembered state. Structurally `platform/settings-store.ts`'s. */
+/** The guide's remembered state. Structurally `platform/settings-store.ts`'s. */
 export interface ObjectiveProgress {
   readonly visible: boolean;
-  readonly done: readonly string[];
 }
 
 export interface ObjectivesBridge {
@@ -222,8 +222,6 @@ export class GameUI {
   private readonly menu: GameMenu | null;
   private readonly objectivesBridge: ObjectivesBridge | null;
   private readonly objectives: ObjectivesPanel;
-  /** Objectives met so far, in the order they were met. See `refreshObjectives`. */
-  private readonly objectivesDone: Set<string>;
   private objectivesVisible: boolean;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
@@ -244,9 +242,14 @@ export class GameUI {
     this.onMenuVisibility = options.onMenuVisibility;
     this.settingsBridge = options.settings ?? null;
     this.objectivesBridge = options.objectives ?? null;
-    this.objectivesDone = new Set(this.objectivesBridge?.initial.done ?? []);
     this.objectivesVisible = this.objectivesBridge?.initial.visible ?? false;
-    this.objectives = new ObjectivesPanel({ onDismiss: () => this.setObjectivesVisible(false) });
+    this.objectives = new ObjectivesPanel({
+      onDismiss: () => this.setObjectivesVisible(false),
+      onSkipStep: (id) => {
+        this.controller.noteQuestDone(id);
+        this.refreshObjectives();
+      },
+    });
     const bridge = this.settingsBridge;
     this.settings =
       bridge === null
@@ -506,8 +509,8 @@ export class GameUI {
       // And the map, for a reason one step slower again: what it shows moves
       // at the speed of a walk and of a radar sweep (C23).
       this.refreshMap();
-      // The first-run objectives (C30), for the bag's reason: what they
-      // count moves at the speed of a pick swing and a placed building.
+      // The quest guide (C30, C31), for the bag's reason: what it counts
+      // moves at the speed of a pick swing and a placed building.
       this.refreshObjectives();
     }
 
@@ -593,7 +596,7 @@ export class GameUI {
     return this.settings?.isOpen() === true;
   }
 
-  /** Are the first-run objectives on screen? For the tests. */
+  /** Is the quest guide on screen? For the tests. */
   isObjectivesOpen(): boolean {
     return this.objectives.isOpen();
   }
@@ -819,9 +822,9 @@ export class GameUI {
   }
 
   /**
-   * Show or hide the first-run objectives, and remember it (C30 task 4).
-   * Called by SKIP, by CLOSE once they are finished, and by the settings
-   * checkbox that brings them back.
+   * Show or hide the quest guide, and remember it (C30 task 4, C31). Called
+   * by HIDE, by CLOSE once it is finished, and by the settings checkbox that
+   * brings it back.
    */
   private setObjectivesVisible(visible: boolean): void {
     this.objectivesVisible = visible;
@@ -832,38 +835,35 @@ export class GameUI {
   }
 
   /**
-   * A new game's first steps (2026-09-23): nothing ticked, and the list back
-   * on screen, as on a first launch.
+   * A new game (2026-09-23): the guide back on screen, as on a first launch.
+   * The new world's log is already empty — the composition root gave the
+   * controller none (C31).
    */
   private resetObjectives(): void {
-    this.objectivesDone.clear();
     this.setObjectivesVisible(true);
   }
 
   /**
-   * Count, tick, and tell the composition root when a line newly ticks.
+   * Count, tick, and tell the controller when a step newly ticks.
    *
-   * Only while the list is showing: a player who skipped it pays nothing for
-   * it, and on §12's reference factory the `stored` count walks every chest.
-   * A ticked line stays ticked (see `objectives.ts`), which is why the done
-   * set is the UI's and not recomputed from the world each time.
+   * Only while the guide is showing: a player who hid it pays nothing for it,
+   * and on §12's reference factory the `stored` count walks every chest. A
+   * ticked step stays ticked (see `objectives.ts`), which is why the log is
+   * kept — by the controller, with the world, since C31 — and not recomputed
+   * from the world each time.
    */
   private refreshObjectives(): void {
     if (!this.objectivesVisible) return;
-    const view = objectivesView(OBJECTIVES, this.objectivesDone, (goal) => this.controller.countObjective(goal));
-    let changed = false;
+    const done = new Set(this.controller.getQuestLog());
+    const view = objectivesView(OBJECTIVES, done, (goal) => this.controller.countObjective(goal));
     for (const line of view.lines) {
-      if (line.done && !this.objectivesDone.has(line.id)) {
-        this.objectivesDone.add(line.id);
-        changed = true;
-      }
+      if (line.done && !done.has(line.id)) this.controller.noteQuestDone(line.id);
     }
     this.objectives.update(view);
-    if (changed) this.reportObjectives();
   }
 
   private reportObjectives(): void {
-    this.objectivesBridge?.onChange({ visible: this.objectivesVisible, done: [...this.objectivesDone] });
+    this.objectivesBridge?.onChange({ visible: this.objectivesVisible });
   }
 
   /**

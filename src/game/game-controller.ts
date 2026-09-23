@@ -104,6 +104,12 @@ import { RESOURCE_TYPE_COUNT, resourceName, type ResourceType } from './world/re
 export const HOTBAR_SLOTS = 9;
 
 /**
+ * The most quest steps a log remembers (C31). Far more than the chain has; a
+ * bound so that a save's metadata, which is untrusted (§14), cannot grow it.
+ */
+export const MAX_QUEST_LOG = 256;
+
+/**
  * A building held over the cursor.
  *
  * Structurally `input/input-manager.ts`'s `BuildTool`. It is redeclared rather
@@ -199,6 +205,11 @@ export interface GameControllerOptions {
    * the content table no longer has is an empty slot rather than an error.
    */
   readonly hotbar?: readonly (string | null)[] | null | undefined;
+  /**
+   * The quest steps already met in this world (C31, save schema v6), or
+   * `null` for none. See `getQuestLog`.
+   */
+  readonly quests?: readonly string[] | null | undefined;
 }
 
 /** A `Cursor` with nothing on the other end of it. For tests and headless use. */
@@ -290,10 +301,14 @@ export class GameController {
    */
   private heldSlot: number | null = null;
 
+  /** Quest steps met in this world (C31). See `getQuestLog`. */
+  private readonly questLog: string[] = [];
+
   constructor(options: GameControllerOptions) {
     this.game = options.game;
     this.cursor = options.cursor ?? new DetachedCursor();
     this.hotbar = this.resolveHotbar(options.hotbar ?? null);
+    this.setQuestLog(options.quests ?? null);
     this.menuSignature = this.buildMenuSignature();
     this.lastSelection = this.cursor.selectedEntityId;
   }
@@ -614,15 +629,13 @@ export class GameController {
       );
     }
 
-    const crafts = this.simulation.recipes
-      .handCraftable()
-      // C22: a recipe research has not revealed is left out rather than
-      // greyed. A hand-craft button is about what is in the bag — a row that
-      // said "you cannot make this" for a reason that has nothing to do with
-      // the bag would be answering a different question than the panel asks.
-      // The research panel is where a lock is explained.
-      .filter((recipe) => this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId))
-      .map((recipe) => this.craftOptionView(recipe, bag));
+    // C22: a recipe research has not revealed is hidden rather than greyed.
+    // A hand-craft button is about what is in the bag — a row that said "you
+    // cannot make this" for a reason that has nothing to do with the bag
+    // would be answering a different question than the panel asks. The
+    // research panel is where a lock is explained. Hidden by the panel, not
+    // left out here: see `CraftOptionView.unlocked`.
+    const crafts = this.simulation.recipes.handCraftable().map((recipe) => this.craftOptionView(recipe, bag));
 
     const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
 
@@ -656,6 +669,7 @@ export class GameController {
       inputs: freeze(inputs),
       craftTicks: this.simulation.crafts.handTicksFor(recipe.recipeId),
       craftable,
+      unlocked: this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId),
     });
   }
 
@@ -1661,7 +1675,52 @@ export class GameController {
         }
         return total;
       }
+      case 'running': {
+        if (!simulation.buildings.has(goal.buildingId)) return 0;
+        let recipe: RecipeId | null = null;
+        if (goal.recipeId !== undefined) {
+          if (!simulation.recipes.has(goal.recipeId)) return 0;
+          recipe = simulation.recipes.get(goal.recipeId).recipeId;
+        }
+        let working = 0;
+        for (const entity of simulation.entities.byType(simulation.buildings.get(goal.buildingId).entityType)) {
+          const status = statusOf(entity);
+          if (status !== MachineStatus.Running && status !== MachineStatus.LowPower) continue;
+          if (recipe !== null && asMachine(entity, simulation.buildings)?.recipe !== recipe) continue;
+          working += 1;
+        }
+        return working;
+      }
+      case 'researched': {
+        if (!simulation.technologies.has(goal.technologyId)) return 0;
+        return simulation.research.isUnlocked(simulation.technologies.get(goal.technologyId).technologyId) ? 1 : 0;
+      }
     }
+  }
+
+  /**
+   * The quest steps met in this world, in the order they were met (C31).
+   *
+   * Kept here beside the hotbar and for the hotbar's reason: it belongs to a
+   * factory, so it travels in the save's metadata (§14, schema v6), and no
+   * system reads it, so it is not simulation state. The ids are the UI's —
+   * `ui/objectives.ts` owns the words — and this only remembers which of them
+   * have latched.
+   */
+  getQuestLog(): readonly string[] {
+    return freeze([...this.questLog]);
+  }
+
+  /** Replace the log — a loaded save's, or `null` for a world with none yet. */
+  setQuestLog(done: readonly string[] | null): void {
+    this.questLog.length = 0;
+    for (const id of done ?? []) this.noteQuestDone(id);
+  }
+
+  /** Remember that a step has been met. Once; a step never un-ticks. */
+  noteQuestDone(id: string): void {
+    if (this.questLog.length >= MAX_QUEST_LOG || this.questLog.includes(id)) return;
+    this.questLog.push(id);
   }
 
   /* ---------------------------------------------------------------- *
