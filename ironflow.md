@@ -620,8 +620,17 @@ export type Command =
   | { type: 'cancelCraft'; index: number }                    // added in C21A
   | { type: 'movePlayer'; dx: number; dy: number }
   | { type: 'mineTile';   x: number; y: number }
-  | { type: 'stopMining' };                      // added in C10, see below
+  | { type: 'stopMining' }                       // added in C10, see below
+  | { type: 'moveStack'; from: number; to: number };   // added 2026-09-23
 ```
+
+**Implementation note (2026-09-23).** `moveStack` came with the player's bag
+becoming a grid of positioned stacks (§13). Where a stack sits is now
+authoritative state, so rearranging the bag is a command like any other.
+Dropped on an empty slot the stack moves, on the same item it merges what
+fits, and on anything else the two swap (`GridInventory.move`). The one
+refusal is `empty_slot`. The same day gave `insertItems` its first two UIs: a
+material held in the hand, and the machine dialog's input slots.
 
 **Implementation note (C22).** `cancelResearch` is the member this union did
 not predict, for the reason `stopMining` was C10's: `startResearch` puts a
@@ -1217,7 +1226,29 @@ to arrange. What each change means:
   carries the stack and, for a building, its `BuildMenuEntry`. Layouts are item
   ids, and a building's id is its item's id (§15), so saved v2 layouts read
   unchanged and the schema stays v2.
-- **A material in hand feeds machines** *(same request)*. Selecting a
+- **The bag is a fixed grid, one stack per slot** *(2026-09-23, on request)*.
+  The player's inventory is a `GridInventory`: thirty positions, each empty
+  or holding one stack, as in the genre's own inventories. Chests keep C08's
+  packed `SlotInventory`. New items top up existing stacks in slot order, then
+  fill empty slots in order. Removal takes from the last stack first. The
+  panel draws every slot, empty ones included, as a pool built once.
+  Dragging a stack onto another slot sends `moveStack` (§7). The same drag
+  carries the item's id, so a bag stack dropped on the hotbar goes on the
+  hotbar, and one dropped on a machine's input slot goes into the machine.
+  The hotbar's "one stack per slot" now shows real stacks: the k-th hotbar
+  slot holding an item shows the k-th stack of it, in bag order.
+- **The machine dialog shows input slots** *(same request)*. A building that
+  takes materials by hand shows one INPUT slot per thing it needs, drawn even
+  when empty: a machine gets one per ingredient of its recipe (a furnace that
+  has not picked one gets what it holds, or one open slot), then fuel. A
+  generator gets fuel and a lab gets science. `MachineView.slots` carries
+  them. Each slot has **PUT**, which moves the item from the bag
+  (`insertItems`, up to what the slot has room for), and **TAKE**
+  (`takeItems`). A stack dragged from the bag or the hotbar onto a slot is put
+  in too. An empty slot's PUT picks the first bag item it would accept, so
+  "Fuel" with coal in the bag is one click. The machine still decides what it
+  accepts (`HandSystem.insert`), so these are pre-checks only.
+- **A material in hand feeds machines** *(same request as the hotbar)*. Selecting a
   material's slot, or clicking it in the bag, puts it in the hand
   (`Cursor.heldItem`, never together with a held building). Left-clicking a
   building then sends `insertItems` for one stack, and selects the machine so
@@ -1589,6 +1620,16 @@ fixture is unchanged, `v2.json` joins it with a rearranged layout, and the
 reference-factory fixture stays v1 so every benchmark load also exercises the
 migration. A slot record in IndexedDB does not carry the hotbar; it is read
 from the body on load.
+
+**Schema v3 (2026-09-23).** The player's bag became a grid (§13), so
+`state.player.inventory` is now `[slot, itemId, count]` for every occupied
+slot, ascending by slot, rather than item→count totals. The slot count is
+content and is not written. `migrations/v2-to-v3.ts` deals a v2 bag's totals
+into slots a stack at a time, in the order they were written. It uses a
+stack-size table **frozen in the migration** rather than `data/items.ts`, so
+a later balance change cannot alter what an old save becomes. The validator
+checks each slot is inside the bag, ascending, and at most one stack. The v3
+fixture joins v1 and v2.
 
 **Implementation note (C27).** The sentence above about migrations — "pure
 functions `vN -> vN+1`, chained, each independently unit-tested against a

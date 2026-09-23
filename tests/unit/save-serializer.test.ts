@@ -62,7 +62,8 @@ describe('what a save writes as a number, and what it writes as a name', () => {
 
     const state = serialize(simulation);
     expect(state.itemIdMap['iron_ore']).toBe(simulation.items.idOf('iron_ore'));
-    expect(state.player.inventory).toEqual([[simulation.items.idOf('iron_ore'), 5]]);
+    // v3: `[slot, itemId, count]` — the bag's positions are state.
+    expect(state.player.inventory).toEqual([[0, simulation.items.idOf('iron_ore'), 5]]);
   });
 
   it('keeps a save loading correctly after data/items.ts is reordered', () => {

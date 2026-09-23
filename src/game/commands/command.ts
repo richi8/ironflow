@@ -65,6 +65,13 @@ export type Command =
   | { readonly type: 'craftItem'; readonly recipeId: string; readonly count: number }
   /** Drop the order at `index` in the hand-craft queue and refund it (C21A). */
   | { readonly type: 'cancelCraft'; readonly index: number }
+  /**
+   * Move the stack in bag slot `from` to slot `to` (both 0-based). Added
+   * 2026-09-23, when the bag gained positions. Onto an empty slot it moves,
+   * onto the same item it merges what fits, onto anything else it swaps —
+   * see `GridInventory.move`. A command because the arrangement is state.
+   */
+  | { readonly type: 'moveStack'; readonly from: number; readonly to: number }
   | { readonly type: 'movePlayer'; readonly dx: number; readonly dy: number }
   | { readonly type: 'mineTile'; readonly x: number; readonly y: number }
   /**
@@ -190,7 +197,10 @@ export type CommandRejectionReason =
    * mistake a player makes when they pace out a tunnel by eye. Saying so
    * beats leaving them two stubs that look connected and carry nothing.
    */
-  | 'span_too_long';
+  | 'span_too_long'
+  /* Added 2026-09-23. */
+  /** The bag slot a stack was to be moved out of is empty, or not a slot. */
+  | 'empty_slot';
 
 /** A command and the reason it was refused, ready to become a notification. */
 export interface CommandRejection {
@@ -252,6 +262,10 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
     case 'craftItem':
       if (!isName(command.recipeId)) return 'malformed';
       return isCount(command.count) ? null : 'malformed';
+    case 'moveStack':
+      return Number.isInteger(command.from) && command.from >= 0 && Number.isInteger(command.to) && command.to >= 0
+        ? null
+        : 'malformed';
     case 'cancelCraft':
       // Zero is the order being made right now, so this is the one index in
       // the game that is allowed to be it.

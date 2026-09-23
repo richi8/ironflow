@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ITEMS } from '../../src/game/data/items.js';
-import { BufferInventory, SlotInventory, type SerializedInventory } from '../../src/game/items/inventory.js';
+import { BufferInventory, GridInventory, SlotInventory, type SerializedInventory } from '../../src/game/items/inventory.js';
 import { ItemRegistry, NO_ITEM, type ItemId } from '../../src/game/registries/item-registry.js';
 
 /**
@@ -240,5 +240,90 @@ describe('serialization', () => {
     expect(() => SlotInventory.fromJSON([[IRON, 5], [IRON, 5]], options)).toThrow(/twice/);
     expect(() => SlotInventory.fromJSON([[IRON, 5, 5] as never], options)).toThrow(/\[itemId, count\] pair/);
     expect(() => SlotInventory.fromJSON([[IRON, 200]], options)).toThrow(/does not fit/);
+  });
+});
+
+describe('GridInventory: the player bag, with positions', () => {
+  /** Item 1 stacks at 50, item 2 at 100. */
+  const stackSizeOf = (itemId: number): number => (itemId === 1 ? 50 : 100);
+  const grid = (slots = 5): GridInventory => new GridInventory({ slots, stackSizeOf });
+
+  it('tops up existing stacks in slot order, then fills empty slots in order', () => {
+    const bag = grid();
+    expect(bag.add(1, 70)).toBe(70);
+    expect(bag.toCells()).toEqual([
+      [0, 1, 50],
+      [1, 1, 20],
+    ]);
+    bag.add(2, 5);
+    bag.add(1, 40);
+    expect(bag.toCells()).toEqual([
+      [0, 1, 50],
+      [1, 1, 50],
+      [2, 2, 5],
+      [3, 1, 10],
+    ]);
+    expect(bag.toJSON()).toEqual([
+      [1, 110],
+      [2, 5],
+    ]);
+  });
+
+  it('adds only what fits and says how much', () => {
+    const bag = grid(2);
+    expect(bag.spaceFor(1)).toBe(100);
+    expect(bag.add(1, 130)).toBe(100);
+    expect(bag.usedSlots).toBe(2);
+    expect(bag.spaceFor(2)).toBe(0);
+  });
+
+  it('removes from the last stack first', () => {
+    const bag = grid();
+    bag.add(1, 120);
+    expect(bag.remove(1, 30)).toBe(30);
+    expect(bag.toCells()).toEqual([
+      [0, 1, 50],
+      [1, 1, 40],
+    ]);
+    expect(bag.remove(1, 500)).toBe(90);
+    expect(bag.isEmpty()).toBe(true);
+  });
+
+  it('moves onto an empty slot, merges onto the same item, and swaps otherwise', () => {
+    const bag = grid();
+    bag.add(1, 70); // slots 0 (50) and 1 (20)
+    bag.add(2, 5); // slot 2
+
+    expect(bag.move(1, 4)).toBe(true);
+    expect(bag.cellAt(4)).toEqual([1, 20]);
+    expect(bag.cellAt(1)).toBeNull();
+
+    // Merging tops up to a stack and leaves the rest where it was.
+    expect(bag.move(0, 4)).toBe(true);
+    expect(bag.cellAt(4)).toEqual([1, 50]);
+    expect(bag.cellAt(0)).toEqual([1, 20]);
+
+    expect(bag.move(2, 0)).toBe(true);
+    expect(bag.cellAt(0)).toEqual([2, 5]);
+    expect(bag.cellAt(2)).toEqual([1, 20]);
+
+    expect(bag.move(1, 3)).toBe(false); // empty
+    expect(bag.move(0, 99)).toBe(false); // not a slot
+  });
+
+  it('round-trips its arrangement, and refuses one that is not a bag', () => {
+    const bag = grid();
+    bag.add(1, 60);
+    bag.move(0, 3);
+    const copy = grid();
+    copy.load(bag.toCells());
+    expect(copy.toCells()).toEqual(bag.toCells());
+
+    expect(() => copy.load([[9, 1, 1]])).toThrow(/slot/);
+    expect(() => copy.load([[0, 1, 51]])).toThrow(/stack/);
+    expect(() => copy.load([
+      [2, 1, 1],
+      [1, 1, 1],
+    ])).toThrow(/order/);
   });
 });

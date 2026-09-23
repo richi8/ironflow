@@ -47,16 +47,16 @@
  *   hundred belts.
  */
 
-import type { SlotInventory } from './inventory.js';
+import type { Inventory } from './inventory.js';
 import type { ItemStack } from './item-stack.js';
 import type { ItemRegistry } from '../registries/item-registry.js';
 
 export class BuildMaterials {
-  private readonly inventory: SlotInventory;
+  private readonly inventory: Inventory;
 
   private readonly items: ItemRegistry;
 
-  constructor(inventory: SlotInventory, items: ItemRegistry) {
+  constructor(inventory: Inventory, items: ItemRegistry) {
     this.inventory = inventory;
     this.items = items;
   }

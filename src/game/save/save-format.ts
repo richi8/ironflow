@@ -52,7 +52,7 @@ import type { ItemIdMapping } from '../registries/item-registry.js';
  * alters what the file says. A save carries both because neither answers the
  * other's question.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** The magic string that marks a file as one of ours. §14, and C26's header. */
 export const SAVE_FORMAT = 'ironflow-save';
@@ -73,6 +73,12 @@ export type SaveValue = string | number | boolean | null | readonly SaveValue[] 
 
 /** A container's contents: `[itemId, count]`, ascending by id, no zeroes. */
 export type SerializedItemSlots = readonly (readonly [number, number])[];
+
+/**
+ * The player's bag (v3): `[slot, itemId, count]` for every occupied slot,
+ * ascending by slot. Positions are state since the bag became a grid.
+ */
+export type SerializedItemGrid = readonly (readonly [number, number, number])[];
 
 /* -------------------------------------------------------------------------- *
  * Entities
@@ -159,7 +165,8 @@ export interface SerializedPlayerState {
   readonly miningX: number | null;
   readonly miningY: number | null;
   readonly miningTicks: number;
-  readonly inventory: SerializedItemSlots;
+  /** v3: stacks with positions. v1 and v2 wrote item→count pairs. */
+  readonly inventory: SerializedItemGrid;
   /** Head first. The order is the player's decision, so it is never sorted. */
   readonly crafts: readonly SerializedCraftOrder[];
 }

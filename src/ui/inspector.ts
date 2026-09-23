@@ -53,6 +53,7 @@
 
 import type {
   MachinePowerView,
+  MachineSlotView,
   MachineStack,
   MachineStatus,
   MachineView,
@@ -60,6 +61,7 @@ import type {
 import type { RecipeView } from '../game/views/recipe-view.js';
 
 import { createIcon } from './icons.js';
+import { ITEM_DRAG_TYPE } from './toolbar.js';
 
 /** Buffer lines drawn per section. See the file header. */
 export const STACK_ROWS = 4;
@@ -120,6 +122,15 @@ interface StackRow {
   readonly take: HTMLButtonElement;
 }
 
+/** One input slot of a machine: what goes in, how full, and PUT / TAKE. */
+interface SlotRow {
+  readonly root: HTMLElement;
+  readonly name: HTMLElement;
+  readonly count: HTMLElement;
+  readonly put: HTMLButtonElement;
+  readonly take: HTMLButtonElement;
+}
+
 interface Section {
   readonly root: HTMLElement;
   readonly rows: readonly StackRow[];
@@ -128,6 +139,8 @@ interface Section {
 export interface InspectorOptions {
   /** Take `count` of `itemId` out of the inspected machine. */
   readonly onTake: (itemId: string, count: number) => void;
+  /** Put up to `count` of `itemId` from the bag into the inspected machine. */
+  readonly onDeposit: (itemId: string, count: number) => void;
   /** Make `recipeId`, or `null` to make nothing at all (C16 task 3). */
   readonly onSetRecipe: (recipeId: string | null) => void;
   /** Stop inspecting. */
@@ -150,6 +163,14 @@ export class Inspector {
 
   private inputs!: Section;
   private outputs!: Section;
+
+  /**
+   * The input slots (2026-09-23): one per material the machine needs, drawn
+   * even when empty. Shown instead of the INPUT list for a building that has
+   * them — see `MachineView.slots`.
+   */
+  private readonly slotSection = document.createElement('div');
+  private readonly slotRows: SlotRow[] = [];
 
   /** The MAKING line, for a machine that chooses its own recipe. */
   private readonly makingRow = document.createElement('div');
@@ -278,6 +299,18 @@ export class Inspector {
     this.inputs = this.createSection('INPUT', true);
     this.outputs = this.createSection('OUTPUT', true);
 
+    this.slotSection.className = 'if-inspector__section if-inspector__slots';
+    this.slotSection.hidden = true;
+    const slotLabel = document.createElement('div');
+    slotLabel.className = 'if-inspector__label';
+    slotLabel.textContent = 'INPUT';
+    this.slotSection.append(slotLabel);
+    for (let i = 0; i < STACK_ROWS; i++) {
+      const row = this.createSlotRow();
+      this.slotRows.push(row);
+      this.slotSection.append(row.root);
+    }
+
     const where = document.createElement('div');
     where.className = 'if-inspector__where';
     const whereLabel = document.createElement('span');
@@ -295,6 +328,7 @@ export class Inspector {
       this.nextRow,
       this.powerRow,
       this.recipeSection,
+      this.slotSection,
       this.inputs.root,
       this.outputs.root,
       where,
@@ -350,7 +384,9 @@ export class Inspector {
     }
 
     this.fillRecipes(view);
-    this.fill(this.inputs, view.inputs, view.inReach);
+    this.fillSlots(view.slots, view.inReach);
+    // A building with slots shows its inputs there; the list is for the rest.
+    this.fill(this.inputs, view.slots === null ? view.inputs : NO_STACKS, view.inReach);
     this.fill(this.outputs, view.outputs, view.inReach);
 
     setText(this.whereValue, `${view.x}, ${view.y}`);
@@ -361,6 +397,14 @@ export class Inspector {
     for (const section of [this.inputs, this.outputs]) {
       for (const row of section.rows) row.take.removeEventListener('click', this.handleTake);
     }
+    for (const row of this.slotRows) {
+      row.put.removeEventListener('click', this.handlePut);
+      row.take.removeEventListener('click', this.handleTake);
+      row.root.removeEventListener('dragover', this.handleSlotDragOver);
+      row.root.removeEventListener('dragleave', this.handleSlotDragLeave);
+      row.root.removeEventListener('drop', this.handleSlotDrop);
+    }
+    this.slotRows.length = 0;
     this.clearRecipes();
     this.root.remove();
   }
@@ -388,6 +432,45 @@ export class Inspector {
       this.view.outputs.find((line) => line.itemId === itemId) ??
       this.view.inputs.find((line) => line.itemId === itemId);
     if (stack !== undefined && stack.count > 0) this.options.onTake(itemId, stack.count);
+  };
+
+  /** PUT: the slot's item, from the bag, as much as the slot holds. */
+  private readonly handlePut = (event: Event): void => {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const itemId = target.dataset['item'];
+    const amount = Number(target.dataset['amount']);
+    if (itemId === undefined || !Number.isInteger(amount) || amount < 1) return;
+    this.options.onDeposit(itemId, amount);
+  };
+
+  /** Accept an item dragged from the bag or the hotbar, and nothing else. */
+  private readonly handleSlotDragOver = (event: DragEvent): void => {
+    const types = event.dataTransfer?.types;
+    if (types === undefined || !Array.from(types).includes(ITEM_DRAG_TYPE)) return;
+    event.preventDefault();
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.add('is-drop-target');
+  };
+
+  private readonly handleSlotDragLeave = (event: DragEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
+  };
+
+  /**
+   * An item dropped on a slot goes into the machine. Which buffer is the
+   * machine's decision, and so is refusing it — the slot only says how many
+   * to offer.
+   */
+  private readonly handleSlotDrop = (event: DragEvent): void => {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    target.classList.remove('is-drop-target');
+    const itemId = event.dataTransfer?.getData(ITEM_DRAG_TYPE) ?? '';
+    const amount = Number(target.dataset['capacity']);
+    if (itemId === '' || !Number.isInteger(amount) || amount < 1) return;
+    event.preventDefault();
+    this.options.onDeposit(itemId, amount);
   };
 
   private readonly handleRecipe = (event: Event): void => {
@@ -517,6 +600,68 @@ export class Inspector {
     return { root, name, count, take };
   }
 
+  private createSlotRow(): SlotRow {
+    const root = document.createElement('div');
+    root.className = 'if-stack if-machine-slot';
+    root.hidden = true;
+    root.addEventListener('dragover', this.handleSlotDragOver);
+    root.addEventListener('dragleave', this.handleSlotDragLeave);
+    root.addEventListener('drop', this.handleSlotDrop);
+
+    const name = document.createElement('span');
+    name.className = 'if-stack__name';
+
+    const count = document.createElement('span');
+    count.className = 'if-stack__count';
+
+    const put = document.createElement('button');
+    put.type = 'button';
+    put.className = 'if-stack__take if-machine-slot__put';
+    put.textContent = 'PUT';
+    put.addEventListener('click', this.handlePut);
+
+    const take = document.createElement('button');
+    take.type = 'button';
+    take.className = 'if-stack__take';
+    take.textContent = 'TAKE';
+    take.addEventListener('click', this.handleTake);
+
+    root.append(name, count, put, take);
+    return { root, name, count, put, take };
+  }
+
+  /** Point the slot rows at `slots`; hide the section for a building with none. */
+  private fillSlots(slots: readonly MachineSlotView[] | null, inReach: boolean): void {
+    this.slotSection.hidden = slots === null || slots.length === 0;
+    for (let i = 0; i < this.slotRows.length; i++) {
+      const row = this.slotRows[i];
+      if (row === undefined) continue;
+      const slot = slots?.[i];
+      row.root.hidden = slot === undefined;
+      if (slot === undefined) continue;
+
+      row.root.dataset['role'] = slot.role;
+      row.root.dataset['capacity'] = String(slot.capacity);
+      row.root.classList.toggle('is-empty', slot.count === 0);
+      setText(row.name, slot.name);
+      setText(row.count, `${slot.count}/${slot.capacity}`);
+
+      if (slot.depositItemId === null) delete row.put.dataset['item'];
+      else row.put.dataset['item'] = slot.depositItemId;
+      row.put.dataset['amount'] = String(slot.capacity - slot.count);
+      // Pre-checks (§7): the machine and the bag decide again on the tick.
+      row.put.disabled = !inReach || slot.depositHeld === 0 || slot.count >= slot.capacity;
+      row.put.title =
+        slot.depositHeld === 0
+          ? `You are carrying nothing this slot takes.`
+          : `Put ${(slot.depositItemId ?? '').replace(/_/g, ' ')} in from your bag (you have ${slot.depositHeld}). Or drag a stack here.`;
+
+      if (slot.itemId === null) delete row.take.dataset['item'];
+      else row.take.dataset['item'] = slot.itemId;
+      row.take.disabled = !inReach || slot.count === 0;
+    }
+  }
+
   /** Point a section's rows at `stacks`, hiding the ones it does not need. */
   private fill(section: Section, stacks: readonly MachineStack[], inReach: boolean): void {
     section.root.hidden = stacks.length === 0;
@@ -538,6 +683,9 @@ export class Inspector {
     }
   }
 }
+
+/** No list: a building whose inputs are drawn as slots instead. */
+const NO_STACKS: readonly MachineStack[] = Object.freeze([]);
 
 /** No choices: a machine that picks its own recipe, or a building with none. */
 const NO_RECIPES: readonly RecipeView[] = Object.freeze([]);

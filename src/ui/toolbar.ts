@@ -247,7 +247,10 @@ export class Toolbar {
       return;
     }
     event.dataTransfer.setData(SLOT_DRAG_TYPE, String(slot));
-    event.dataTransfer.effectAllowed = 'move';
+    // The item too, so a slot dropped on a machine's input slot feeds it.
+    const itemId = target.dataset['item'];
+    if (itemId !== undefined) event.dataTransfer.setData(ITEM_DRAG_TYPE, itemId);
+    event.dataTransfer.effectAllowed = 'copyMove';
   };
 
   private createSlot(slot: number): HTMLElement {
@@ -288,6 +291,7 @@ export class Toolbar {
       button.classList.add('is-empty');
       button.classList.remove('is-selected', 'is-unaffordable', 'is-locked', 'is-spent');
       button.draggable = false;
+      delete button.dataset['item'];
       // Not disabled: a disabled button receives no drag events, and an empty
       // slot is exactly where an item gets dropped.
       button.title = 'Empty — drag an item here from your inventory';
@@ -295,6 +299,7 @@ export class Toolbar {
     }
 
     setText(name, view.name);
+    if (button.dataset['item'] !== view.itemId) button.dataset['item'] = view.itemId;
     // One stack: what this slot stands for, not the whole bag.
     setText(count, String(view.count));
     button.classList.remove('is-empty');

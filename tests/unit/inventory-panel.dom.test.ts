@@ -73,10 +73,10 @@ function give(simulation: Simulation, itemId: string, count: number): void {
   simulation.player.inventory.add(simulation.items.idOf(itemId), count);
 }
 
-/** The visible bag rows, as "Name count". */
+/** The occupied bag slots, in slot order, as "Name count". */
 function bagRows(root: ParentNode): string[] {
   return [...root.querySelectorAll('.if-bag-cell')]
-    .filter((cell) => !(cell as HTMLElement).hidden)
+    .filter((cell) => !cell.classList.contains('is-empty'))
     .map((cell) => {
       const name = cell.querySelector('.if-bag-cell__name')?.textContent ?? '';
       const count = cell.querySelector('.if-bag-cell__count')?.textContent ?? '';
@@ -127,6 +127,7 @@ describe('opening and closing', () => {
   });
 
   it('picks up a carried building on a click and gets out of the way', () => {
+    give(harness.simulation, 'chest', 1);
     harness.ui.toggleInventory();
     const cell = query<HTMLElement>(harness.root, '.if-bag-cell[data-item="chest"]');
     expect(cell.draggable).toBe(true);
@@ -189,7 +190,47 @@ describe('what the player is carrying', () => {
 
     const slots = query<HTMLElement>(harness.root, '.if-inventory__slots');
     expect(slots.textContent).toBe(`2 / ${harness.simulation.player.inventory.slots} SLOTS`);
-    expect(query<HTMLElement>(harness.root, '.if-bag-cell__slots').textContent).toBe('2 slots');
+    // Two stacks, each in its own position.
+    expect(bagRows(harness.root)).toEqual(['Iron Ore 50', 'Iron Ore 10']);
+  });
+
+  it('draws one cell per slot, empty ones included', () => {
+    harness.ui.toggleInventory();
+    const cells = harness.root.querySelectorAll('.if-bag-cell');
+    expect(cells.length).toBe(harness.simulation.player.inventory.slots);
+  });
+
+  it('moves a stack dragged onto another slot, through a command', () => {
+    give(harness.simulation, 'coal', 3);
+    harness.ui.toggleInventory();
+    settle(harness);
+
+    const first = query<HTMLElement>(harness.root, '.if-bag-cell[data-index="0"]');
+    const stored: Record<string, string> = {};
+    const start = new Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(start, 'dataTransfer', {
+      value: { types: [], setData: (type: string, value: string) => (stored[type] = value), effectAllowed: 'none' },
+    });
+    first.dispatchEvent(start);
+    expect(stored['application/x-ironflow-cell']).toBe('0');
+    expect(stored['application/x-ironflow-item']).toBe('coal');
+
+    const target = query<HTMLElement>(harness.root, '.if-bag-cell[data-index="7"]');
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: {
+        types: ['application/x-ironflow-cell'],
+        getData: (type: string) => stored[type] ?? '',
+      },
+    });
+    target.dispatchEvent(drop);
+    harness.simulation.tick();
+    settle(harness);
+
+    const coal = harness.simulation.items.idOf('coal');
+    expect(harness.simulation.player.inventory.cellAt(7)).toEqual([coal, 3]);
+    expect(harness.simulation.player.inventory.cellAt(0)).toBeNull();
+    expect(target.dataset['item']).toBe('coal');
   });
 
   it('warns when the last slot has gone', () => {

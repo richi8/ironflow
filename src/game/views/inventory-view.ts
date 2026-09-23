@@ -118,7 +118,27 @@ export interface CraftQueueView {
   readonly blocked: boolean;
 }
 
+/**
+ * One position in the bag: a stack, or an empty slot (2026-09-23).
+ *
+ * The bag is a grid the player arranges, so the panel draws `cells` in order
+ * and a stack stays where it was put.
+ */
+export interface InventoryCellView {
+  /** The slot, 0-based. What `moveStack` is given (§7). */
+  readonly index: number;
+  /** Null for an empty slot; every other field then describes nothing. */
+  readonly itemId: string | null;
+  readonly name: string;
+  readonly count: number;
+  readonly stackSize: number;
+  /** The building this item places, or null. */
+  readonly buildingId: string | null;
+}
+
 export interface InventoryView {
+  /** Every slot of the bag, in order. Always `slots` long. */
+  readonly cells: readonly InventoryCellView[];
   /** Every item in the game, in content order. See the file header. */
   readonly items: readonly InventorySlotView[];
   /** Slots in the bag, and how many are occupied. */

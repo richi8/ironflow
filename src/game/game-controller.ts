@@ -60,13 +60,16 @@ import type { BuildMenuCost, BuildMenuEntry, BuildMenuView, HotbarSlotView } fro
 import type { Inventory } from './items/inventory.js';
 import type { PortStack } from './items/item-port.js';
 import type { ItemId } from './registries/item-registry.js';
-import type { MachinePowerView, MachineStack, MachineView } from './views/building-view.js';
+import type { MachinePowerView, MachineSlotView, MachineStack, MachineView } from './views/building-view.js';
+import { asGenerator } from './entities/generator-entity.js';
+import { slotsCount } from './items/inventory.js';
 import type { GameEvent, GameEventOf, GameEventType } from './views/game-event.js';
 import type { HudItemCount, HudPowerView, HudResearchView, HudView } from './views/hud-view.js';
 import type {
   CraftOptionView,
   CraftPartView,
   CraftQueueView,
+  InventoryCellView,
   InventorySlotView,
   InventoryView,
 } from './views/inventory-view.js';
@@ -525,15 +528,13 @@ export class GameController {
   /**
    * The hotbar, slot by slot, with the stack each slot stands for.
    *
-   * **One slot is one stack.** The bag is counts, not slots (C08), so the
-   * stacks are dealt out in slot order: the first slot holding iron plate
-   * shows the first 100, the second the next 100, and a slot past what is
-   * carried shows 0. Nothing is reserved or moved — the slots are a way of
-   * looking at the bag, and what they show always adds up to what it holds.
+   * **One slot is one stack**: the first hotbar slot holding iron plate shows
+   * the first stack of it in the bag (in bag order), the second the next, and
+   * a slot past what is carried shows 0. Nothing is reserved or moved — the
+   * hotbar is a way of looking at the bag.
    */
   private hotbarView(entryFor: ReadonlyMap<string, BuildMenuEntry>): readonly (HotbarSlotView | null)[] {
     const items = this.simulation.items;
-    const bag = this.simulation.inventory;
     const handItem = this.cursor.heldItem?.itemId ?? this.cursor.buildTool?.buildingId ?? null;
     const dealt = new Map<string, number>();
 
@@ -542,8 +543,7 @@ export class GameController {
       const definition = items.get(itemId);
       const before = dealt.get(itemId) ?? 0;
       dealt.set(itemId, before + 1);
-      const total = bag.count(itemId);
-      const count = Math.max(0, Math.min(definition.stackSize, total - before * definition.stackSize));
+      const count = this.stacksOf(itemId)[before] ?? 0;
       const selected = handItem === itemId && this.selectedSlotIndex(itemId) === index;
       return freeze({
         itemId,
@@ -555,6 +555,20 @@ export class GameController {
       });
     });
     return freeze(slots);
+  }
+
+  /** Every stack of one item in the bag, in bag order. */
+  private stacksOf(itemId: string): number[] {
+    const bag = this.simulation.player.inventory;
+    const items = this.simulation.items;
+    if (!items.has(itemId)) return [];
+    const runtimeId = items.idOf(itemId);
+    const stacks: number[] = [];
+    for (let index = 0; index < bag.slots; index++) {
+      const cell = bag.cellAt(index);
+      if (cell !== null && cell[0] === runtimeId) stacks.push(cell[1]);
+    }
+    return stacks;
   }
 
   /**
@@ -602,7 +616,28 @@ export class GameController {
 
     const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
 
+    const cells: InventoryCellView[] = [];
+    for (let index = 0; index < bag.slots; index++) {
+      const cell = bag.cellAt(index);
+      if (cell === null || !this.simulation.items.isItemId(cell[0])) {
+        cells.push(freeze({ index, itemId: null, name: '', count: 0, stackSize: 0, buildingId: null }));
+        continue;
+      }
+      const definition = this.simulation.items.byId(cell[0]);
+      cells.push(
+        freeze({
+          index,
+          itemId: definition.id,
+          name: definition.name,
+          count: cell[1],
+          stackSize: definition.stackSize,
+          buildingId: this.buildingForItem(definition.id),
+        }),
+      );
+    }
+
     return freeze({
+      cells: freeze(cells),
       items: freeze(items),
       slots: bag.slots,
       usedSlots: bag.usedSlots,
@@ -907,6 +942,100 @@ export class GameController {
   }
 
   /**
+   * The input slots of a building that takes materials by hand, or null.
+   *
+   * One slot per thing it needs, drawn even when empty, so the dialog shows
+   * what to bring (2026-09-23):
+   *
+   * ```text
+   * machine     a slot per ingredient of its recipe; a furnace that has not
+   *             picked one shows what it holds, or one open slot; then fuel
+   * generator   fuel
+   * lab         science
+   * ```
+   */
+  private machineSlotsOf(entity: Entity): readonly MachineSlotView[] | null {
+    const buildings = this.simulation.buildings;
+    const slots: MachineSlotView[] = [];
+
+    const config = buildings.productionFor(entity.type);
+    const machine = asMachine(entity, buildings);
+    if (config !== null && machine !== null) {
+      const recipes = this.simulation.recipes;
+      const recipe = recipes.isRecipeId(machine.recipe) ? recipes.byId(machine.recipe) : null;
+      if (recipe !== null) {
+        for (const stack of recipe.inputs) {
+          slots.push(this.slotView(entity, 'ingredient', stack.itemId, slotsCount(machine.input, stack.itemId), config.inputCapacity));
+        }
+      } else if (machine.input.length > 0) {
+        for (const [itemId, count] of machine.input) {
+          slots.push(this.slotView(entity, 'ingredient', itemId, count, config.inputCapacity));
+        }
+      } else if (config.recipeSelection !== 'player') {
+        slots.push(this.slotView(entity, 'ingredient', null, 0, config.inputCapacity));
+      }
+      if (config.fuelCapacity !== undefined) {
+        const fuel = machine.fuel[0];
+        slots.push(this.slotView(entity, 'fuel', fuel?.[0] ?? null, fuel?.[1] ?? 0, config.fuelCapacity));
+      }
+      return freeze(slots);
+    }
+
+    const generatorConfig = buildings.generatorFor(entity.type);
+    const generator = asGenerator(entity, buildings);
+    if (generatorConfig !== null && generator !== null) {
+      const fuel = generator.fuel[0];
+      slots.push(this.slotView(entity, 'fuel', fuel?.[0] ?? null, fuel?.[1] ?? 0, generatorConfig.fuelCapacity));
+      return freeze(slots);
+    }
+
+    const labConfig = buildings.researchFor(entity.type);
+    const lab = asLab(entity, buildings);
+    if (labConfig !== null && lab !== null) {
+      const science = lab.input[0];
+      slots.push(this.slotView(entity, 'science', science?.[0] ?? null, science?.[1] ?? 0, labConfig.inputCapacity));
+      return freeze(slots);
+    }
+    return null;
+  }
+
+  /** One input slot, with what a PUT from the bag would move into it. */
+  private slotView(
+    entity: Entity,
+    role: MachineSlotView['role'],
+    itemId: ItemId | null,
+    count: number,
+    capacity: number,
+  ): MachineSlotView {
+    const items = this.simulation.items;
+    const bag = this.simulation.player.inventory;
+    let deposit: ItemId | null = itemId;
+    if (deposit === null) {
+      // The first thing in the bag, in content order, that this slot takes.
+      // Fuel goes to the fuel slot and nothing else, which is how the
+      // machine itself routes it (`items/item-port.ts`).
+      for (const [candidate] of bag.toJSON()) {
+        const burns = items.fuelTicksOf(candidate) > 0;
+        if ((role === 'fuel') !== burns) continue;
+        if (this.simulation.hands.roomFor(entity, candidate) > 0) {
+          deposit = candidate;
+          break;
+        }
+      }
+    }
+    const known = itemId !== null && items.isItemId(itemId);
+    return freeze({
+      role,
+      itemId: known ? items.byId(itemId).id : null,
+      name: known ? items.byId(itemId).name : SLOT_NAMES[role],
+      count,
+      capacity,
+      depositItemId: deposit !== null && items.isItemId(deposit) ? items.byId(deposit).id : null,
+      depositHeld: deposit === null ? 0 : bag.count(deposit),
+    });
+  }
+
+  /**
    * One building, as the inspector draws it. `null` for an id nothing answers to.
    *
    * Everything here is derived on the spot from authoritative state (§10) and
@@ -953,6 +1082,7 @@ export class GameController {
       recipe: this.currentRecipeView(entity),
       recipes: this.recipeChoicesFor(entity),
       inputs: inputs.length === 0 ? EMPTY_STACKS : freeze(inputs),
+      slots: this.machineSlotsOf(entity),
       outputs: outputs.length === 0 ? EMPTY_STACKS : freeze(outputs),
       // Measured for the selected machine only (C12 task 2). A machine asked
       // about in passing reads 0 rather than a figure from someone else's
@@ -1306,6 +1436,14 @@ export class GameController {
   }
 
   /**
+   * Move the stack in bag slot `from` to slot `to` (0-based): a drag inside
+   * the inventory. A command, because where a stack sits is state (§7).
+   */
+  moveStack(from: number, to: number): CommandResult {
+    return this.dispatch({ type: 'moveStack', from, to });
+  }
+
+  /**
    * Queue `count` hand-crafts of a recipe (C21A).
    *
    * The ingredients leave the bag on the tick this is applied, not when each
@@ -1410,9 +1548,10 @@ export class GameController {
       this.cursor.heldItem?.itemId ?? '-',
       String(this.cursor.buildRotation),
     ];
-    // The hotbar's stacks: ore on the bar changes count as it is mined.
+    // The hotbar's stacks: ore on the bar changes count as it is mined, and
+    // a stack moved in the bag changes which one a slot shows.
     for (const itemId of this.hotbar) {
-      parts.push(itemId === null ? '-' : String(this.simulation.inventory.count(itemId)));
+      parts.push(itemId === null ? '-' : this.stacksOf(itemId).join(','));
     }
     for (const definition of this.simulation.buildings.all()) {
       parts.push(definition.id);
@@ -1562,6 +1701,13 @@ export class GameController {
   }
 
 }
+
+/** What an empty input slot is called, by what goes in it. */
+const SLOT_NAMES: Readonly<Record<MachineSlotView['role'], string>> = Object.freeze({
+  ingredient: 'Ingredient',
+  fuel: 'Fuel',
+  science: 'Science',
+});
 
 /** Nothing in, nothing out. Shared so every empty machine view points at one array. */
 const EMPTY_STACKS: readonly MachineStack[] = Object.freeze([]);

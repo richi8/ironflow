@@ -28,6 +28,10 @@
  *
  * ## Contents are the state; slots are not
  *
+ * *(True of the two containers above. The player's bag has been a third,
+ * `GridInventory` at the end of this file, since 2026-09-23: its stacks have
+ * positions the player arranges, and those positions are state.)*
+ *
  * Serialization is item→count, sorted by numeric item id, and says nothing
  * about which slot anything sits in. Two inventories holding the same items
  * therefore serialize identically however they got there (C08's third
@@ -374,5 +378,220 @@ export class BufferInventory extends ContentsInventory {
     const inventory = new BufferInventory(options);
     restore(inventory, serialized, 'BufferInventory.fromJSON');
     return inventory;
+  }
+}
+/* -------------------------------------------------------------------------- *
+ * The player's bag: stacks with positions (2026-09-23)
+ * -------------------------------------------------------------------------- */
+
+/** One position in a `GridInventory`: a stack, or `null` for an empty slot. */
+export type GridCell = [ItemId, number] | null;
+
+/**
+ * A grid as plain data: `[slot, itemId, count]` for every occupied slot,
+ * ascending by slot. Empty slots are not written, so the form does not depend
+ * on how many slots the bag has — that is content, like every capacity here.
+ */
+export type SerializedGrid = readonly (readonly [number, ItemId, number])[];
+
+export interface GridInventoryOptions {
+  /** How many slots. At least 1. */
+  readonly slots: number;
+  readonly stackSizeOf: StackSizeLookup;
+}
+
+/**
+ * The player's bag, the way the genre has one: a fixed number of positions,
+ * each holding one stack, which the player can rearrange.
+ *
+ * `SlotInventory` packs its contents and has no positions at all, which is
+ * right for a chest nobody opens and wrong for a bag the player looks into
+ * every minute. Here **the arrangement is state**: which slot a stack sits in
+ * is authoritative (§10), serialized, and changed only by the `moveStack`
+ * command (§7).
+ *
+ * The rules that decide where things go are fixed and positional, so they
+ * are deterministic whatever order anything happened in (§6 R4):
+ *
+ * ```text
+ * add     tops up stacks of that item in slot order, then fills empty slots
+ *         in slot order
+ * remove  takes from the last stack of that item first, so the full stacks
+ *         at the front are the last to go
+ * move    to an empty slot moves; onto the same item merges what fits and
+ *         leaves the rest; onto anything else swaps
+ * ```
+ *
+ * A stack never exceeds its item's stack size, and `load` refuses a save
+ * that says otherwise.
+ */
+export class GridInventory implements Inventory {
+  readonly slots: number;
+
+  private readonly cells: GridCell[];
+  private readonly stackSizeOf: StackSizeLookup;
+
+  constructor(options: GridInventoryOptions) {
+    if (!Number.isInteger(options.slots) || options.slots < 1) {
+      throw new RangeError(`GridInventory: slots must be a whole number above 0, got ${options.slots}.`);
+    }
+    this.slots = options.slots;
+    this.stackSizeOf = options.stackSizeOf;
+    this.cells = Array.from({ length: options.slots }, (): GridCell => null);
+  }
+
+  /** The stack in slot `index`, as a copy, or null for an empty or unknown slot. */
+  cellAt(index: number): readonly [ItemId, number] | null {
+    const cell = this.cells[index];
+    return cell === undefined || cell === null ? null : [cell[0], cell[1]];
+  }
+
+  get usedSlots(): number {
+    let used = 0;
+    for (const cell of this.cells) if (cell !== null) used += 1;
+    return used;
+  }
+
+  get freeSlots(): number {
+    return this.slots - this.usedSlots;
+  }
+
+  count(itemId: ItemId): number {
+    let total = 0;
+    for (const cell of this.cells) if (cell !== null && cell[0] === itemId) total += cell[1];
+    return total;
+  }
+
+  spaceFor(itemId: ItemId): number {
+    const stackSize = this.stackSizeOf(itemId);
+    let space = 0;
+    for (const cell of this.cells) {
+      if (cell === null) space += stackSize;
+      else if (cell[0] === itemId) space += Math.max(0, stackSize - cell[1]);
+    }
+    return space;
+  }
+
+  canAdd(itemId: ItemId, amount: number): boolean {
+    assertItemId(itemId, 'GridInventory.canAdd');
+    assertAmount(amount, 'GridInventory.canAdd');
+    return amount <= this.spaceFor(itemId);
+  }
+
+  add(itemId: ItemId, amount: number): number {
+    assertItemId(itemId, 'GridInventory.add');
+    assertAmount(amount, 'GridInventory.add');
+    const stackSize = this.stackSizeOf(itemId);
+    let left = amount;
+
+    for (const cell of this.cells) {
+      if (left === 0) break;
+      if (cell === null || cell[0] !== itemId) continue;
+      const moved = Math.min(left, stackSize - cell[1]);
+      if (moved <= 0) continue;
+      cell[1] += moved;
+      left -= moved;
+    }
+    for (let i = 0; i < this.cells.length && left > 0; i++) {
+      if (this.cells[i] !== null) continue;
+      const moved = Math.min(left, stackSize);
+      this.cells[i] = [itemId, moved];
+      left -= moved;
+    }
+    return amount - left;
+  }
+
+  remove(itemId: ItemId, amount: number): number {
+    assertItemId(itemId, 'GridInventory.remove');
+    assertAmount(amount, 'GridInventory.remove');
+    let left = amount;
+    for (let i = this.cells.length - 1; i >= 0 && left > 0; i--) {
+      const cell = this.cells[i];
+      if (cell === null || cell === undefined || cell[0] !== itemId) continue;
+      const taken = Math.min(left, cell[1]);
+      cell[1] -= taken;
+      left -= taken;
+      if (cell[1] === 0) this.cells[i] = null;
+    }
+    return amount - left;
+  }
+
+  isEmpty(): boolean {
+    return this.cells.every((cell) => cell === null);
+  }
+
+  /**
+   * Move the stack in slot `from` to slot `to`. Answers false when there is
+   * nothing to move or either slot is not one of this bag's.
+   */
+  move(from: number, to: number): boolean {
+    if (!this.isSlot(from) || !this.isSlot(to)) return false;
+    const moving = this.cells[from] ?? null;
+    if (moving === null) return false;
+    if (from === to) return true;
+
+    const target = this.cells[to] ?? null;
+    if (target === null) {
+      this.cells[to] = moving;
+      this.cells[from] = null;
+      return true;
+    }
+    if (target[0] === moving[0]) {
+      const moved = Math.min(moving[1], this.stackSizeOf(moving[0]) - target[1]);
+      target[1] += moved;
+      moving[1] -= moved;
+      if (moving[1] === 0) this.cells[from] = null;
+      return true;
+    }
+    this.cells[to] = moving;
+    this.cells[from] = target;
+    return true;
+  }
+
+  isSlot(index: number): boolean {
+    return Number.isInteger(index) && index >= 0 && index < this.slots;
+  }
+
+  /**
+   * Totals, item→count ascending: the same shape every other container
+   * answers, for the HUD and for build costs. Positions are in `toCells`.
+   */
+  toJSON(): SerializedInventory {
+    const totals: [ItemId, number][] = [];
+    for (const cell of this.cells) {
+      if (cell !== null) slotsSet(totals, cell[0], slotsCount(totals, cell[0]) + cell[1]);
+    }
+    return totals;
+  }
+
+  /** The arrangement, for the save. See `SerializedGrid`. */
+  toCells(): SerializedGrid {
+    const out: [number, ItemId, number][] = [];
+    this.cells.forEach((cell, index) => {
+      if (cell !== null) out.push([index, cell[0], cell[1]]);
+    });
+    return out;
+  }
+
+  /** Replace the contents with a saved arrangement. Loud about anything malformed. */
+  load(serialized: SerializedGrid): void {
+    const next: GridCell[] = Array.from({ length: this.slots }, (): GridCell => null);
+    let previous = -1;
+    for (const entry of serialized) {
+      if (!Array.isArray(entry) || entry.length !== 3) {
+        throw new Error(`GridInventory.load: ${JSON.stringify(entry)} is not a [slot, itemId, count] triple.`);
+      }
+      const [slot, itemId, count] = entry;
+      if (!this.isSlot(slot) || slot <= previous) {
+        throw new Error(`GridInventory.load: slot ${slot} is out of range or out of order.`);
+      }
+      previous = slot;
+      assertItemId(itemId, 'GridInventory.load');
+      if (!Number.isInteger(count) || count < 1 || count > this.stackSizeOf(itemId)) {
+        throw new Error(`GridInventory.load: slot ${slot} holds ${count} of item ${itemId}, which is not one stack.`);
+      }
+      next[slot] = [itemId, count];
+    }
+    for (let i = 0; i < this.slots; i++) this.cells[i] = next[i] ?? null;
   }
 }

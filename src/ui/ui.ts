@@ -204,6 +204,12 @@ export class GameUI {
         const selected = this.controller.getSelection();
         if (selected !== null) this.controller.takeItems(selected, itemId, count);
       },
+      // The machine's input slots (2026-09-23): the same arrangement in the
+      // other direction. The machine decides what it accepts.
+      onDeposit: (itemId, count) => {
+        const selected = this.controller.getSelection();
+        if (selected !== null) this.controller.insertItems(selected, itemId, count);
+      },
       // C16, and the same arrangement: the panel names a recipe, the
       // controller knows which machine that means, and the simulation decides.
       onSetRecipe: (recipeId) => {
@@ -221,6 +227,7 @@ export class GameUI {
       onCancel: (index) => this.controller.cancelCraft(index),
       // Picked up — a building to place, or a material to feed a machine
       // with. The panel gets out of the way, so the next click is on the world.
+      onMoveStack: (from, to) => this.controller.moveStack(from, to),
       onPickItem: (itemId) => {
         this.controller.holdItem(itemId);
         this.setInventoryOpen(false);

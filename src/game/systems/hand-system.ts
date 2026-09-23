@@ -155,6 +155,15 @@ export class HandSystem {
   }
 
   /**
+   * How many of `itemId` this building would take from the hand right now —
+   * zero when it is full or refuses the item. The machine dialog's pre-check
+   * for which bag item a PUT would move (§7 permits it; `insert` still decides).
+   */
+  roomFor(entity: Entity, itemId: ItemId): number {
+    return inputPortOf(entity, this.ports)?.spaceFor(itemId) ?? 0;
+  }
+
+  /**
    * How many of one item a machine would hand over. Zero for "none of that".
    *
    * Asked by string id, because that is the vocabulary a command speaks (§7),

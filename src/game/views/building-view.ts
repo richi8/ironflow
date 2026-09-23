@@ -65,6 +65,34 @@ export interface MachineStack {
  * the same reason: a view model carries only what exists, and a belt is not a
  * machine that is 0% powered.
  */
+/**
+ * One input slot of a machine: something it needs, and how full it is
+ * (2026-09-23). The machine dialog draws one per material, even when empty,
+ * so the player can see what to bring and put it in or take it out by hand.
+ */
+export interface MachineSlotView {
+  /** What goes here: an ingredient, fuel, or science. */
+  readonly role: 'ingredient' | 'fuel' | 'science';
+  /**
+   * The item in the slot, or the one it is waiting for. Null for a slot that
+   * takes any of several items and holds none yet — fuel with no coal in it,
+   * or a furnace that has not been told what to smelt.
+   */
+  readonly itemId: string | null;
+  /** The item's name, or what the slot is for ("Fuel") when it has none. */
+  readonly name: string;
+  readonly count: number;
+  readonly capacity: number;
+  /**
+   * The item a PUT would move in from the bag, or null when the bag holds
+   * nothing this slot takes. The slot's own item when it has one; otherwise
+   * the first thing in the bag it would accept.
+   */
+  readonly depositItemId: string | null;
+  /** How many of `depositItemId` the player carries. */
+  readonly depositHeld: number;
+}
+
 export interface MachinePowerView {
   /** Kilowatts it draws, or 0 for a generator and for anything that is free. */
   readonly consumptionKw: number;
@@ -104,6 +132,12 @@ export interface MachineView {
    */
   readonly recipes: readonly RecipeView[] | null;
   readonly inputs: readonly MachineStack[];
+  /**
+   * The input slots, one per material this building takes, or null for a
+   * building that takes none by hand (a chest, a belt, a miner). See
+   * `MachineSlotView`.
+   */
+  readonly slots: readonly MachineSlotView[] | null;
   readonly outputs: readonly MachineStack[];
   /**
    * A rolling average over the last 300 ticks (C12 task 2), or `null` for a

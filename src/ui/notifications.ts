@@ -65,6 +65,7 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   // it belongs: the limit is the building's, and a toast is read after the
   // mistake rather than before it.
   span_too_long: 'The other end of that underground belt is too far away.',
+  empty_slot: 'There is nothing in that slot to move.',
 });
 
 export function rejectionMessage(reason: CommandRejectionReason): string {

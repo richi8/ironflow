@@ -80,6 +80,7 @@ import {
   type SerializedChunkDelta,
   type SerializedEntity,
   type SerializedGameState,
+  type SerializedItemGrid,
   type SerializedItemSlots,
   type SerializedPlayerState,
   type SerializedResearchState,
@@ -559,6 +560,31 @@ function readItemSlots(value: unknown, where: string, numbering: ItemNumbering, 
   return out;
 }
 
+/**
+ * `[slot, itemId, count]` triples, ascending by slot (v3): the player's bag.
+ * Every slot is inside the bag, used once, and holds at most one stack.
+ */
+function readItemGrid(value: unknown, where: string, numbering: ItemNumbering, slots: number): SerializedItemGrid {
+  const entries = readArray(value, where, slots);
+  const out: (readonly [number, number, number])[] = [];
+  let previous = -1;
+
+  for (const entry of entries) {
+    const triple = readArray(entry, `an entry of ${where}`, 3);
+    if (triple.length !== 3) fail(`an entry of ${where} has ${triple.length} fields, not 3.`);
+    const slot = readInteger(triple[0], `a slot in ${where}`, 0, slots - 1);
+    if (slot <= previous) fail(`${where} lists slot ${slot} after ${previous}; slots must ascend and never repeat.`);
+    previous = slot;
+
+    const itemId = readInteger(triple[1], `an item id in ${where}`, FIRST_ITEM_ID, MAX_STACK_SIZE);
+    if (!numbering.usable.has(itemId)) fail(`${where} holds item ${itemId}, which this build has no item for.`);
+    const stackSize = numbering.stackSizeOf(itemId);
+    const count = readInteger(triple[2], `a count in ${where}`, 1, stackSize);
+    out.push([slot, itemId, count] as const);
+  }
+  return out;
+}
+
 /* -------------------------------------------------------------------------- *
  * The player
  * -------------------------------------------------------------------------- */
@@ -581,10 +607,7 @@ function readPlayer(value: unknown, numbering: ItemNumbering): SerializedPlayerS
     miningX: miningX === null ? null : readInteger(miningX, 'the mining target x', TILE_MIN, TILE_MAX),
     miningY: miningY === null ? null : readInteger(miningY, 'the mining target y', TILE_MIN, TILE_MAX),
     miningTicks: readInteger(player['miningTicks'], 'miningTicks', 0, Number.MAX_SAFE_INTEGER),
-    inventory: readItemSlots(player['inventory'], "the player's inventory", numbering, {
-      kind: 'slots',
-      slots: PLAYER_INVENTORY_SLOTS,
-    }),
+    inventory: readItemGrid(player['inventory'], "the player's inventory", numbering, PLAYER_INVENTORY_SLOTS),
     crafts: readCrafts(player['crafts']),
   };
 }

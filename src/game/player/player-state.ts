@@ -34,9 +34,12 @@
  * The consequence the player feels: the bag can be **full**. Thirty slots now
  * hold ore, plates and buildings together, which is what makes a chest
  * something to want rather than something to have.
+ *
+ * Since 2026-09-23 the bag is a `GridInventory`: each stack has a position
+ * the player can rearrange, and the save records it.
  */
 
-import { SlotInventory, type SerializedInventory, type StackSizeLookup } from '../items/inventory.js';
+import { GridInventory, type SerializedGrid, type StackSizeLookup } from '../items/inventory.js';
 import { TPS } from '../simulation-clock.js';
 import { NORTH, isRotation, type Rotation, type TileCoord } from '../world/coordinates.js';
 
@@ -192,7 +195,8 @@ export interface SerializedPlayer {
   readonly miningX: number | null;
   readonly miningY: number | null;
   readonly miningTicks: number;
-  readonly inventory: SerializedInventory;
+  /** Every occupied slot as `[slot, itemId, count]`, ascending by slot. */
+  readonly inventory: SerializedGrid;
   /**
    * The hand-craft queue, head first (C21A). Order is the *decision*, not an
    * accident of a container, so it is serialized as written and never sorted.
@@ -259,14 +263,15 @@ export class PlayerState {
 
   /**
    * Everything the player is carrying: ore, plates, gears and buildings.
-   * Slot-based (C08), and since C20 the only container they have.
+   * Slot-based (C08), and since C20 the only container they have. Positional
+   * since 2026-09-23 — see the file header.
    */
-  readonly inventory: SlotInventory;
+  readonly inventory: GridInventory;
 
   constructor(options: PlayerStateOptions) {
     this.subX = tileCentreSubtile(options.x ?? 0);
     this.subY = tileCentreSubtile(options.y ?? 0);
-    this.inventory = new SlotInventory({
+    this.inventory = new GridInventory({
       slots: options.slots ?? PLAYER_INVENTORY_SLOTS,
       stackSizeOf: options.stackSizeOf,
     });
@@ -428,7 +433,7 @@ export class PlayerState {
       miningX: this.miningX,
       miningY: this.miningY,
       miningTicks: this.miningTicks,
-      inventory: this.inventory.toJSON(),
+      inventory: this.inventory.toCells(),
       // Copied, not handed over: `toJSON` is read by the determinism harness
       // and by C24's save, and neither may hold a live order it could edit.
       crafts: this.crafts.map((order) => ({

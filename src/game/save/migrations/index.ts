@@ -2,10 +2,11 @@
  * Every migration this build has, oldest first. See ironflow.md C27.
  *
  * ```text
- *   SAVE_VERSION = 2        MIGRATIONS = [v1 -> v2]
+ *   SAVE_VERSION = 3        MIGRATIONS = [v1 -> v2, v2 -> v3]
  * ```
  *
- * v2 (2026-09-23) added the player's hotbar layout to the metadata. The
+ * v2 (2026-09-23) added the player's hotbar layout to the metadata, and v3
+ * (the same day) gave the player's bag positions. The
  * registry is not decoration: `save-migrator.ts` checks that the chain reaches
  * `SAVE_VERSION`, and `tests/integration/save-fixtures.test.ts` checks that
  * every version from 1 up has a committed fixture — so the day `SAVE_VERSION`
@@ -66,6 +67,7 @@
 import type { Migration } from '../save-migrator.js';
 
 import { v1ToV2 } from './v1-to-v2.js';
+import { v2ToV3 } from './v2-to-v3.js';
 
 /** Oldest first, contiguous, ending at `SAVE_VERSION`. */
-export const MIGRATIONS: readonly Migration[] = Object.freeze([v1ToV2]);
+export const MIGRATIONS: readonly Migration[] = Object.freeze([v1ToV2, v2ToV3]);

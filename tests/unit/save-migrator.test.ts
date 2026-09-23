@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS } from '../../src/game/save/migrations/index.js';
 import { v1ToV2 } from '../../src/game/save/migrations/v1-to-v2.js';
+import { v2ToV3 } from '../../src/game/save/migrations/v2-to-v3.js';
 import { SAVE_FORMAT, SAVE_VERSION } from '../../src/game/save/save-format.js';
 import {
   SaveMigrationError,
@@ -210,5 +211,35 @@ describe('v1 -> v2: the hotbar layout', () => {
 
   it('leaves a malformed metadata for the validator to refuse', () => {
     expect(v1ToV2.migrate({ version: 1, metadata: 'nope' })).toEqual({ version: 2, metadata: 'nope' });
+  });
+});
+
+describe('v2 -> v3: the bag gets positions', () => {
+  it('deals the totals into slots a stack at a time, in the order they were written', () => {
+    const v2 = {
+      version: 2,
+      state: {
+        tick: 5,
+        itemIdMap: { iron_ore: 1, coal: 3, iron_plate: 5 },
+        player: { subX: 1, inventory: [[1, 120], [3, 10], [5, 100]] },
+      },
+    };
+    const v3 = v2ToV3.migrate(v2);
+    expect(v3['version']).toBe(3);
+    // Iron ore stacks at 50: 120 is three slots.
+    expect((v3['state'] as { player: { inventory: unknown } }).player.inventory).toEqual([
+      [0, 1, 50],
+      [1, 1, 50],
+      [2, 1, 20],
+      [3, 3, 10],
+      [4, 5, 100],
+    ]);
+    expect((v3['state'] as { player: { subX: number } }).player.subX).toBe(1);
+  });
+
+  it('leaves a malformed bag for the validator to refuse', () => {
+    const v2 = { version: 2, state: { player: { inventory: [[1]] } } };
+    expect(v2ToV3.migrate(v2)).toEqual({ ...v2, version: 3 });
+    expect(v2ToV3.migrate({ version: 2, state: 'nope' })).toEqual({ version: 3, state: 'nope' });
   });
 });

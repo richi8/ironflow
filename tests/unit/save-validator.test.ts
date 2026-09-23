@@ -217,7 +217,14 @@ describe('ids this build does not have', () => {
   });
 
   it('refuses an unknown item in the player bag', () => {
-    expect(reason(broken(['state.player.inventory', [[4242, 1]]]))).toMatch(/4242/);
+    expect(reason(broken(['state.player.inventory', [[0, 4242, 1]]]))).toMatch(/4242/);
+  });
+
+  it('refuses a bag slot that is out of range, repeated, or over a stack', () => {
+    const ore = validateSaveFile(valid()).state.itemIdMap['iron_ore'] ?? 1;
+    expect(reason(broken(['state.player.inventory', [[999, ore, 1]]]))).toMatch(/slot/);
+    expect(reason(broken(['state.player.inventory', [[3, ore, 1], [3, ore, 1]]]))).toMatch(/ascend/);
+    expect(reason(broken(['state.player.inventory', [[0, ore, 51]]]))).toMatch(/count/);
   });
 
   it('refuses an unknown item in an inserter hand', () => {

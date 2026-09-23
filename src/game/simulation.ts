@@ -733,6 +733,10 @@ export class Simulation {
         return this.craftingSystem.craft(command.recipeId, command.count);
       case 'cancelCraft':
         return this.craftingSystem.cancel(command.index);
+      case 'moveStack':
+        // The player rearranging their own bag: never out of reach, and the
+        // container itself says whether there was anything to move.
+        return this.player.inventory.move(command.from, command.to) ? null : 'empty_slot';
       case 'startResearch':
         return this.researchSystem.start(command.technologyId);
       case 'cancelResearch':

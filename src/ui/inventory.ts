@@ -7,18 +7,26 @@
  * that belong together because they are the same bag read twice:
  *
  * ```text
- *   CARRYING       every kind of item, its count, and the slots it costs
+ *   CARRYING       the bag: a fixed grid of slots, one stack in each
  *   CRAFT BY HAND  what those items can be turned into, and how many
  *   MAKING         the queue, head first, with the one bar that is moving
  * ```
  *
  * ## It builds its DOM once, from content
  *
- * Both grids are fixed pools sized by the *content table* rather than by the
- * contents — a cell per registered item, a button per hand-craftable recipe —
- * and both are handed to `mount()` in the first view. Nothing is created or destroyed while the game runs: a cell
- * whose count is zero is hidden, and the ore that arrives a second later
- * un-hides it (§13).
+ * The bag is a fixed pool of one cell per slot, and the craft grid one button
+ * per hand-craftable recipe; both are sized by the first view handed to
+ * `mount()`. Nothing is created or destroyed while the game runs: an empty
+ * slot is a cell painted empty, and a stack moving is two cells repainted
+ * (§13).
+ *
+ * ## The bag is arranged by dragging (2026-09-23)
+ *
+ * Each stack has a position, as in the genre's own inventories. Dragging one
+ * cell onto another sends `moveStack`: onto an empty slot it moves, onto the
+ * same item it merges, onto anything else it swaps. The same drag carries the
+ * item's id too, so a cell dropped on the hotbar goes on the hotbar and one
+ * dropped on a machine's input slot goes into the machine.
  *
  * The queue is the one varying-length list, and it is a fixed pool too —
  * `QUEUE_ROWS` of them, which is more orders than the simulation will hold.
@@ -44,12 +52,15 @@
 import type {
   CraftOptionView,
   CraftQueueView,
-  InventorySlotView,
+  InventoryCellView,
   InventoryView,
 } from '../game/views/inventory-view.js';
 
 import { createIcon } from './icons.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
+
+/** The drag payload for a bag stack on its way to another slot: the source slot, 0-based. */
+export const CELL_DRAG_TYPE = 'application/x-ironflow-cell';
 
 /**
  * Queue rows drawn. More than `MAX_CRAFT_ORDERS`, which is the simulation's
@@ -65,7 +76,6 @@ interface Cell {
   readonly root: HTMLElement;
   readonly name: HTMLElement;
   readonly count: HTMLElement;
-  readonly slots: HTMLElement;
 }
 
 interface CraftButton {
@@ -90,6 +100,8 @@ export interface InventoryPanelOptions {
   readonly onCancel: (index: number) => void;
   /** A carried item was clicked: hold it, ready to place or to feed a machine. */
   readonly onPickItem: (itemId: string) => void;
+  /** The stack in slot `from` was dropped on slot `to` (both 0-based). */
+  readonly onMoveStack: (from: number, to: number) => void;
   readonly onClose: () => void;
 }
 
@@ -104,7 +116,7 @@ export class InventoryPanel {
   private readonly queueEmpty = document.createElement('div');
   private readonly options: InventoryPanelOptions;
 
-  private readonly cells = new Map<string, Cell>();
+  private readonly cells: Cell[] = [];
   private readonly craftButtons = new Map<string, CraftButton>();
   private readonly queueRows: QueueRow[] = [];
 
@@ -165,14 +177,12 @@ export class InventoryPanel {
     this.slotsLabel.classList.toggle('is-warning', view.usedSlots >= view.slots);
 
     let carried = 0;
-    for (const item of view.items) {
-      const cell = this.cells.get(item.itemId);
-      if (cell === undefined) continue;
-      cell.root.hidden = item.count === 0;
-      if (item.count === 0) continue;
-      carried += 1;
-      this.paintCell(cell, item);
-    }
+    view.cells.forEach((cellView, index) => {
+      const cell = this.cells[index];
+      if (cell === undefined) return;
+      if (cellView.itemId !== null) carried += 1;
+      this.paintCell(cell, cellView);
+    });
     this.bagEmpty.hidden = carried > 0;
 
     for (const option of view.crafts) {
@@ -187,13 +197,16 @@ export class InventoryPanel {
   destroy(): void {
     this.closeButton.removeEventListener('click', this.handleClose);
     for (const button of this.craftButtons.values()) button.root.removeEventListener('click', this.handleCraft);
-    for (const cell of this.cells.values()) {
+    for (const cell of this.cells) {
       cell.root.removeEventListener('click', this.handlePick);
       cell.root.removeEventListener('dragstart', this.handleDragStart);
+      cell.root.removeEventListener('dragover', this.handleDragOver);
+      cell.root.removeEventListener('dragleave', this.handleDragLeave);
+      cell.root.removeEventListener('drop', this.handleDrop);
     }
     for (const row of this.queueRows) row.cancel.removeEventListener('click', this.handleCancel);
     this.craftButtons.clear();
-    this.cells.clear();
+    this.cells.length = 0;
     this.queueRows.length = 0;
     this.root.remove();
   }
@@ -224,15 +237,44 @@ export class InventoryPanel {
     if (itemId !== null) this.options.onPickItem(itemId);
   };
 
-  /** A drag of a carried item, on its way to a hotbar slot. */
+  /**
+   * A drag of a stack: to another slot, to the hotbar, or into a machine. It
+   * carries both the slot and the item, and whoever it is dropped on reads
+   * the one it understands.
+   */
   private readonly handleDragStart = (event: DragEvent): void => {
     const itemId = itemOf(event);
-    if (itemId === null || event.dataTransfer === null) {
+    const index = indexOf(event);
+    if (itemId === null || index === null || event.dataTransfer === null) {
       event.preventDefault();
       return;
     }
     event.dataTransfer.setData(ITEM_DRAG_TYPE, itemId);
-    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(CELL_DRAG_TYPE, String(index));
+    event.dataTransfer.effectAllowed = 'copyMove';
+  };
+
+  /** Accept another bag stack being dragged over, and nothing else. */
+  private readonly handleDragOver = (event: DragEvent): void => {
+    const types = event.dataTransfer?.types;
+    if (types === undefined || !Array.from(types).includes(CELL_DRAG_TYPE)) return;
+    event.preventDefault();
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.add('is-drop-target');
+  };
+
+  private readonly handleDragLeave = (event: DragEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
+  };
+
+  private readonly handleDrop = (event: DragEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
+    const to = indexOf(event);
+    const raw = event.dataTransfer?.getData(CELL_DRAG_TYPE) ?? '';
+    const from = raw === '' ? NaN : Number(raw);
+    if (to === null || !Number.isInteger(from)) return;
+    event.preventDefault();
+    if (from !== to) this.options.onMoveStack(from, to);
   };
 
   private readonly handleCancel = (event: Event): void => {
@@ -248,7 +290,7 @@ export class InventoryPanel {
     column.append(label('CARRYING'));
 
     this.bag.className = 'if-bag';
-    for (const item of view.items) this.bag.append(this.createCell(item));
+    for (const cell of view.cells) this.bag.append(this.createCell(cell.index));
 
     this.bagEmpty.className = 'if-inventory__empty';
     this.bagEmpty.textContent = 'Nothing yet. Hold left-click on ore to mine it.';
@@ -275,33 +317,27 @@ export class InventoryPanel {
     return column;
   }
 
-  private createCell(item: InventorySlotView): HTMLElement {
+  /** One slot of the bag. What is in it is painted, never built (§13). */
+  private createCell(index: number): HTMLElement {
     const root = document.createElement('div');
-    root.className = 'if-bag-cell';
-    root.hidden = true;
-
-    const name = document.createElement('span');
-    name.className = 'if-bag-cell__name';
-    name.textContent = item.name;
-
-    const count = document.createElement('span');
-    count.className = 'if-bag-cell__count';
-
-    const slots = document.createElement('span');
-    slots.className = 'if-bag-cell__slots';
-
-    // Every item can be picked up and put on the hotbar. Whether it places a
-    // building is content and never changes, so it is decided once, here.
-    root.dataset['item'] = item.itemId;
-    root.draggable = true;
+    root.className = 'if-bag-cell is-empty';
+    root.dataset['index'] = String(index);
     root.tabIndex = 0;
     root.setAttribute('role', 'button');
     root.addEventListener('click', this.handlePick);
     root.addEventListener('dragstart', this.handleDragStart);
-    if (item.buildingId !== null) root.classList.add('is-placeable');
+    root.addEventListener('dragover', this.handleDragOver);
+    root.addEventListener('dragleave', this.handleDragLeave);
+    root.addEventListener('drop', this.handleDrop);
 
-    root.append(name, count, slots);
-    this.cells.set(item.itemId, { root, name, count, slots });
+    const name = document.createElement('span');
+    name.className = 'if-bag-cell__name';
+
+    const count = document.createElement('span');
+    count.className = 'if-bag-cell__count';
+
+    root.append(name, count);
+    this.cells.push({ root, name, count });
     return root;
   }
 
@@ -357,16 +393,29 @@ export class InventoryPanel {
     return root;
   }
 
-  private paintCell(cell: Cell, item: InventorySlotView): void {
-    setText(cell.count, String(item.count));
-    // The slot cost, which is what the "27 / 30" at the top is made of — and
-    // the answer to a bag that is full while reading as half empty.
-    setText(cell.slots, item.slots === 1 ? '1 slot' : `${item.slots} slots`);
+  private paintCell(cell: Cell, view: InventoryCellView): void {
+    const { root } = cell;
+    if (view.itemId === null) {
+      setText(cell.name, '');
+      setText(cell.count, '');
+      delete root.dataset['item'];
+      root.draggable = false;
+      root.classList.add('is-empty');
+      root.classList.remove('is-placeable');
+      root.title = 'Empty — drag a stack here';
+      return;
+    }
+    setText(cell.name, view.name);
+    setText(cell.count, String(view.count));
+    if (root.dataset['item'] !== view.itemId) root.dataset['item'] = view.itemId;
+    root.draggable = true;
+    root.classList.remove('is-empty');
+    root.classList.toggle('is-placeable', view.buildingId !== null);
     const use =
-      item.buildingId === null
-        ? ' — click to hold and feed a machine, or drag onto the hotbar'
-        : ' — click to build, or drag onto the hotbar';
-    cell.root.title = `${item.name} — ${item.count}, ${item.stackSize} per slot${use}`;
+      view.buildingId === null
+        ? 'click to hold and feed a machine'
+        : 'click to build';
+    root.title = `${view.name} — ${view.count} / ${view.stackSize}. ${use}; drag to move, onto the hotbar, or into a machine.`;
   }
 
   private paintCraft(button: CraftButton, option: CraftOptionView): void {
@@ -425,6 +474,14 @@ function label(text: string): HTMLElement {
   element.className = 'if-inspector__label';
   element.textContent = text;
   return element;
+}
+
+/** The slot a cell is, read off the element the listener is bound to. */
+function indexOf(event: Event): number | null {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) return null;
+  const index = Number(target.dataset['index']);
+  return Number.isInteger(index) ? index : null;
 }
 
 /** The item a cell holds, read off the element the listener is bound to. */

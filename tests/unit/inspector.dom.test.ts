@@ -413,10 +413,13 @@ describe('no rebuild, and no reach into the game', () => {
     runTicks(1);
     settle();
 
-    const inputs = section('INPUT');
-    expect(inputs.hidden).toBe(false);
-    const button = inputs.querySelector<HTMLButtonElement>('.if-stack__take');
-    expect(button?.hidden).toBe(false);
+    // Since 2026-09-23 a machine's inputs are slots, each with PUT and TAKE.
+    const slots = query<HTMLElement>('.if-inspector__slots');
+    expect(slots.hidden).toBe(false);
+    const row = [...slots.querySelectorAll<HTMLElement>('.if-machine-slot')].find((r) => !r.hidden);
+    const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+      (b) => b.textContent === 'TAKE',
+    );
     expect(button?.dataset['item']).toBe('iron_ore');
     expect(button?.disabled).toBe(false);
 
@@ -424,6 +427,61 @@ describe('no rebuild, and no reach into the game', () => {
     runTicks(1);
     expect(harness.simulation.commands.takeRejections()).toEqual([]);
     expect(harness.simulation.player.inventory.count(ore)).toBeGreaterThan(0);
+  });
+
+  it('shows a furnace an ore slot and a fuel slot, and fills them from the bag', () => {
+    const furnace = harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.Furnace, PATCH.x + 2, PATCH.y + 2, NORTH),
+    );
+    const coal = harness.simulation.items.idOf('coal');
+    const ore = harness.simulation.items.idOf('iron_ore');
+    harness.simulation.player.inventory.add(coal, 20);
+    harness.simulation.player.inventory.add(ore, 30);
+
+    select(furnace.id);
+    runTicks(1);
+    settle();
+
+    const rows = [...harness.root.querySelectorAll<HTMLElement>('.if-machine-slot')].filter((r) => !r.hidden);
+    // Empty slots, drawn anyway, so the player can see what to bring.
+    expect(rows.map((r) => [r.dataset['role'], r.querySelector('.if-stack__name')?.textContent])).toEqual([
+      ['ingredient', 'Ingredient'],
+      ['fuel', 'Fuel'],
+    ]);
+    const put = (r: HTMLElement): HTMLButtonElement | undefined =>
+      [...r.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'PUT');
+    for (const r of rows) {
+      expect(put(r)?.disabled).toBe(false);
+      put(r)?.click();
+    }
+    runTicks(1);
+
+    expect(harness.simulation.commands.takeRejections()).toEqual([]);
+    // All twenty left the bag; the furnace lit one on the same tick.
+    expect(harness.simulation.player.inventory.count(coal)).toBe(0);
+    expect(furnace.fuel[0]?.[0]).toBe(coal);
+    expect(harness.simulation.player.inventory.count(ore)).toBeLessThan(30);
+  });
+
+  it('takes a stack dragged onto a slot', () => {
+    const furnace = harness.simulation.entities.create<MachineEntity>(
+      newMachine(EntityType.Furnace, PATCH.x + 2, PATCH.y + 2, NORTH),
+    );
+    const coal = harness.simulation.items.idOf('coal');
+    harness.simulation.player.inventory.add(coal, 5);
+    select(furnace.id);
+    runTicks(1);
+    settle();
+
+    const fuel = query<HTMLElement>('.if-machine-slot[data-role="fuel"]');
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: { types: ['application/x-ironflow-item'], getData: (t: string) => (t === 'application/x-ironflow-item' ? 'coal' : '') },
+    });
+    fuel.dispatchEvent(drop);
+    runTicks(1);
+
+    expect(furnace.fuel).toEqual([[coal, 5]]);
   });
 });
 
@@ -577,7 +635,7 @@ describe('the recipe picker (C16)', () => {
 
 describe('the row pool', () => {
   it('is built once and hidden rather than created per stack', () => {
-    const inspector = new Inspector({ onTake: () => {}, onSetRecipe: () => {}, onClose: () => {} });
+    const inspector = new Inspector({ onTake: () => {}, onDeposit: () => {}, onSetRecipe: () => {}, onClose: () => {} });
     const root = document.createElement('div');
     inspector.mount(root);
 
