@@ -144,6 +144,10 @@ describe('sprite ids', () => {
     // because a counter ran past eight would be the worst kind of bug.
     expect(describeSprite('belt:1:11')).toEqual({ kind: 'belt', rotation: 1, phase: 3 });
     expect(describeSprite('belt:1:x')).toEqual({ kind: 'missing' });
+    // 2026-09-23: which sides another belt feeds in from.
+    expect(describeSprite('belt:1:3:j2')).toEqual({ kind: 'belt', rotation: 1, phase: 3, joined: 2 });
+    expect(describeSprite('belt:1:3:j0')).toEqual({ kind: 'missing' });
+    expect(describeSprite('belt:1:3:2')).toEqual({ kind: 'missing' });
   });
 
   it('resolves an underground mouth at each facing, and each end of a run', () => {

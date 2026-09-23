@@ -288,7 +288,7 @@ export function paintSprite(
       paintMachine(sprite);
       return;
     case 'belt':
-      paintBelt(sprite.rotation, sprite.phase);
+      paintBelt(sprite.rotation, sprite.phase, sprite.joined ?? 0);
       return;
     case 'splitter':
       paintSplitter(sprite.rotation, sprite.phase);
@@ -893,7 +893,7 @@ function laneShadow(rotation: Rotation, u0: number, v0: number, u1: number, v1: 
  * an arrow — and the chevron stays because a still belt (below `DETAIL_ZOOM`,
  * or a ghost) has to say which way it runs too (pillar 3).
  */
-function lane(rotation: Rotation, phase: number, across: number): void {
+function lane(rotation: Rotation, phase: number, across: number, joined = 0): void {
   const body = shade(color('blue'), 0.55);
   const [f0, g0, f1, g1] = laneRect(rotation, -0.5, 0.5, across - 0.5, across + 0.5);
   laneShadow(rotation, f0, g0, f1, g1);
@@ -929,11 +929,11 @@ function lane(rotation: Rotation, phase: number, across: number): void {
       C.stroke();
     }
 
-    // The lip: a lit line along each side of the top.
+    // The lip: a lit line along each side of the top, except a side another
+    // belt feeds in from (`joined`, bit 1 left, bit 2 right).
     C.beginPath();
-    for (const edge of [-0.5 + BELT_EDGE / 2, 0.5 - BELT_EDGE / 2]) {
-      laneLine(rotation, -0.5, across + edge, 0.5, across + edge, BELT_DECK);
-    }
+    if ((joined & 1) === 0) laneLine(rotation, -0.5, across - 0.5 + BELT_EDGE / 2, 0.5, across - 0.5 + BELT_EDGE / 2, BELT_DECK);
+    if ((joined & 2) === 0) laneLine(rotation, -0.5, across + 0.5 - BELT_EDGE / 2, 0.5, across + 0.5 - BELT_EDGE / 2, BELT_DECK);
     C.strokeStyle = color('blue-high');
     C.lineWidth = Math.max(1, 0.035 * EX);
     C.stroke();
@@ -948,8 +948,8 @@ function lane(rotation: Rotation, phase: number, across: number): void {
   C.stroke();
 }
 
-function paintBelt(rotation: Rotation, phase: number): void {
-  lane(rotation, phase, 0);
+function paintBelt(rotation: Rotation, phase: number, joined: number): void {
+  lane(rotation, phase, 0, joined);
 }
 
 /**

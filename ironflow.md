@@ -7101,7 +7101,13 @@ reaches into the next tile and two translucent shadows overlapping there
 notch the line at every seam. Splitters and tunnel mouths use the same lane,
 with the housing and hood rising `SPLITTER_HOUSING` and `TUNNEL_HOOD` above
 it. Every item sprite is lifted by `BELT_DECK`, since items are only ever
-drawn riding one. The atlas extents grew to match.
+drawn riding one. The atlas extents grew to match. A side another carrier feeds in from
+(a belt, splitter or tunnel mouth on the tile beside it, facing in) is drawn
+without its lip, so the incoming belt meets an open edge. That fact is
+neighbour state, so it travels in the sprite id as an optional tail,
+`belt:<r>:<phase>:j<mask>` (bit 1 left of the flow, bit 2 right), computed in
+`entity-view.ts`. Every older id names the picture it did, and the atlas
+bakes all four variants.
 
 **Deliberately not drawn:** belt curves. The reference sheet has one, but an
 item on a side-loaded belt travels straight along the lane (§9), so a curve

@@ -62,6 +62,8 @@ import {
   INSERTER_SWING_STEPS,
   PLAYER_ACTIVITIES,
   beltSprite,
+  JOINED_LEFT,
+  JOINED_RIGHT,
   inserterSprite,
   itemSprite,
   machineFrameSprite,
@@ -198,8 +200,35 @@ function spriteFor(
   if (mouth !== null) {
     return undergroundSprite(mouth.rotation, isUndergroundEntrance(mouth, partnerOf(mouth, store)));
   }
+  if (definition.belt !== undefined) return beltSprite(entity.rotation, phase, beltJoins(entity, buildings, store));
   return buildingSprite(definition, entity.rotation, phase);
 }
+
+/**
+ * Which sides of a belt another carrier feeds in from, as `beltSprite`'s
+ * `joined` mask (2026-09-23): a belt, splitter or tunnel mouth on the tile to
+ * the left or right of the flow, facing into this one.
+ */
+function beltJoins(entity: Entity, buildings: BuildingRegistry, store: EntityStore): number {
+  let joined = 0;
+  for (const [turn, bit] of SIDES) {
+    const toward = (entity.rotation + turn) % 4;
+    const offset = DIRECTION_OFFSETS[toward];
+    if (offset === undefined) continue;
+    const neighbour = store.at(entity.x + offset.x, entity.y + offset.y);
+    if (neighbour === undefined || neighbour.id === entity.id) continue;
+    // Facing back at us: the opposite of the direction we looked in.
+    if (neighbour.rotation !== (toward + 2) % 4) continue;
+    if (carrierSpeed(buildings.forEntityType(neighbour.type)) !== null) joined |= bit;
+  }
+  return joined;
+}
+
+/** Left of the flow is three quarter turns round, right is one. */
+const SIDES: readonly (readonly [number, number])[] = Object.freeze([
+  [3, JOINED_LEFT],
+  [1, JOINED_RIGHT],
+]);
 
 /** The other mouth of a run, or undefined for a lone one. See C23. */
 function partnerOf(mouth: { readonly link: number }, store: EntityStore): Entity | undefined {
@@ -569,9 +598,17 @@ export function atlasLevels(buildings: BuildingRegistry, items: ItemRegistry): L
   for (const definition of buildings.all()) {
     for (const rotation of rotations) {
       if (definition.belt !== undefined || definition.splitter !== undefined) {
-        const sprite = definition.belt !== undefined ? beltSprite : splitterSprite;
-        plain.push(sprite(rotation, 0));
-        for (let phase = 0; phase < BELT_CHEVRON_PHASES; phase++) detailed.push(sprite(rotation, phase));
+        if (definition.belt !== undefined) {
+          // Every side-join variant (see `beltSprite`). The plain levels draw
+          // no lip, but the ids differ, so they need them all too.
+          for (let joined = 0; joined <= (JOINED_LEFT | JOINED_RIGHT); joined++) plain.push(beltSprite(rotation, 0, joined));
+          for (let phase = 0; phase < BELT_CHEVRON_PHASES; phase++) {
+            for (let joined = 0; joined <= (JOINED_LEFT | JOINED_RIGHT); joined++) detailed.push(beltSprite(rotation, phase, joined));
+          }
+        } else {
+          plain.push(splitterSprite(rotation, 0));
+          for (let phase = 0; phase < BELT_CHEVRON_PHASES; phase++) detailed.push(splitterSprite(rotation, phase));
+        }
       } else if (definition.inserter !== undefined) {
         for (let swing = 0; swing <= INSERTER_SWING_STEPS; swing++) {
           both(inserterSprite(rotation, swing, false));

@@ -112,10 +112,23 @@ export const TERRAIN_SPRITES: readonly SpriteId[] = Object.freeze(
 /** The sprite for a belt facing each `Rotation`, indexed by it. Phase 0. */
 export const BELT_SPRITES: readonly SpriteId[] = Object.freeze(['belt:0', 'belt:1', 'belt:2', 'belt:3']);
 
-/** The sprite for a belt facing `rotation`, `phase` steps into its cycle. */
-export function beltSprite(rotation: Rotation, phase = 0): SpriteId {
-  return `belt:${rotation}:${phase}`;
+/**
+ * The sprite for a belt facing `rotation`, `phase` steps into its cycle.
+ *
+ * `joined` says which sides another belt feeds in from (2026-09-23): bit 1 is
+ * the left of the flow, bit 2 the right. A joined side is drawn without its
+ * lit lip, so the incoming belt meets an open edge. Written as a `j<mask>`
+ * tail, and left off when nothing joins, so every older id names the same
+ * picture it did.
+ */
+export function beltSprite(rotation: Rotation, phase = 0, joined = 0): SpriteId {
+  return joined === 0 ? `belt:${rotation}:${phase}` : `belt:${rotation}:${phase}:j${joined}`;
 }
+
+/** `beltSprite`'s `joined` bit for a belt fed from its left. */
+export const JOINED_LEFT = 1;
+/** `beltSprite`'s `joined` bit for a belt fed from its right. */
+export const JOINED_RIGHT = 2;
 
 /**
  * The sprite for a splitter facing `rotation`, on the same chevron cycle (C17).
@@ -250,7 +263,13 @@ export type SpriteDescriptor =
       /** The activity frame, 1-3 while working. Absent (at rest) on a plain id. */
       readonly frame?: number;
     }
-  | { readonly kind: 'belt'; readonly rotation: Rotation; readonly phase: number }
+  | {
+      readonly kind: 'belt';
+      readonly rotation: Rotation;
+      readonly phase: number;
+      /** Which sides are fed from another belt. See `beltSprite`. Absent when none. */
+      readonly joined?: number;
+    }
   | { readonly kind: 'splitter'; readonly rotation: Rotation; readonly phase: number }
   | {
       readonly kind: 'underground';
@@ -437,6 +456,19 @@ function parseSpriteId(id: SpriteId): SpriteDescriptor {
       kind: namespace,
       rotation: Number(text) as Rotation,
       phase: Number(phaseText) % BELT_CHEVRON_PHASES,
+    });
+  }
+
+  if (namespace === 'belt' && parts.length === 4) {
+    const text = parts[1] ?? '';
+    const phaseText = parts[2] ?? '';
+    const joinedText = parts[3] ?? '';
+    if (!/^[0-3]$/.test(text) || !/^\d+$/.test(phaseText) || !/^j[1-3]$/.test(joinedText)) return MISSING;
+    return Object.freeze({
+      kind: 'belt' as const,
+      rotation: Number(text) as Rotation,
+      phase: Number(phaseText) % BELT_CHEVRON_PHASES,
+      joined: Number(joinedText.slice(1)),
     });
   }
 

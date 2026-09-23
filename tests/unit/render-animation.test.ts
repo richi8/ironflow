@@ -6,7 +6,7 @@ import { MachineStatus } from '../../src/game/entities/machine-status.js';
 import { newMiner, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { createChunk } from '../../src/game/world/chunk.js';
-import { EAST, NORTH } from '../../src/game/world/coordinates.js';
+import { EAST, NORTH, SOUTH } from '../../src/game/world/coordinates.js';
 import { TILE_TYPE_COUNT, TileType } from '../../src/game/world/tile.js';
 import { World } from '../../src/game/world/world.js';
 import { Camera } from '../../src/renderer/camera.js';
@@ -15,6 +15,9 @@ import { EntityLayer, depthKey } from '../../src/renderer/layers/entity-layer.js
 import { tileVariant } from '../../src/renderer/layers/terrain-layer.js';
 import { RenderLayer, type RenderEntity } from '../../src/renderer/render-state.js';
 import {
+  JOINED_LEFT,
+  JOINED_RIGHT,
+  beltSprite,
   describeSprite,
   machineFrameSprite,
   playerSprite,
@@ -92,6 +95,26 @@ describe('the sprite grammar’s C29 tails', () => {
     expect(shape('copper_wire')).toBe('coil');
     expect(shape('circuit')).toBe('chip');
     expect(shape('assembler')).toBe('crate');
+  });
+});
+
+describe('a belt fed from the side (2026-09-23)', () => {
+  it('names the sides another carrier faces into, and nothing else', () => {
+    const sim = simulation();
+    // An east line at y 2; one belt comes up into it from the south (its
+    // right), one comes down from the north (its left), one points away.
+    const line = sim.entities.create(newBelt(3, 2, EAST));
+    const fromLeft = sim.entities.create(newBelt(5, 2, EAST));
+    const plain = sim.entities.create(newBelt(7, 2, EAST));
+    sim.entities.create(newBelt(3, 3, NORTH));
+    sim.entities.create(newBelt(5, 1, SOUTH));
+    sim.entities.create(newBelt(7, 3, SOUTH));
+
+    const drawn = describeEntities(sim.entities, sim.buildings, 0, { animate: false });
+    const sprite = (id: number): SpriteId => drawn.find((entity) => entity.id === id)?.sprite ?? '';
+    expect(sprite(line.id)).toBe(beltSprite(EAST, 0, JOINED_RIGHT));
+    expect(sprite(fromLeft.id)).toBe(beltSprite(EAST, 0, JOINED_LEFT));
+    expect(sprite(plain.id)).toBe(beltSprite(EAST, 0));
   });
 });
 
