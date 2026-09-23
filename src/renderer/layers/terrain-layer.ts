@@ -283,6 +283,8 @@ export interface TerrainStats {
   readonly built: number;
   /** World chunks drawn without a bitmap during the last frame. */
   readonly direct: number;
+  /** World chunks drawn at all during the last frame, either way (C28's overlay). */
+  readonly visible: number;
 }
 
 export interface TerrainLayerOptions {
@@ -297,6 +299,7 @@ export class TerrainLayer {
 
   private built = 0;
   private direct = 0;
+  private visible = 0;
 
   constructor(options: TerrainLayerOptions) {
     this.atlas = options.atlas;
@@ -309,7 +312,13 @@ export class TerrainLayer {
   }
 
   getStats(): TerrainStats {
-    return { cached: this.cache.size, pixels: this.cache.pixels, built: this.built, direct: this.direct };
+    return {
+      cached: this.cache.size,
+      pixels: this.cache.pixels,
+      built: this.built,
+      direct: this.direct,
+      visible: this.visible,
+    };
   }
 
   /**
@@ -344,6 +353,7 @@ export class TerrainLayer {
   ): void {
     this.built = 0;
     this.direct = 0;
+    this.visible = 0;
 
     const zoom = camera.zoom;
     const bucket = zoomBucketIndex(zoom);
@@ -351,6 +361,7 @@ export class TerrainLayer {
     const surfaceSize = surfacePixels(scale);
 
     world.forEachChunkInBounds(bounds, (chunk) => {
+      this.visible += 1;
       if (surfaceSize > MAX_SURFACE_PIXELS) {
         this.drawDirect(ctx, chunk, camera, bounds, zoom);
         return;

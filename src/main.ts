@@ -1,6 +1,9 @@
 import './styles/main.css';
 
+import { takeCensus } from './debug/census.js';
 import { DebugOverlay } from './debug/debug-overlay.js';
+import { writePerformanceRows, type FrameTimes, type Milestones } from './debug/perf-readout.js';
+import { Profiler, RollingWindow } from './debug/profiler.js';
 import type { CommandSink } from './game/commands/command-processor.js';
 import { GameController } from './game/game-controller.js';
 import { Game } from './game/game.js';
@@ -263,7 +266,23 @@ async function bootstrap(): Promise<void> {
   const uiRoot = requireElement<HTMLElement>('#ui');
 
   const surface = new CanvasSurface(canvas);
-  const overlay = new DebugOverlay(uiRoot);
+  // Open while developing and closed in a release build, where F3 still opens
+  // it. This is C28's "compile-time-ish flag": Vite replaces `DEV` with a
+  // literal, and the profiler is attached only while the overlay is open, so
+  // a release build ticks with no timer at all unless somebody asks.
+  const overlay = new DebugOverlay(uiRoot, import.meta.env.DEV);
+
+  /**
+   * Performance numbers measured once, or once per event (C28). Written where
+   * each thing happens and read only by the overlay; `null` is "not yet".
+   */
+  const milestones: { -readonly [K in keyof Milestones]: Milestones[K] } = {
+    coldStart: null,
+    worldgen: null,
+    serialize: null,
+    saveBytes: null,
+    load: null,
+  };
 
   /**
    * Is the UI built yet?
@@ -303,7 +322,13 @@ async function bootstrap(): Promise<void> {
     const newest = bootSlots[0];
     if (newest !== undefined) {
       const file = await service.read(newest.id);
+      // Timed around `deserialize` alone, here and in `applyLoadedState`, so
+      // the overlay's `load` row is §12's "load + rebuildDerived" whichever
+      // way the world arrived, rather than including an IndexedDB read one
+      // time and not the other.
+      const loadStarted = performance.now();
       resumed = { id: newest.id, simulation: deserialize(file.state) };
+      milestones.load = performance.now() - loadStarted;
     }
   } catch (cause) {
     // §14: a corrupt or unreadable save is refused and **kept**, never
@@ -318,7 +343,32 @@ async function bootstrap(): Promise<void> {
   /**
    * The world. A `let`, because loading a save replaces it — see the header.
    */
-  let simulation: Simulation = resumed?.simulation ?? newSimulation();
+  let simulation: Simulation = resumed?.simulation ?? timedNewSimulation();
+
+  /** A new world, with the time its generation took on the overlay's `worldgen` row. */
+  function timedNewSimulation(): Simulation {
+    const started = performance.now();
+    const created = newSimulation();
+    milestones.worldgen = performance.now() - started;
+    return created;
+  }
+
+  /**
+   * Per-phase tick timings (C28). Attached to the simulation only while the
+   * overlay is open — see `syncProfiler` — and re-attached to a loaded world,
+   * which is a different `Simulation` from the one it was timing.
+   */
+  const profiler = new Profiler(() => performance.now());
+
+  /** Frame times over the last five seconds at 60 fps. See `perf-readout.ts`. */
+  const frames: FrameTimes = { render: new RollingWindow(300), interval: new RollingWindow(300) };
+
+  /** Time the simulation's phases while the overlay is open, and not otherwise. */
+  function syncProfiler(): void {
+    profiler.reset();
+    simulation.setPhaseTimer(overlay.isVisible() ? profiler : null);
+  }
+  syncProfiler();
   /** Where this world came from. The debug overlay's `world` row says so. */
   let origin = resumed === null ? 'new' : 'loaded';
   const scheduler = new BrowserFrameScheduler();
@@ -411,6 +461,7 @@ async function bootstrap(): Promise<void> {
   function handleAction(action: InputAction): void {
     if (action === 'debug.toggleOverlay') {
       overlay.toggle();
+      syncProfiler();
       return;
     }
     if (action === 'ui.toggleBuildMenu') {
@@ -520,9 +571,15 @@ async function bootstrap(): Promise<void> {
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
+    const renderStarted = performance.now();
     const now = scheduler.now();
     const elapsedMs = (now - lastFrameUs) / 1000;
     lastFrameUs = now;
+    frames.interval.push(elapsedMs);
+    // The first frame drawn is the moment the page became something a player
+    // can use; `performance.now()` counts from navigation, so this is §12's
+    // "cold start to interactive" without a second clock.
+    milestones.coldStart ??= renderStarted;
     if (!game.isPaused()) renderSeconds += elapsedMs / 1000;
 
     renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds);
@@ -567,41 +624,67 @@ async function bootstrap(): Promise<void> {
     // finished stepping by the time `render` is called.
     autosave.update(elapsedMs);
 
-    const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
-    const stats = renderer.getStats();
-    const hover = input.hover;
-    const held = controller.getSelectedBuilding();
+    // Everything the frame did besides ticking, which is what §12's render
+    // budget is about. Taken before the overlay's own repaint, so the readout
+    // does not count itself.
+    frames.render.push(performance.now() - renderStarted);
 
-    overlay.update(
-      game.getStats(),
-      simulation.getTick(),
-      {
-        size: `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`,
-        // C19: the seed is the first thing to check when a map looks wrong,
-        // and it is not necessarily the one `WORLD_SEED` asked for.
-        world: `seed ${simulation.seed} (${origin}), ${simulation.world.chunkCount} chunk(s), ${simulation.entities.size} entities`,
-        build:
-          held === null
-            ? '— (1-9 or B to select, R rotates)'
-            : `${held} r${input.buildRotation} x${simulation.inventory.count(held)}`,
-        terrain: `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, ${stats.entities} ent, z${camera.zoom.toFixed(2)}`,
-        hover:
-          hover === null
-            ? '—'
-            : `${hover.x},${hover.y}${input.hoverEntity === null ? '' : ` #${input.hoverEntity}`}`,
-        // C09's readout: the number behind the tint and the pile. It stays
-        // after C12 because it is about the *world*, not about a machine —
-        // the inspector answers for buildings and has nothing to say about a
-        // bare ore tile.
-        ore: hover === null ? '—' : describeOre(simulation.world, hover.x, hover.y),
-        // C10's readout: where the player is between tiles, which way they
-        // face and how far into the current lump they are. An inventory panel
-        // is where the bag becomes player-facing; the subtile arithmetic is
-        // checked by eye here and nowhere else.
-        player: describePlayerState(controller.getPlayerView()),
-      },
-      elapsedMs,
-    );
+    overlay.update(elapsedMs, (rows) => {
+      const { cssWidth, cssHeight, deviceWidth, deviceHeight, dpr } = surface.getSize();
+      const stats = renderer.getStats();
+      const hover = input.hover;
+      const held = controller.getSelectedBuilding();
+      const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
+      const current = saves.getState();
+
+      writePerformanceRows(rows, {
+        loop: game.getStats(),
+        frames,
+        profile: overlay.isVisible() ? profiler.snapshot() : null,
+        census: takeCensus(simulation),
+        drawn: stats.entities,
+        visibleChunks: stats.terrain.visible,
+        loadedChunks: simulation.world.chunkCount,
+        heapMB: memory === undefined ? null : memory.usedJSHeapSize / (1024 * 1024),
+        once: {
+          ...milestones,
+          // The save being played, as stored — which is the size that matters,
+          // and the one the save menu shows beside it.
+          saveBytes: current.slots.find((slot) => slot.id === current.currentId)?.bytes ?? null,
+        },
+      });
+
+      rows.section('session');
+      rows.row('tick', String(simulation.getTick()));
+      rows.row('size', `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`);
+      // C19: the seed is the first thing to check when a map looks wrong,
+      // and it is not necessarily the one `WORLD_SEED` asked for.
+      rows.row('world', `seed ${simulation.seed} (${origin})`);
+      rows.row(
+        'build',
+        held === null
+          ? '— (1-9 or B to select, R rotates)'
+          : `${held} r${input.buildRotation} x${simulation.inventory.count(held)}`,
+      );
+      rows.row(
+        'terrain',
+        `${stats.terrain.cached} cached / ${stats.terrain.direct} direct, z${camera.zoom.toFixed(2)}`,
+      );
+      rows.row(
+        'hover',
+        hover === null ? '—' : `${hover.x},${hover.y}${input.hoverEntity === null ? '' : ` #${input.hoverEntity}`}`,
+      );
+      // C09's readout: the number behind the tint and the pile. It stays
+      // after C12 because it is about the *world*, not about a machine —
+      // the inspector answers for buildings and has nothing to say about a
+      // bare ore tile.
+      rows.row('ore', hover === null ? '—' : describeOre(simulation.world, hover.x, hover.y));
+      // C10's readout: where the player is between tiles, which way they
+      // face and how far into the current lump they are. An inventory panel
+      // is where the bag becomes player-facing; the subtile arithmetic is
+      // checked by eye here and nowhere else.
+      rows.row('player', describePlayerState(controller.getPlayerView()));
+    });
   };
 
   const game = new Game({ simulation, scheduler, render });
@@ -636,7 +719,10 @@ async function bootstrap(): Promise<void> {
     const wasPaused = game.isPaused();
     game.setPaused(true);
     try {
-      return { state: serialize(simulation), playtimeTicks: simulation.getTick() };
+      const started = performance.now();
+      const state = serialize(simulation);
+      milestones.serialize = performance.now() - started;
+      return { state, playtimeTicks: simulation.getTick() };
     } finally {
       game.setPaused(wasPaused);
     }
@@ -661,8 +747,12 @@ async function bootstrap(): Promise<void> {
    * factory they were in.
    */
   function applyLoadedState(state: SerializedGameState): void {
+    const started = performance.now();
     const loaded = deserialize(state);
+    milestones.load = performance.now() - started;
+    milestones.worldgen = null;
     simulation = loaded;
+    syncProfiler();
     game.replaceSimulation(loaded);
     controller.reload();
     // The terrain cache is keyed by world chunk and revision, and a loaded

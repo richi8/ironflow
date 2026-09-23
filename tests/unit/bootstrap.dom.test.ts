@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DebugOverlay } from '../../src/debug/debug-overlay.js';
+import { DebugOverlay, type DebugRows } from '../../src/debug/debug-overlay.js';
 import { Game } from '../../src/game/game.js';
 import { Simulation } from '../../src/game/simulation.js';
 import { TPS } from '../../src/game/simulation-clock.js';
@@ -122,16 +122,17 @@ describe('CanvasSurface', () => {
 });
 
 describe('DebugOverlay', () => {
-  const stats = {
-    fps: 60,
-    frameMs: 1.5,
-    simMs: 0.2,
-    renderMs: 0.4,
-    steps: 2,
-    alpha: 0.25,
-    shedCount: 0,
-    frameCount: 10,
-  };
+  /** A collector writing two sections, as the composition root does. */
+  function rows(tick: number, extra: Readonly<Record<string, string>> = {}) {
+    return (out: DebugRows): void => {
+      out.section('tick');
+      out.row('mean', '1.50 ms', 'ok');
+      out.row('p99', '40.0 ms', 'hard_fail');
+      out.section('session');
+      out.row('tick', String(tick));
+      for (const [label, value] of Object.entries(extra)) out.row(label, value);
+    };
+  }
 
   it('builds its DOM once and updates by assignment', () => {
     const root = document.createElement('div');
@@ -140,48 +141,72 @@ describe('DebugOverlay', () => {
 
     const node = root.querySelector('.debug-overlay');
     expect(node).not.toBeNull();
-    const rowCount = node?.childElementCount ?? 0;
-    const firstValue = node?.querySelector('.debug-overlay__value');
 
-    const rows = { size: '800x600 @2x', world: '1 chunk(s)', terrain: '4 cached' };
-    overlay.update(stats, 123, rows, 200);
-    overlay.update({ ...stats, fps: 30 }, 456, rows, 200);
-
-    // §13: no panel rebuilds its subtree on update. The extra rows are added
-    // the first time they are seen, so the count is compared after that.
+    const extra = { size: '800x600 @2x', terrain: '4 cached' };
+    overlay.update(200, rows(123, extra));
     const grownCount = node?.childElementCount ?? 0;
-    expect(grownCount).toBe(rowCount + Object.keys(rows).length);
+    const firstValue = node?.querySelector('.debug-overlay__value');
+    overlay.update(200, rows(456, extra));
+
+    // §13: no panel rebuilds its subtree on update. Rows and section headings
+    // are added the first time they are seen, and never again.
+    expect(node?.childElementCount).toBe(grownCount);
+    expect(node?.querySelectorAll('.debug-overlay__section')).toHaveLength(2);
     expect(node?.querySelector('.debug-overlay__value')).toBe(firstValue);
     expect(node?.textContent).toContain('456');
-    expect(node?.textContent).toContain('1 chunk(s)');
     // C03's readout: terrain-cache residency, which is the only way to see
     // from inside the page whether the world-chunk bitmaps are being reused.
     expect(node?.textContent).toContain('4 cached');
   });
 
-  it('throttles updates rather than writing every frame', () => {
+  it('colours a row by its budget verdict (C28)', () => {
     const root = document.createElement('div');
-    document.body.append(root);
     const overlay = new DebugOverlay(root);
+    overlay.update(200, rows(1));
 
-    overlay.update(stats, 1, { size: 'x' }, 200); // crosses the interval
-    const after = root.textContent ?? '';
+    const values = [...root.querySelectorAll('.debug-overlay__value')];
+    expect(values[0]?.classList.contains('debug-overlay__value--ok')).toBe(true);
+    expect(values[1]?.classList.contains('debug-overlay__value--danger')).toBe(true);
 
-    overlay.update(stats, 999, { size: 'x' }, 5); // well inside the interval: ignored
-    expect(root.textContent).toBe(after);
-    expect(root.textContent).not.toContain('999');
+    // A verdict that changes swaps the class rather than adding a second one.
+    overlay.update(200, (out) => {
+      out.section('tick');
+      out.row('mean', '9.0 ms', 'over_target');
+      out.row('p99', '12.0 ms', null);
+    });
+    expect(values[0]?.className).toBe('debug-overlay__value debug-overlay__value--warn');
+    expect(values[1]?.className).toBe('debug-overlay__value');
   });
 
-  it('writes nothing while hidden', () => {
+  it('throttles updates, and collects nothing on a frame it will not draw', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const overlay = new DebugOverlay(root);
 
-    overlay.toggle();
+    overlay.update(200, rows(1)); // crosses the interval
+    const after = root.textContent ?? '';
+
+    let collected = false;
+    overlay.update(5, () => {
+      collected = true;
+    }); // well inside the interval: ignored
+    expect(collected).toBe(false);
+    expect(root.textContent).toBe(after);
+  });
+
+  it('writes nothing while hidden, and can start hidden', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const overlay = new DebugOverlay(root, false);
     expect(overlay.isVisible()).toBe(false);
 
-    overlay.update(stats, 777, { size: 'x' }, 500);
+    overlay.update(500, rows(777));
     expect(root.textContent).not.toContain('777');
+
+    // Opening it paints on the next frame rather than a tenth of a second later.
+    overlay.toggle();
+    overlay.update(1, rows(778));
+    expect(root.textContent).toContain('778');
   });
 });
 

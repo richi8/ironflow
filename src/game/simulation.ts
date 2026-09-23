@@ -9,6 +9,7 @@ import { BUILD_RANGE_TILES, PlayerState } from './player/player-state.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { ITEMS } from './data/items.js';
 import { ItemRegistry } from './registries/item-registry.js';
+import { Phase, type PhaseTimer } from './phase-timer.js';
 import { ProductionCounters } from './production.js';
 import { Rng, toUint32 } from './rng.js';
 import { RECIPES } from './data/recipes.js';
@@ -299,6 +300,15 @@ export class Simulation {
    */
   private ticking = false;
 
+  /**
+   * Who is timing the phases, if anyone (C28). See `phase-timer.ts`.
+   *
+   * Not state in any sense §10 means: it changes nothing a tick computes, it
+   * is never serialized, and a loaded world starts without one. `null` is the
+   * normal case and the one the release build runs in.
+   */
+  private phaseTimer: PhaseTimer | null = null;
+
   constructor(options: SimulationOptions) {
     this.world = options.world;
     this.seed = toUint32(options.seed ?? 0);
@@ -539,6 +549,18 @@ export class Simulation {
   }
 
   /**
+   * Time every phase from the next tick on, or stop (C28).
+   *
+   * Attached from outside `game/` because the clock is outside `game/` (§6
+   * R1). A tick already in progress is not affected: the timer is read once,
+   * at the top of the tick, so a tick is either timed from its first phase to
+   * its last or not at all.
+   */
+  setPhaseTimer(timer: PhaseTimer | null): void {
+    this.phaseTimer = timer;
+  }
+
+  /**
    * Advance the world by exactly one fixed timestep.
    *
    * Phase order (ironflow.md §8). Every tick runs these in this order:
@@ -575,6 +597,13 @@ export class Simulation {
 
   /** The phases themselves. Split out only so `tick` can own the flag above. */
   private runPhases(): void {
+    // Read once, so the eleven calls below cannot change their mind mid-tick.
+    // Each is guarded by `!== null` rather than written `timer?.`: the two are
+    // the same branch, and this spelling says out loud that nothing at all
+    // happens without one (C28: "zero-cost when disabled").
+    const timer = this.phaseTimer;
+    if (timer !== null) timer.beginTick();
+
     this.tickCount += 1;
 
     // Phase 1 — commands. Drained fully, in queue order, capped per tick (§7).
@@ -584,6 +613,7 @@ export class Simulation {
       const reason = this.applyCommand(command);
       if (reason !== null) this.commands.reject(command, reason);
     }
+    if (timer !== null) timer.endPhase(Phase.Commands);
 
     // Phase 2 — power. Networks are resolved and every machine's share of the
     // supply is settled *before* anything can spend it, which is the whole
@@ -591,28 +621,33 @@ export class Simulation {
     // generator placed this frame supplies on the tick it was built, which is
     // C21's third acceptance criterion.
     this.power.tick(this.tickCount);
+    if (timer !== null) timer.endPhase(Phase.Power);
 
     // Phase 3 — mining. Miners extract into their own buffers (C11). It runs
     // before production so ore mined this tick is smeltable this tick, and
     // after the command phase so a miner placed this frame starts on the tick
     // it was built rather than the one after.
     this.miningSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Mining);
 
     // Phase 4 — production. Machines burn a tick of fuel and advance a tick of
     // progress (C15). After mining, so an ore that landed in a buffer this
     // tick can be smelted in it; before the belts, so a plate finished this
     // tick is on the belt in front of the furnace in the same tick.
     this.productionSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Production);
 
     // Phase 5 — belts. Items move, hand off between belts, and are dropped on
     // by the machines beside them (C13). Downstream-first, so belt speed is a
     // property of the layout rather than of the order the belts were built in.
     this.beltSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Belts);
 
     // Phase 6 — inserters. Items cross from one building to the next (C14).
     // After the belts, so an inserter reads a settled belt position and its
     // throughput is a property of the layout rather than of array order.
     this.inserterSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Inserters);
 
     // Phase 7 — research. Labs spend science, a finished unit counts toward
     // the head of the queue, and a finished technology applies its unlocks
@@ -620,6 +655,7 @@ export class Simulation {
     // what makes "completing a technology immediately makes its unlocks
     // buildable" a property of the phase order rather than of a callback.
     this.researchSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Research);
 
     // Phase 8 — player. Movement, manual mining (C10) and hand-crafting
     // (C21A). It runs after every machine so that the world a step of walking
@@ -631,6 +667,7 @@ export class Simulation {
     // order they happened rather than in the order the systems were written.
     this.craftingSystem.tick();
     this.playerSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Player);
 
     // Phase 9 — exploration. The world chunks around the player, and one
     // world chunk of each radar's coverage (C23). It is *appended* to §8's
@@ -638,6 +675,7 @@ export class Simulation {
     // phase 8 because the player's reveal is about where they now stand, and
     // it has to precede cleanup because everything does.
     this.explorationSystem.tick();
+    if (timer !== null) timer.endPhase(Phase.Exploration);
 
     // Phase 10 — cleanup. Deferred removals are applied here and nowhere else,
     // which is what makes "a system never sees a half-removed entity" a
@@ -647,6 +685,7 @@ export class Simulation {
     // never be read again — only paid for. This is the one place that knows
     // an entity has actually gone.
     if (removed.length > 0) this.production.forget(removed);
+    if (timer !== null) timer.endPhase(Phase.Cleanup);
   }
 
   /**

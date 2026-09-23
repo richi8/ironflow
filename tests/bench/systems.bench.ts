@@ -13,6 +13,7 @@ import { Simulation } from '../../src/game/simulation.js';
 import { EAST } from '../../src/game/world/coordinates.js';
 
 import { layReferenceFactory, oreEverywhere, referenceWorld } from '../determinism/reference-factory.js';
+import { loadReferenceFactory } from './reference-fixture.js';
 import { World } from '../../src/game/world/world.js';
 
 /**
@@ -40,8 +41,10 @@ import { World } from '../../src/game/world/world.js';
  * "simulation tick, mean" budget.
  *
  * Every case holds **1,000 entities** so the numbers are comparable to each
- * other; §12's real reference factory is twenty times that and is C28's, built
- * as a save fixture.
+ * other — except the last, which is §12's real reference factory, twenty
+ * times that, loaded from the save fixture C28 built
+ * (`tests/fixtures/reference-factory.ifsave`). Its per-*phase* cost, which
+ * this file cannot see, is `npm run perf`'s: `tests/perf/regression.perf.test.ts`.
  *
  * ## Why nothing here asserts
  *
@@ -161,6 +164,16 @@ function furnaces(): Simulation {
   return warm(simulation);
 }
 
+/**
+ * §12's reference factory, as the save fixture has it (C28). Already at steady
+ * state — the fixture was saved after a warm-up — so it is not warmed again:
+ * its furnaces carry a few minutes of coal, and a benchmark should spend it
+ * measuring rather than waiting.
+ */
+async function referenceFixture(): Promise<Simulation> {
+  return loadReferenceFactory();
+}
+
 /** An empty world, so the cost of a tick with nothing in it is on the record. */
 function idle(): Simulation {
   return warm(empty());
@@ -182,7 +195,7 @@ function baselinePath(slug: string): string {
  */
 const WRITING_BASELINE = process.env['IRONFLOW_BENCH_BASELINE'] === '1';
 
-const CASES: readonly { slug: string; label: string; build: () => Simulation }[] = [
+const CASES: readonly { slug: string; label: string; build: () => Simulation | Promise<Simulation> }[] = [
   { slug: 'idle', label: 'idle (no entities)', build: idle },
   { slug: 'belts', label: 'belts', build: belts },
   { slug: 'miners', label: 'miners', build: miners },
@@ -190,6 +203,7 @@ const CASES: readonly { slug: string; label: string; build: () => Simulation }[]
   { slug: 'splitters', label: 'splitters', build: splitters },
   { slug: 'furnaces', label: 'furnaces', build: furnaces },
   { slug: 'reference-factory', label: 'reference factory (mixed)', build: referenceFactory },
+  { slug: 'reference-fixture', label: 'reference factory, §12 fixture (20,000)', build: referenceFixture },
 ];
 
 describe('simulation tick, by system', () => {
@@ -199,7 +213,7 @@ describe('simulation tick, by system', () => {
     for (const { slug, label, build } of CASES) {
       // Built once, outside the measured body: a benchmark that rebuilt a
       // thousand entities per iteration would be timing `EntityStore.create`.
-      const simulation = build();
+      const simulation = await build();
       registrations.push(
         bench(
           label,

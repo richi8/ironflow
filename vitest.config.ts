@@ -56,6 +56,21 @@ export default defineConfig({
           benchmark: { include: [] },
         },
       },
+      {
+        test: {
+          name: 'perf',
+          environment: 'node',
+          include: ['tests/perf/**/*.perf.test.ts'],
+          fileParallelism: false,
+          // So the harness can collect before it measures: the fixture's
+          // decode leaves megabytes of strings behind, and a major collection
+          // landing inside one run and not another was most of the variation
+          // between runs before this was here.
+          execArgv: ['--expose-gc'],
+          testTimeout: 300_000,
+          benchmark: { include: [] },
+        },
+      },
     ],
   },
 });

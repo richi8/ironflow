@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C27B complete — the world is drawn on a square grid under a raised camera.** The renderer was isometric from C01 to C27. C27A made the grid square — `projection.ts` is a scale, a footprint is a rectangle, `W` walks north — and C27B put the camera back on its tilt, so a machine shows its top face, its near face and a shadow, the inserter's arm lifts, and §5 hazards 1 and 2 are live again with the picker's sweep on one axis. Two projection changes, and `game/**` did not change by a line either time: that is what the §5 boundary test was bought for. Next: C28 — performance instrumentation. |
+| **Status** | **C28 complete — performance is measured.** The simulation reports the end of every phase to an optional `PhaseTimer` and reads no clock itself; `debug/profiler.ts` turns the reports into rolling mean/p99 per phase, and the F3 overlay shows §12's table live, coloured against its budgets. §12's reference factory is a committed save (`tests/fixtures/reference-factory.ifsave`, 20,000 entities, ~7,900 belt items), and `npm run perf` fails on a hard-fail budget or on one phase regressing against its baseline. **First measurement: a 2.5 ms tick against an 8 ms target** (1.5 ms outside the test runner), belts and inserters three quarters of it; every headless §12 metric is inside its target. Next: C29 — renderer optimisation & art pass, with nothing yet flagged on the simulation side. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C28 — Performance instrumentation** |
+| **First action** | Chunk **C29 — Renderer optimisation & art pass** |
 
 ---
 
@@ -6536,6 +6536,124 @@ already the contract between content and the atlas.
 threshold assertions.
 
 **Out of scope.** Actually optimising anything. That is C29.
+
+### What implementing it decided
+
+**The simulation says when; something else says what time it is.** §6 R1
+keeps every clock out of `game/`, so `game/phase-timer.ts` is an interface —
+`beginTick()` then `endPhase(phase)` ten times — and `Simulation` holds a
+`PhaseTimer | null`. With `null` a tick reads no clock and calls nothing; what
+is left is one `!== null` per phase, and an A/B run with and without the hooks
+could not tell them apart (0.39 µs idle, ~362 µs on 5,200 entities, either way).
+"0 when disabled" is asserted rather than measured: a unit test hands the
+simulation a counting clock, removes it, and checks the clock is never read
+again. The profiler itself costs **0.35 µs a tick** enabled, against a 100 µs
+ceiling.
+
+**The compile-time-ish flag is where the timer is attached.** `main.ts` opens
+the overlay with `import.meta.env.DEV` — open while developing, closed in a
+release build — and attaches the profiler only while the overlay is open, so a
+release build ticks with no timer unless someone presses F3. A literal `define`
+guard inside `simulation.ts` was the alternative, and it would have put a Vite
+concept in `game/` (§3) to save one comparison a phase.
+
+**The overlay is §12's table.** Four sections — frame, tick (mean, p99 and
+every phase over the last ten seconds), world (§12's census, entities drawn,
+visible and loaded world chunks, heap) and once (cold start, worldgen, last
+serialize, current save's size, last load) — with every row that has a §12
+budget coloured by `debug/budgets.ts`, the same table `npm run perf` fails on.
+A GC pause is seen as the longest frame in the window, ignoring frames over a
+second (a returning background tab). The overlay collects its rows only on the
+frames it repaints, so the census walk costs nothing on the other nine in ten.
+**Deviation:** "entities on screen at max zoom-out" is reported as *entities
+drawn*, uncoloured, because it depends on where the camera is; C29 reads it
+zoomed out over the fixture.
+
+**The fixture is an export, not a test helper.**
+`tools/make-reference-factory.ts` (`npm run bench:fixture`) lays 500 copies of a
+40-entity module — 24 belts, 6 inserters, 2 miners, 2 furnaces, an assembler,
+two poles and two or three chests or a generator — which is §12's composition
+divided by 500 exactly. It lays them on a real generated world, with every
+footprint on buildable ground and every miner on iron alone. The file is written
+by `encodeSaveFile`, so the benchmarks load it through the door a player's file
+comes through, and a person can drop it on the game window to read the browser
+budgets with F3. Three details made it a *steady* factory rather than a
+snapshot of one filling up:
+
+- One ore line in six ends in nothing and is **laid full**. Flowing lines carry
+  about six items; §12's ~8,000 needs backed-up ones too, and one in six lands
+  on 7,900.
+- Furnaces start with **full input buffers**. An empty furnace takes every item
+  that passes it until it holds fifty, which is ten minutes of a factory
+  filling up and not a factory at work.
+- Modules start **out of step** — miner and furnace progress offset by the
+  module's index — or 500 furnaces finish on the same tick every 3.2 s and the
+  p99 measures the pulse.
+
+It is saved after a one-minute warm-up, and its item count then holds within a
+few items for minutes. The furnaces carry about 10,000 ticks of coal from the
+save, which bounds how long a benchmark may run one load.
+
+**Two kinds of benchmark, and only one of them asserts.** `npm run bench` is
+C18's `vitest bench` suite and gains a fixture case; it still never fails.
+`npm run perf` is a new vitest project (`tests/perf/`, one file at a time, with
+`--expose-gc`, excluded from `npm test`), and it **fails** on:
+
+- a §12 hard fail among the metrics Node can measure: load, heap, tick mean and
+  p99, serialize, gzipped size, 40×40 worldgen;
+- a phase that regressed against `tests/bench/baseline/reference-fixture-phases.json`
+  (`npm run perf:baseline` rewrites it);
+- the harness itself not being reproducible, or not catching a slowdown.
+
+A phase counts as regressed when it got ≥ 1.5× slower **relative to the rest
+of the same tick**, so a baseline taken on one laptop still judges fairly on a
+slower one. Phases under 3% of the tick are not judged. The "deliberate 2×
+slowdown" is real rather than simulated: a wrapper busy-waits at the end of
+one phase for as long as the phase took, and the test doubles mining,
+production, belts and inserters in turn. Each is caught and nothing else is
+blamed. Reproducibility needed two things: a GC before each window, and each
+result taken as the **median of three 600-tick windows**. A single window let
+one run in five land 20% slow on a busy laptop. With both, the CV across five
+fresh loads is under 1%, against the 5% allowed.
+
+**Deviation: no CI, so "fails CI" means `npm run perf` exits non-zero.** It is
+not part of `npm run check`, which stays machine-independent. Run both before a
+chunk that touches the tick. `tests/integration/reference-fixture.test.ts` *is*
+in `npm test`: it checks the file is still §12's composition and still loads
+and runs. It will be the first thing to go red when the save schema or world
+generator changes; `npm run bench:fixture` then `npm run perf:baseline` is the
+fix.
+
+**What the first measurement says**, for C29 to start from:
+
+```text
+reference factory, 20,000 entities   (vitest runner, M-series laptop)
+  tick mean 2.5 ms, p99 ~3 ms        target 8 / 16, hard 20 / 33
+    belts 1.1   inserters 1.0   mining 0.24   production 0.23   power 0.12
+  load 150 ms   serialize 98 ms   save 0.19 MB gz   worldgen 40x40 200 ms
+  heap ~38 MB (process)
+browser (headless Chromium, 1600x1000, fixture imported, zoom 1):
+  tick 3.45 ms   render 4.1 ms   60 fps   longest frame 22 ms   heap 60 MB
+```
+
+Belts are not near §16's ~4 ms trigger for belt networks, so C29's sanctioned
+path 4 is **not** justified by this. The browser-side numbers were taken at
+zoom 1 near spawn, where one entity is on screen. The zoomed-out render over the
+fixture is the measurement C29 has to take first.
+
+**Noticed, not fixed (§19 rule 5).**
+
+- The same tick costs 1.5 ms under plain Node, 2.5 ms under the vitest runner
+  and ~6 ms in `systems.bench.ts` after that file's seven other factories have
+  run in the same process. The first gap is the test runner's module
+  transform; the second is either that or call sites made polymorphic by the
+  other factories' entity shapes (§16). Ruling out the second is C29's.
+- C18's committed `idle` bench baseline is about 5× under what the case measures
+  today. The A/B above shows the phase hooks are not the cause, so it predates
+  this chunk. The other C18 baselines were not rewritten: re-baselining would
+  hide exactly that.
+- `vitest.config.ts`'s header still mentions `npm run bench:compare` and a
+  single `baseline.json`. Neither has existed since C18.
 
 ---
 

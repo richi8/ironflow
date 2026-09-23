@@ -66,6 +66,11 @@ body {
   font-size: 12px;
   line-height: 1.55;
   user-select: none;
+  /* C28 made it long: §12's metrics, ten phases and the census. It scrolls
+     rather than running off the bottom of a laptop screen. */
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .debug-overlay__title {
@@ -74,6 +79,14 @@ body {
   border-bottom: 1px solid var(--if-stroke);
   color: var(--if-accent);
   letter-spacing: 0.08em;
+}
+
+.debug-overlay__section {
+  margin-top: 6px;
+  color: var(--if-blue-high);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
 }
 
 .debug-overlay__row {
@@ -88,6 +101,22 @@ body {
 
 .debug-overlay__value {
   color: var(--if-text);
+  white-space: pre;
+}
+
+/* A §12 row against its budget (C28): within target, over target, past the
+   hard-fail line. The status tokens, so the overlay says it the way the HUD
+   says a brown-out. */
+.debug-overlay__value--ok {
+  color: var(--if-ok);
+}
+
+.debug-overlay__value--warn {
+  color: var(--if-warn);
+}
+
+.debug-overlay__value--danger {
+  color: var(--if-danger);
 }
 
 
