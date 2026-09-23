@@ -31,6 +31,7 @@
 import { BELT_TILE_UNITS, asBelt, type BeltItem } from '../entities/belt-entity.js';
 import type { EntityStore } from '../entities/entity-store.js';
 import { NO_ENTITY, type Entity } from '../entities/entity.js';
+import { asInserter, type InserterEntity } from '../entities/inserter-entity.js';
 import { SPLITTER_LANES, asSplitter, splitterTile, type SplitterSide } from '../entities/splitter-entity.js';
 import {
   asUnderground,
@@ -52,7 +53,7 @@ import {
   stepFor,
   subtileToTile,
 } from '../player/player-state.js';
-import type { ItemRegistry } from '../registries/item-registry.js';
+import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
 import { resourceItemId } from '../world/resource.js';
 import { isPassable } from '../world/tile.js';
 import { DIRECTION_OFFSETS, TILE_MAX, TILE_MIN, type Rotation } from '../world/coordinates.js';
@@ -279,8 +280,9 @@ export class PlayerSystem {
 
   /**
    * One tick of F held: take the nearest item within `PICKUP_RANGE_TILES` of
-   * the player's centre, along each axis, off a belt, a splitter or the visible end of an
-   * underground run, into the bag. One item a tick, and only one the bag has
+   * the player's centre, along each axis, off a belt, a splitter, the visible
+   * end of an underground run or an inserter's hand, into the bag. An item in
+   * a hand counts as at the inserter's tile centre, wherever the arm is. One item a tick, and only one the bag has
    * room for, so a full bag skips iron and still takes coal.
    *
    * Distances are exact integers (§6 R3): the player is in subtiles (240 to a
@@ -296,43 +298,65 @@ export class PlayerSystem {
     const px = player.subX * BELT_TILE_UNITS;
     const py = player.subY * BELT_TILE_UNITS;
     const limit = PICKUP_RANGE_TILES * scale;
-    let best: { items: BeltItem[]; index: number } | null = null;
+    let best: PickupSource | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
 
-    for (const lane of this.lanesNear(player.tileX, player.tileY)) {
-      const step = DIRECTION_OFFSETS[lane.rotation];
-      if (step === undefined) continue;
-      for (let index = 0; index < lane.items.length; index++) {
-        const item = lane.items[index];
-        if (item === undefined) continue;
-        const along = item.pos - lane.from;
-        if (along < 0 || along >= BELT_TILE_UNITS) continue;
-        const x = (lane.x * BELT_TILE_UNITS + alongAxis(step.x, along)) * SUBTILES_PER_TILE;
-        const y = (lane.y * BELT_TILE_UNITS + alongAxis(step.y, along)) * SUBTILES_PER_TILE;
-        // A square reach, so the whole of each neighbouring belt tile is in it;
-        // a circle one tile across would miss the far half of the one beside.
-        if (Math.abs(x - px) > limit || Math.abs(y - py) > limit) continue;
-        const distance = (x - px) * (x - px) + (y - py) * (y - py);
-        if (distance > bestDistance || (best !== null && distance === bestDistance)) continue;
-        if (player.inventory.spaceFor(item.itemId) < 1) continue;
-        best = { items: lane.items, index };
-        bestDistance = distance;
+    /** Is an item at `(x, y)`, in those units, the nearest so far that fits? */
+    const nearer = (x: number, y: number, itemId: ItemId): boolean => {
+      // A square reach, so the whole of each neighbouring belt tile is in it;
+      // a circle one tile across would miss the far half of the one beside.
+      if (Math.abs(x - px) > limit || Math.abs(y - py) > limit) return false;
+      const distance = (x - px) * (x - px) + (y - py) * (y - py);
+      if (distance > bestDistance || (best !== null && distance === bestDistance)) return false;
+      if (player.inventory.spaceFor(itemId) < 1) return false;
+      bestDistance = distance;
+      return true;
+    };
+
+    for (const entity of this.entitiesNear(player.tileX, player.tileY)) {
+      const inserter = asInserter(entity);
+      if (inserter !== null) {
+        if (inserter.heldItem === NO_ITEM) continue;
+        const x = (inserter.x * BELT_TILE_UNITS + BELT_TILE_UNITS / 2) * SUBTILES_PER_TILE;
+        const y = (inserter.y * BELT_TILE_UNITS + BELT_TILE_UNITS / 2) * SUBTILES_PER_TILE;
+        if (nearer(x, y, inserter.heldItem)) best = { inserter };
+        continue;
+      }
+      for (const lane of this.lanesOf(entity)) {
+        const step = DIRECTION_OFFSETS[lane.rotation];
+        if (step === undefined) continue;
+        for (let index = 0; index < lane.items.length; index++) {
+          const item = lane.items[index];
+          if (item === undefined) continue;
+          const along = item.pos - lane.from;
+          if (along < 0 || along >= BELT_TILE_UNITS) continue;
+          const x = (lane.x * BELT_TILE_UNITS + alongAxis(step.x, along)) * SUBTILES_PER_TILE;
+          const y = (lane.y * BELT_TILE_UNITS + alongAxis(step.y, along)) * SUBTILES_PER_TILE;
+          if (nearer(x, y, item.itemId)) best = { items: lane.items, index };
+        }
       }
     }
 
-    if (best === null) return;
-    const [taken] = best.items.splice(best.index, 1);
+    const source: PickupSource | null = best;
+    if (source === null) return;
+    if ('inserter' in source) {
+      // An empty hand at the drop is one the player emptied, and the inserter
+      // swings back without stalling (`inserter-system.ts`).
+      player.inventory.add(source.inserter.heldItem, 1);
+      source.inserter.heldItem = NO_ITEM;
+      return;
+    }
+    const [taken] = source.items.splice(source.index, 1);
     if (taken !== undefined) player.inventory.add(taken.itemId, 1);
   }
 
   /**
-   * Every stretch of lane lying on the 3x3 tiles around `(cx, cy)`, which is
-   * everywhere a point within one tile of the player's centre can be. Each is
-   * one tile of a lane: its items with `pos` in `from..from+255` are on tile
-   * `(x, y)`. An underground run shows two such stretches, one at each mouth;
-   * what is between them is out of sight and out of reach.
+   * Everything standing on the 3x3 tiles around `(cx, cy)`, which is
+   * everywhere a point within one tile of the player's centre can be, once
+   * each and in ascending id. An underground exit is replaced by its entrance,
+   * whose lane holds the exit's items.
    */
-  private lanesNear(cx: number, cy: number): PickupLane[] {
+  private entitiesNear(cx: number, cy: number): Entity[] {
     const found: Entity[] = [];
     for (let y = cy - 1; y <= cy + 1; y++) {
       for (let x = cx - 1; x <= cx + 1; x++) {
@@ -348,34 +372,38 @@ export class PlayerSystem {
         if (!found.includes(entity)) found.push(entity);
       }
     }
-    found.sort((a, b) => a.id - b.id);
+    return found.sort((a, b) => a.id - b.id);
+  }
+
+  /**
+   * The stretches of lane an entity shows, none for anything but a carrier.
+   * Each is one tile of a lane: its items with `pos` in `from..from+255` are
+   * on tile `(x, y)`. An underground run shows two, one at each mouth; what is
+   * between them is out of sight and out of reach.
+   */
+  private lanesOf(entity: Entity): PickupLane[] {
+    const belt = asBelt(entity);
+    if (belt !== null) return [{ items: belt.items, x: belt.x, y: belt.y, rotation: belt.rotation, from: 0 }];
 
     const lanes: PickupLane[] = [];
-    for (const entity of found) {
-      const belt = asBelt(entity);
-      if (belt !== null) {
-        lanes.push({ items: belt.items, x: belt.x, y: belt.y, rotation: belt.rotation, from: 0 });
-        continue;
+    const splitter = asSplitter(entity);
+    if (splitter !== null) {
+      const size = this.buildings.footprintOf(splitter.type);
+      for (let side = 0; side < SPLITTER_LANES; side++) {
+        const tile = splitterTile(splitter, size, side as SplitterSide);
+        const items = splitter.lanes[side as SplitterSide];
+        lanes.push({ items, x: tile.x, y: tile.y, rotation: splitter.rotation, from: 0 });
       }
-      const splitter = asSplitter(entity);
-      if (splitter !== null) {
-        const size = this.buildings.footprintOf(splitter.type);
-        for (let side = 0; side < SPLITTER_LANES; side++) {
-          const tile = splitterTile(splitter, size, side as SplitterSide);
-          const items = splitter.lanes[side as SplitterSide];
-          lanes.push({ items, x: tile.x, y: tile.y, rotation: splitter.rotation, from: 0 });
-        }
-        continue;
-      }
-      const mouth = asUnderground(entity, this.buildings);
-      if (mouth !== null) {
-        lanes.push({ items: mouth.items, x: mouth.x, y: mouth.y, rotation: mouth.rotation, from: 0 });
-        const partner = this.partnerOf(mouth);
-        const units = undergroundLaneUnits(mouth, partner);
-        if (partner !== undefined && units > BELT_TILE_UNITS) {
-          const from = units - BELT_TILE_UNITS;
-          lanes.push({ items: mouth.items, x: partner.x, y: partner.y, rotation: mouth.rotation, from });
-        }
+      return lanes;
+    }
+    const mouth = asUnderground(entity, this.buildings);
+    if (mouth !== null) {
+      lanes.push({ items: mouth.items, x: mouth.x, y: mouth.y, rotation: mouth.rotation, from: 0 });
+      const partner = this.partnerOf(mouth);
+      const units = undergroundLaneUnits(mouth, partner);
+      if (partner !== undefined && units > BELT_TILE_UNITS) {
+        const from = units - BELT_TILE_UNITS;
+        lanes.push({ items: mouth.items, x: partner.x, y: partner.y, rotation: mouth.rotation, from });
       }
     }
     return lanes;
@@ -389,7 +417,10 @@ export class PlayerSystem {
   }
 }
 
-/** One tile's worth of a lane, for `pickUp`. See `lanesNear`. */
+/** Where `pickUp`'s chosen item is: a place in a lane, or an inserter's hand. */
+type PickupSource = { readonly items: BeltItem[]; readonly index: number } | { readonly inserter: InserterEntity };
+
+/** One tile's worth of a lane, for `pickUp`. See `lanesOf`. */
 interface PickupLane {
   readonly items: BeltItem[];
   readonly x: number;

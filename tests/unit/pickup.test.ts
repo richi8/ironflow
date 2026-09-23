@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { BeltEntity } from '../../src/game/entities/belt-entity.js';
 import { BELT_TILE_UNITS } from '../../src/game/entities/belt-entity.js';
+import { InserterState, type InserterEntity } from '../../src/game/entities/inserter-entity.js';
 import type { SplitterEntity } from '../../src/game/entities/splitter-entity.js';
 import { asUnderground, undergroundLaneUnits } from '../../src/game/entities/underground-belt-entity.js';
 import { deserialize, serialize } from '../../src/game/save/save-serializer.js';
@@ -13,7 +14,8 @@ import { World } from '../../src/game/world/world.js';
 /**
  * F: pick items up off the belts around the player (2026-09-23), as Factorio
  * does. Held, one item a tick, the nearest first, within one tile of the
- * player's centre along each axis, and only what the bag has room for.
+ * player's centre along each axis, and only what the bag has room for. It
+ * takes from belts, splitters, underground ends and inserters' hands.
  */
 
 function newGame(): Simulation {
@@ -103,6 +105,24 @@ describe('picking up with F', () => {
     simulation.tick();
     expect(simulation.inventory.count('iron_plate')).toBe(1);
     expect(entrance.items).toHaveLength(1);
+  });
+
+  it('takes the item out of an inserter\'s hand, and the arm swings back empty', () => {
+    const simulation = newGame();
+    build(simulation, 'inserter', 0, 0, EAST);
+    const inserter = simulation.entities.at(0, 0) as InserterEntity;
+    inserter.heldItem = simulation.items.idOf('iron_plate');
+    inserter.state = InserterState.Carrying;
+    inserter.stateTicks = 0;
+    simulation.player.setTilePosition(1, 0);
+
+    hold(simulation, true);
+    simulation.tick();
+    expect(simulation.inventory.count('iron_plate')).toBe(1);
+    expect(inserter.heldItem).toBe(0);
+    for (let i = 0; i < 60; i++) simulation.tick();
+    expect(inserter.heldItem).toBe(0);
+    expect(simulation.inventory.count('iron_plate')).toBe(1);
   });
 
   it('leaves what the bag has no room for', () => {

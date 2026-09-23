@@ -128,7 +128,7 @@ export type InputAction =
   /** Demolish what stands in front of the player (C30). A right-click's other half. */
   | 'world.remove'
   /**
-   * Pick up items off the belts around the player, for as long as it is held
+   * Pick up items off the belts and inserters around the player, while held
    * (2026-09-23). Factorio's F, on F.
    */
   | 'player.pickUp'
@@ -152,7 +152,7 @@ export const ACTION_LABELS: Readonly<Record<InputAction, string>> = Object.freez
   'player.moveRight': 'Walk right',
   'world.interact': 'Use the tile in front: build, feed, open, mine',
   'world.remove': 'Remove the building in front',
-  'player.pickUp': 'Pick up items from belts around you (hold)',
+  'player.pickUp': 'Pick up items from belts and inserters around you (hold)',
   'build.rotate': 'Rotate the held building',
   'build.pipette': 'Pick up the building under the cursor',
   'build.slot1': 'Hotbar slot 1',
