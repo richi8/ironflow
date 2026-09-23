@@ -1,19 +1,25 @@
 /**
  * The hotbar. See ironflow.md C07 task 3 and §13.
  *
- * Nine slots along the bottom, bound to the number row, plus the button that
- * opens the full build menu. Slot *n* is the *n*th entry of
- * `data/buildings.ts` — the same resolution the keyboard uses, because both go
- * through `GameController.selectSlot` and neither knows what a building is.
+ * Nine slots along the bottom, bound to the number row, beside the buttons
+ * that open the other panels. What each slot holds is the player's: a
+ * building is dragged onto a slot from the inventory and taken off it with a
+ * right-click. The toolbar only reports those gestures — the controller keeps
+ * the arrangement, and slot *n* means the same thing to a click here and to
+ * the number key, because both go through `GameController.selectSlot`.
  *
- * The nine slots are built once in `mount()` and never recreated: a slot past
- * the end of the content table is an empty tile today and fills itself in the
- * moment a building is added, which is C06's last acceptance criterion still
- * holding one chunk later. Updating is assignment and class toggles only (§13).
+ * The nine slots are built once in `mount()` and never recreated. Updating is
+ * assignment and class toggles only (§13).
  */
 
 import type { BuildMenuEntry, BuildMenuView } from '../game/views/build-menu-view.js';
 import { HOTBAR_SLOTS } from '../game/game-controller.js';
+
+/**
+ * The drag payload for a building on its way to the hotbar. A type of its
+ * own, so the slots ignore a drag of anything else — a file, a link, text.
+ */
+export const BUILDING_DRAG_TYPE = 'application/x-ironflow-building';
 
 interface Slot {
   readonly button: HTMLButtonElement;
@@ -24,7 +30,10 @@ interface Slot {
 export interface ToolbarOptions {
   /** Slot number, 1-based. The controller decides what that means. */
   readonly onSelectSlot: (slot: number) => void;
-  readonly onToggleBuildMenu: () => void;
+  /** A building was dropped on slot `slot` (1-based). */
+  readonly onAssignSlot: (slot: number, buildingId: string) => void;
+  /** Slot `slot` (1-based) was right-clicked: empty it. */
+  readonly onClearSlot: (slot: number) => void;
   /** Open or close the inventory panel (C21A). */
   readonly onToggleInventory: () => void;
   /** Open or close the technology tree (C22). */
@@ -41,7 +50,6 @@ const ROTATION_LABELS = ['N', 'E', 'S', 'W'] as const;
 export class Toolbar {
   private readonly root = document.createElement('div');
   private readonly slots: Slot[] = [];
-  private readonly menuButton = document.createElement('button');
   private readonly bagButton = document.createElement('button');
   private readonly techButton = document.createElement('button');
   private readonly mapButton = document.createElement('button');
@@ -56,16 +64,9 @@ export class Toolbar {
   mount(parent: HTMLElement): void {
     this.root.className = 'if-toolbar';
 
-    this.menuButton.type = 'button';
-    this.menuButton.className = 'if-toolbar__menu';
-    this.menuButton.textContent = 'BUILD';
-    this.menuButton.title = 'Open the build menu (B)';
-    this.menuButton.addEventListener('click', this.handleMenu);
-    this.root.append(this.menuButton);
-
-    // Beside BUILD rather than in the HUD's row of read-outs, because it is
-    // the same kind of thing: a panel the player opens with their left hand
-    // while the right one is on the map.
+    // Here rather than in the HUD's row of read-outs: a panel the player opens
+    // with their left hand while the right one is on the map — and the bag is
+    // where the hotbar is filled from.
     this.bagButton.type = 'button';
     this.bagButton.className = 'if-toolbar__menu';
     this.bagButton.textContent = 'BAG';
@@ -115,19 +116,13 @@ export class Toolbar {
   /** Repaint from a snapshot. Called on `buildMenuChanged`, not on a timer (§13). */
   update(view: BuildMenuView): void {
     this.slots.forEach((slot, index) => {
-      const entry: BuildMenuEntry | undefined = view.entries[index];
-      this.paintSlot(slot, entry);
+      this.paintSlot(slot, view.hotbar[index] ?? undefined);
     });
 
     const held = view.selectedBuildingId !== null;
     const label = held ? (ROTATION_LABELS[view.rotation] ?? '') : '';
     if (this.rotationLabel.textContent !== label) this.rotationLabel.textContent = label;
     this.rotationLabel.classList.toggle('is-active', held);
-  }
-
-  setBuildMenuOpen(open: boolean): void {
-    this.menuButton.classList.toggle('is-active', open);
-    this.menuButton.setAttribute('aria-pressed', String(open));
   }
 
   setInventoryOpen(open: boolean): void {
@@ -151,19 +146,20 @@ export class Toolbar {
   }
 
   destroy(): void {
-    this.menuButton.removeEventListener('click', this.handleMenu);
     this.bagButton.removeEventListener('click', this.handleBag);
     this.techButton.removeEventListener('click', this.handleTech);
     this.mapButton.removeEventListener('click', this.handleMap);
     this.saveButton.removeEventListener('click', this.handleSave);
-    for (const slot of this.slots) slot.button.removeEventListener('click', this.handleSlot);
+    for (const slot of this.slots) {
+      slot.button.removeEventListener('click', this.handleSlot);
+      slot.button.removeEventListener('contextmenu', this.handleClear);
+      slot.button.removeEventListener('dragover', this.handleDragOver);
+      slot.button.removeEventListener('dragleave', this.handleDragLeave);
+      slot.button.removeEventListener('drop', this.handleDrop);
+    }
     this.root.remove();
     this.slots.length = 0;
   }
-
-  private readonly handleMenu = (): void => {
-    this.options.onToggleBuildMenu();
-  };
 
   private readonly handleTech = (): void => {
     this.options.onToggleResearch();
@@ -189,10 +185,36 @@ export class Toolbar {
    * a `destroy()` quietly stops working.
    */
   private readonly handleSlot = (event: Event): void => {
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLElement)) return;
-    const slot = Number(target.dataset['slot']);
-    if (Number.isInteger(slot)) this.options.onSelectSlot(slot);
+    const slot = slotOf(event);
+    if (slot !== null) this.options.onSelectSlot(slot);
+  };
+
+  /** Right-click takes a building off the bar. The browser's menu never opens over a slot. */
+  private readonly handleClear = (event: Event): void => {
+    event.preventDefault();
+    const slot = slotOf(event);
+    if (slot !== null) this.options.onClearSlot(slot);
+  };
+
+  /** Accept a building being dragged over, and nothing else. */
+  private readonly handleDragOver = (event: DragEvent): void => {
+    if (!carriesBuilding(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.add('is-drop-target');
+  };
+
+  private readonly handleDragLeave = (event: DragEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
+  };
+
+  private readonly handleDrop = (event: DragEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.classList.remove('is-drop-target');
+    const buildingId = event.dataTransfer?.getData(BUILDING_DRAG_TYPE) ?? '';
+    const slot = slotOf(event);
+    if (buildingId === '' || slot === null) return;
+    event.preventDefault();
+    this.options.onAssignSlot(slot, buildingId);
   };
 
   private createSlot(slot: number): HTMLElement {
@@ -201,6 +223,10 @@ export class Toolbar {
     button.className = 'if-slot';
     button.dataset['slot'] = String(slot);
     button.addEventListener('click', this.handleSlot);
+    button.addEventListener('contextmenu', this.handleClear);
+    button.addEventListener('dragover', this.handleDragOver);
+    button.addEventListener('dragleave', this.handleDragLeave);
+    button.addEventListener('drop', this.handleDrop);
 
     const key = document.createElement('span');
     key.className = 'if-slot__key';
@@ -227,8 +253,9 @@ export class Toolbar {
       setText(count, '');
       button.classList.add('is-empty');
       button.classList.remove('is-selected', 'is-unaffordable', 'is-locked');
-      button.disabled = true;
-      button.title = '';
+      // Not disabled: a disabled button receives no drag events, and an empty
+      // slot is exactly where a building gets dropped.
+      button.title = 'Empty — drag a building here from your inventory';
       return;
     }
 
@@ -238,8 +265,10 @@ export class Toolbar {
     button.classList.toggle('is-selected', entry.selected);
     button.classList.toggle('is-unaffordable', !entry.affordable);
     button.classList.toggle('is-locked', !entry.unlocked);
-    button.disabled = false;
-    button.title = `${entry.name} — ${describeCost(entry)}`;
+    // C22's lock, said where the building is: the build menu that used to say
+    // it is gone.
+    const lock = entry.unlocked ? '' : ` — locked, research ${entry.unlockedBy ?? 'required'}`;
+    button.title = `${entry.name} — ${describeCost(entry)}${lock}. Right-click to remove.`;
   }
 }
 
@@ -263,6 +292,20 @@ function stockOf(entry: BuildMenuEntry): number {
 function describeCost(entry: BuildMenuEntry): string {
   if (entry.cost.length === 0) return 'free';
   return entry.cost.map((line) => `${line.count}x ${line.itemId} (${line.held})`).join(', ');
+}
+
+/** The 1-based slot an event happened on, read off the element it was bound to. */
+function slotOf(event: Event): number | null {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) return null;
+  const slot = Number(target.dataset['slot']);
+  return Number.isInteger(slot) ? slot : null;
+}
+
+/** Is this drag carrying a building? The type list is readable during a drag; the data is not. */
+function carriesBuilding(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  return types !== undefined && Array.from(types).includes(BUILDING_DRAG_TYPE);
 }
 
 function setText(element: HTMLElement, text: string): void {

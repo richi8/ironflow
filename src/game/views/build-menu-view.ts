@@ -57,6 +57,11 @@ export interface BuildMenuEntry {
 
 export interface BuildMenuView {
   readonly entries: readonly BuildMenuEntry[];
+  /**
+   * The hotbar, slot by slot: the entry the player put there, or `null` for
+   * an empty slot. Always `HOTBAR_SLOTS` long.
+   */
+  readonly hotbar: readonly (BuildMenuEntry | null)[];
   /** What the cursor is holding, or null for an empty hand. */
   readonly selectedBuildingId: string | null;
   /** The rotation the held building would be placed with. */

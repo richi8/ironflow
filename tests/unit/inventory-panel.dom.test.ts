@@ -126,16 +126,28 @@ describe('opening and closing', () => {
     expect(query<HTMLElement>(harness.root, '.if-inventory').hidden).toBe(false);
   });
 
-  it('puts the build menu away, because they want the same space', () => {
-    harness.ui.toggleBuildMenu();
-    expect(query<HTMLElement>(harness.root, '.if-build-menu').hidden).toBe(false);
-
+  it('picks up a carried building on a click and gets out of the way', () => {
     harness.ui.toggleInventory();
-    expect(query<HTMLElement>(harness.root, '.if-build-menu').hidden).toBe(true);
-    expect(harness.ui.isInventoryOpen()).toBe(true);
+    const cell = query<HTMLElement>(harness.root, '.if-bag-cell[data-building="chest"]');
+    expect(cell.draggable).toBe(true);
 
-    harness.ui.toggleBuildMenu();
+    cell.click();
+    expect(harness.controller.getSelectedBuilding()).toBe('chest');
     expect(harness.ui.isInventoryOpen()).toBe(false);
+
+    // Picking up what is already held keeps holding it.
+    harness.ui.toggleInventory();
+    cell.click();
+    expect(harness.controller.getSelectedBuilding()).toBe('chest');
+  });
+
+  it('offers nothing to pick up or drag for an item that builds nothing', () => {
+    const ore = [...harness.root.querySelectorAll<HTMLElement>('.if-bag-cell')].find(
+      (cell) => cell.querySelector('.if-bag-cell__name')?.textContent === 'Iron Ore',
+    );
+    expect(ore).toBeDefined();
+    expect(ore?.draggable).toBe(false);
+    expect(ore?.classList.contains('is-placeable')).toBe(false);
   });
 
   it('repaints on the frame it opens, even while paused', () => {

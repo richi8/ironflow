@@ -1172,9 +1172,8 @@ optimisation paths, which are to be walked only when the profiler says so.
 
 ```text
 GameUI
- +-- Toolbar        build categories, hotbar 1-9
+ +-- Toolbar        hotbar 1-9, arranged by the player; panel buttons
  +-- HUD            resources, power, research progress, tick rate, alerts
- +-- BuildMenu      full building list, costs, locked/unlocked
  +-- Inspector      selected entity: status, progress, contents, rate
  +-- InventoryPanel player inventory
  +-- ResearchPanel  tech tree, current research, queue
@@ -1185,6 +1184,38 @@ GameUI
 
 These are UI classes. They are not game entities and they do not appear in
 `game/`.
+
+**Changed 2026-09-23, on request: there is no build menu.** A building is
+picked from the hotbar or from the inventory, and the hotbar is the player's
+to arrange. What each change means:
+
+- **The hotbar belongs to the player.** A carried building in the inventory is
+  a cell you can pick up. Dragging it onto a hotbar slot puts it there,
+  right-clicking a slot empties it, and a building dragged onto a second slot
+  moves rather than appears twice, so a number key always means one thing.
+  The nine slots start as the first nine buildings in content order, which is
+  what the hotbar was before. `GameController` owns the arrangement
+  (`assignSlot`, `clearSlot`) and emits `buildMenuChanged`, and
+  `BuildMenuView.hotbar` is what the toolbar paints.
+- **The arrangement is a preference, not game state.** It is not in the save
+  (§10) and it survives a load. The composition root keeps it in
+  `localStorage` (`ironflow.hotbar`), and missing or blocked storage means the
+  default hotbar.
+- **Clicking a carried building in the inventory holds it and closes the
+  panel**, so the next click lands on the world. `InventorySlotView.buildingId`
+  says which items place something. It is derived from §15's rule that a
+  building costs one of its own item.
+- **The lock moved.** C22 printed a locked building's technology in the build
+  menu. It is now on the hotbar slot: greyed, with the technology named in the
+  slot's tooltip.
+- **Pause is the game menu.** The HUD's PAUSE button and `P` open the save
+  menu, which is the game menu for now. §8 already pauses the loop behind it,
+  and closing it resumes. A bare pause with nothing on screen to explain it is
+  gone. `B` is unbound.
+- **Escape closes whichever panel is open**, before the input layer hears it.
+  It is caught on `window` in the capture phase, so it also works from the save
+  menu's name field. With no panel open it falls through as before: it drops
+  the held building and the selection.
 
 ### Rules
 
@@ -6550,12 +6581,13 @@ simulation a counting clock, removes it, and checks the clock is never read
 again. The profiler itself costs **0.35 µs a tick** enabled, against a 100 µs
 ceiling.
 
-**The compile-time-ish flag is where the timer is attached.** `main.ts` opens
-the overlay with `import.meta.env.DEV` — open while developing, closed in a
-release build — and attaches the profiler only while the overlay is open, so a
-release build ticks with no timer unless someone presses F3. A literal `define`
-guard inside `simulation.ts` was the alternative, and it would have put a Vite
-concept in `game/` (§3) to save one comparison a phase.
+**The compile-time-ish flag is where the timer is attached.** The profiler is
+attached only while the overlay is open, so the game ticks with no timer unless
+someone presses F3. A literal `define` guard inside `simulation.ts` was the
+alternative, and it would have put a Vite concept in `game/` (§3) to save one
+comparison a phase. *(Changed 2026-09-23: the overlay now starts closed in
+every build, not only in release builds, and it sits against the right edge of
+the screen. The left is the inspector's and the middle belongs to the panels.)*
 
 **The overlay is §12's table.** Four sections — frame, tick (mean, p99 and
 every phase over the last ten seconds), world (§12's census, entities drawn,

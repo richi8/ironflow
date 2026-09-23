@@ -102,7 +102,7 @@ export class Hud {
 
     this.pauseButton.type = 'button';
     this.pauseButton.className = 'if-hud__pause';
-    this.pauseButton.title = 'Pause the simulation (P)';
+    this.pauseButton.title = 'Pause and open the game menu (P)';
     this.pauseLabel.textContent = 'PAUSE';
     this.pauseButton.append(this.pauseIcon, this.pauseLabel);
     this.pauseButton.addEventListener('click', this.onTogglePause);

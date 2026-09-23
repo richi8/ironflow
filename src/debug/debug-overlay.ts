@@ -61,10 +61,10 @@ export class DebugOverlay {
   };
 
   /**
-   * @param visible whether it starts open. `main.ts` passes `import.meta.env.DEV`:
-   * open while developing, closed in a release build, where F3 still opens it.
+   * @param visible whether it starts open. Closed unless asked: F3 opens it,
+   * and the profiler behind it runs only while it is open.
    */
-  constructor(parent: HTMLElement, visible = true) {
+  constructor(parent: HTMLElement, visible = false) {
     this.root = document.createElement('div');
     this.root.className = 'debug-overlay';
 

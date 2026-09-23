@@ -53,7 +53,7 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   nothing_queued: 'There is nothing there to cancel.',
   // C22. One sentence for a locked building and a locked recipe alike: the
   // player does the same thing about either, and *which* technology it needs
-  // is printed beside the thing itself in the build menu and the research
+  // is printed beside the thing itself on the hotbar and in the research
   // panel, where it can be read without a toast going past.
   locked: 'You have not researched that yet.',
   unknown_technology: 'No such technology.',
@@ -62,8 +62,8 @@ const REJECTION_TEXT: Readonly<Record<CommandRejectionReason, string>> = Object.
   missing_prerequisites: 'Something that leads to that has not been researched yet.',
   research_queue_full: 'The research queue is full.',
   // C23. The number is not in the sentence because the sentence is not where
-  // it belongs: the build menu names the span beside the building, where it
-  // can be read before the mistake rather than after it.
+  // it belongs: the limit is the building's, and a toast is read after the
+  // mistake rather than before it.
   span_too_long: 'The other end of that underground belt is too far away.',
 });
 

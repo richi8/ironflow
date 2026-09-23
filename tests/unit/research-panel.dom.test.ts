@@ -241,21 +241,3 @@ describe('the panel’s DOM', () => {
   });
 });
 
-describe('the build menu’s half of the same sentence', () => {
-  it('greys a locked building and names the technology that would reveal it', () => {
-    harness.ui.toggleResearch();
-    harness.ui.toggleBuildMenu();
-
-    const row = query<HTMLButtonElement>(harness.root, '.if-build-row[data-building="splitter"]');
-    expect(row.disabled).toBe(true);
-    expect(row.classList.contains('is-locked')).toBe(true);
-    expect(query<HTMLElement>(row, '.if-build-row__lock').textContent).toBe('Logistics 1');
-    expect(row.title).toContain('researching Logistics 1 unlocks it');
-
-    harness.simulation.researchSystem.grant('logistics_1');
-    harness.controller.pump();
-
-    expect(row.disabled).toBe(false);
-    expect(query<HTMLElement>(row, '.if-build-row__lock').hidden).toBe(true);
-  });
-});

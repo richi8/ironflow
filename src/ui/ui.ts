@@ -2,7 +2,7 @@
  * The UI shell: the panels, and the clock that drives them. See C07 and §13.
  *
  * ```text
- *   GameController  ->  GameUI  ->  Hud / Toolbar / BuildMenu / Notifications
+ *   GameController  ->  GameUI  ->  Hud / Toolbar / panels / Notifications
  *   frozen views        rates       build once, update by assignment
  * ```
  *
@@ -30,9 +30,9 @@
  * genuinely wanted a sub-second timer before the inspector existed: a toast
  * counting down to its own removal.
  *
- * Everything else is event-driven: the build menu and hotbar repaint on
- * `buildMenuChanged`, the HUD additionally on `pauseChanged`, and the inspector
- * on `selectionChanged` — which is what lets the word PAUSED appear, and a
+ * Everything else is event-driven: the hotbar repaints on `buildMenuChanged`,
+ * the HUD additionally on `pauseChanged`, and the inspector on
+ * `selectionChanged` — which is what lets the word PAUSED appear, and a
  * clicked machine open, on a frame where both lanes are stopped.
  *
  * The map (C23) is the one panel that keeps a lane **while paused**, because
@@ -44,12 +44,29 @@
  * this UI asked for — so the composition root pushes a new view when one
  * finishes, and §8's "pause the loop outright when a modal save/load dialog is
  * open" means there are no lanes running behind it anyway.
+ *
+ * ## Pause is the game menu, and Escape closes things
+ *
+ * Pausing — the HUD's button, or P — opens the save menu, which is the game
+ * menu for now; §8 already pauses the loop behind it, and closing it resumes.
+ * A pause with nothing on screen to say why was a state a player could get
+ * into by accident and not see the way out of.
+ *
+ * Escape closes whichever panel is open, before anything else hears the key:
+ * a panel on top of the world is the thing the player is looking at, so it is
+ * the thing "stop" means. With no panel open, Escape falls through to the
+ * input layer and drops the held building and the selection, as it always has.
+ * It is caught on `window` in the capture phase so that it works with the
+ * cursor in the save menu's name field, where the keyboard layer deliberately
+ * hears nothing.
+ *
+ * There is no build menu. Buildings are picked from the hotbar or from the
+ * inventory, and the hotbar is filled by dragging buildings onto it.
  */
 
 import type { GameController } from '../game/game-controller.js';
 import type { MapPoint } from '../game/views/map-view.js';
 
-import { BuildMenu } from './build-menu.js';
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
 import { MapPanel } from './map-panel.js';
@@ -129,7 +146,6 @@ export class GameUI {
   private readonly controller: GameController;
   private readonly hud: Hud;
   private readonly toolbar: Toolbar;
-  private readonly buildMenu: BuildMenu;
   private readonly inspector: Inspector;
   private readonly inventory: InventoryPanel;
   private readonly research: ResearchPanel;
@@ -153,7 +169,7 @@ export class GameUI {
     this.saves = options.saves ?? null;
 
     this.hud = new Hud({
-      onTogglePause: () => this.controller.togglePause(),
+      onTogglePause: () => this.togglePauseMenu(),
       // C22. The RESEARCH tile has shown a dash since C07 with nothing behind
       // it; making it the way in is why the panel is findable without reading
       // a keybinding list — the same argument the ITEMS tile makes.
@@ -165,14 +181,12 @@ export class GameUI {
     });
     this.toolbar = new Toolbar({
       onSelectSlot: (slot) => this.controller.selectSlot(slot),
-      onToggleBuildMenu: () => this.toggleBuildMenu(),
+      onAssignSlot: (slot, buildingId) => this.controller.assignSlot(slot, buildingId),
+      onClearSlot: (slot) => this.controller.clearSlot(slot),
       onToggleInventory: () => this.toggleInventory(),
       onToggleResearch: () => this.toggleResearch(),
       onToggleMap: () => this.toggleMap(),
       onToggleSaveMenu: () => this.toggleSaveMenu(),
-    });
-    this.buildMenu = new BuildMenu({
-      onSelectBuilding: (buildingId) => this.controller.selectBuilding(buildingId),
     });
     this.inspector = new Inspector({
       // The panel names an item and a count; which machine that means is the
@@ -198,6 +212,13 @@ export class GameUI {
       // does not allow.
       onCraft: (recipeId, count) => this.controller.craftItem(recipeId, count),
       onCancel: (index) => this.controller.cancelCraft(index),
+      // Picked up to build with: the panel gets out of the way, so the next
+      // click is on the world. `selectBuilding` puts down a building already
+      // held, so this holds it whether or not it was held before.
+      onPickBuilding: (buildingId) => {
+        if (this.controller.getSelectedBuilding() !== buildingId) this.controller.selectBuilding(buildingId);
+        this.setInventoryOpen(false);
+      },
       onClose: () => this.toggleInventory(),
     });
     this.map = new MapPanel({
@@ -237,7 +258,6 @@ export class GameUI {
     const menuView = this.controller.getBuildMenuView();
 
     this.hud.mount(this.root);
-    this.buildMenu.mount(this.root, menuView);
     this.inspector.mount(this.root);
     this.inventory.mount(this.root, this.controller.getInventoryView());
     this.research.mount(this.root, this.controller.getResearchView());
@@ -247,8 +267,8 @@ export class GameUI {
     this.notifications.mount(this.root);
 
     this.toolbar.update(menuView);
-    this.toolbar.setBuildMenuOpen(this.buildMenu.isOpen());
     this.refreshHud();
+    window.addEventListener('keydown', this.handleEscape, true);
 
     this.unsubscribes.push(
       // §7: never fail silently. Every rejection — the shape ones refused at
@@ -270,9 +290,7 @@ export class GameUI {
         );
       }),
       this.controller.subscribe('buildMenuChanged', () => {
-        const view = this.controller.getBuildMenuView();
-        this.toolbar.update(view);
-        this.buildMenu.update(view);
+        this.toolbar.update(this.controller.getBuildMenuView());
       }),
       // The HUD must repaint while paused, because "paused" is what it has to
       // say. Its periodic lane is stopped at that moment; this is the event
@@ -347,23 +365,33 @@ export class GameUI {
     }
   }
 
-  /** Open or close the build menu. Returns the new state. */
-  toggleBuildMenu(): boolean {
-    const open = this.buildMenu.toggle();
-    this.toolbar.setBuildMenuOpen(open);
-    // The two panels want the same half of the screen and answer the same
-    // question from opposite ends — "what can I build" and "what am I made
-    // of" — so opening one puts the other away rather than stacking them.
-    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
-    if (open && this.map.isOpen()) this.setMapOpen(false);
-    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
+  /**
+   * Pause into the game menu, or close it and play on. The HUD's pause button
+   * and P. See the header.
+   */
+  togglePauseMenu(): boolean {
+    return this.toggleSaveMenu();
+  }
+
+  /**
+   * Close whichever panel is open. Returns whether one was.
+   *
+   * Escape's first meaning; see the header. The panels are exclusive, so at
+   * most one closes — but every one is asked, so a panel added later cannot be
+   * the one Escape forgets.
+   */
+  closeDialog(): boolean {
+    const open = this.saveMenu.isOpen() || this.inventory.isOpen() || this.research.isOpen() || this.map.isOpen();
+    this.setSaveMenuOpen(false);
+    if (this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (this.research.isOpen()) this.setResearchOpen(false);
+    if (this.map.isOpen()) this.setMapOpen(false);
     return open;
   }
 
   /** Open or close the inventory. Returns the new state (C21A). */
   toggleInventory(): boolean {
     const open = this.setInventoryOpen(!this.inventory.isOpen());
-    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.research.isOpen()) this.setResearchOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
     if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
@@ -373,7 +401,6 @@ export class GameUI {
   /** Open or close the research panel. Returns the new state (C22). */
   toggleResearch(): boolean {
     const open = this.setResearchOpen(!this.research.isOpen());
-    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
     if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
@@ -405,7 +432,6 @@ export class GameUI {
   /** Open or close the save menu. Returns the new state (C25). */
   toggleSaveMenu(): boolean {
     const open = this.setSaveMenuOpen(!this.saveMenu.isOpen());
-    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.research.isOpen()) this.setResearchOpen(false);
     if (open && this.map.isOpen()) this.setMapOpen(false);
@@ -420,10 +446,8 @@ export class GameUI {
   /** Open or close the map. Returns the new state (C23). */
   toggleMap(): boolean {
     const open = this.setMapOpen(!this.map.isOpen());
-    // The fourth panel to want the same half of the screen. One at a time,
-    // for the reason the build menu and the bag are exclusive: they answer
+    // Panels want the same half of the screen. One at a time: they answer
     // different questions and stacking them answers neither.
-    if (open && this.buildMenu.isOpen()) this.toggleBuildMenu();
     if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
     if (open && this.research.isOpen()) this.setResearchOpen(false);
     if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
@@ -446,6 +470,7 @@ export class GameUI {
   }
 
   destroy(): void {
+    window.removeEventListener('keydown', this.handleEscape, true);
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
@@ -455,10 +480,17 @@ export class GameUI {
     this.inventory.destroy();
     this.inspector.destroy();
     this.toolbar.destroy();
-    this.buildMenu.destroy();
     this.hud.destroy();
     this.mounted = false;
   }
+
+  /** Escape, before the keyboard layer hears it. See the header and `closeDialog`. */
+  private readonly handleEscape = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || event.repeat) return;
+    if (!this.closeDialog()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   /**
    * Show or hide the panel, repainting on the way in.

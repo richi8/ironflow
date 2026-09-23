@@ -24,13 +24,9 @@
  * than no keybinding at all.
  *
  * The nine build slots are C06's, and all nine are handled — by
- * `GameController.selectSlot`, which maps slot *n* to the *n*th building in
- * `data/buildings.ts`. Their meaning is therefore content: a slot past the end
- * of that table selects nothing today and becomes a real hotkey the moment a
- * building is added, with no code change anywhere. That is C06's last
- * acceptance criterion, expressed as a keymap. (C07 moved that resolution out
- * of the composition root, where C06 left it, and into the controller §4 puts
- * it in; the toolbar's nine tiles now go through the same call.)
+ * `GameController.selectSlot`, which selects whatever building the player put
+ * on that slot of the hotbar (the first nine buildings until they arrange it).
+ * The toolbar's nine tiles go through the same call.
  *
  * Pan directions are named for the **screen**, not for tile space: this is a
  * view control, the player is pushing the picture around, and nothing here
@@ -77,8 +73,6 @@ export type InputAction =
   | 'build.slot7'
   | 'build.slot8'
   | 'build.slot9'
-  /** Open and close the build menu (C07). */
-  | 'ui.toggleBuildMenu'
   /**
    * Open and close the inventory, which is also the hand-craft bench (C21A).
    *
@@ -125,7 +119,10 @@ export type InputAction =
    * want (`S`) is the key that walks the player south.
    */
   | 'ui.toggleSaveMenu'
-  /** Hold the simulation still while the world keeps being drawn (C07, §8). */
+  /**
+   * Pause into the game menu, or close it and play on (C07, §8). The menu is
+   * the save menu for now; the loop is held still behind it.
+   */
   | 'game.togglePause'
   | 'debug.toggleOverlay';
 
@@ -140,10 +137,9 @@ export type KeyBindings = Readonly<Record<string, InputAction>>;
  * withdrawn is worse than one that was never offered. Space is the drag modifier for the same reason it is in
  * every map editor: it is the largest key and it is not a letter anyone needs
  * while dragging. `R` rotates and the number row selects, which is what every
- * game in this genre has trained the player's left hand to expect. `B` opens
- * the build menu and `P` pauses, both of which are free: neither is reachable
- * by the left hand while it is on the number row, so neither can be hit by
- * accident mid-drag. `I` and `E` both open the bag (C21A) — see the action.
+ * game in this genre has trained the player's left hand to expect. `P` pauses
+ * into the game menu, and is free: it is not reachable by the left hand while
+ * it is on the number row, so it cannot be hit by accident mid-drag. `I` and `E` both open the bag (C21A) — see the action.
  */
 export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   ArrowUp: 'camera.panUp',
@@ -163,7 +159,6 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   KeyR: 'build.rotate',
   ShiftLeft: 'machine.copyModifier',
   ShiftRight: 'machine.copyModifier',
-  KeyB: 'ui.toggleBuildMenu',
   KeyI: 'ui.toggleInventory',
   KeyE: 'ui.toggleInventory',
   KeyT: 'ui.toggleResearch',

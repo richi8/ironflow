@@ -83,6 +83,24 @@ function countElements(nodes: NodeList): number {
   return count;
 }
 
+/**
+ * A drag event carrying `data` as `type`. jsdom has no `DataTransfer`, so the
+ * two members the toolbar reads are supplied by hand.
+ */
+function dragEvent(type: string, dataType: string, data: string): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', {
+    value: { types: [dataType], getData: (asked: string) => (asked === dataType ? data : ''), dropEffect: 'none' },
+  });
+  return event;
+}
+
+/** Drag a building over a slot and let go. */
+function drop(target: Element, buildingId: string): void {
+  target.dispatchEvent(dragEvent('dragover', 'application/x-ironflow-building', buildingId));
+  target.dispatchEvent(dragEvent('drop', 'application/x-ironflow-building', buildingId));
+}
+
 function tileValue(root: ParentNode, label: string): string {
   for (const tile of root.querySelectorAll('.if-hud__tile')) {
     if (tile.querySelector('.if-hud__label')?.textContent === label) {
@@ -110,22 +128,22 @@ describe('mounting', () => {
     // Nine slots whatever the content table holds: a slot with nothing behind
     // it is an empty tile that fills itself when a building is added (C06).
     expect(root.querySelectorAll('.if-slot').length).toBe(9);
-    // One row per building and one group per category that has one in it,
-    // both read from the content table: a chunk that adds a building must not
-    // have to come back and edit a number here.
-    const categories = new Set(BUILDINGS.map((definition) => definition.category));
-    expect(root.querySelectorAll('.if-build-row').length).toBe(BUILDINGS.length);
-    expect(root.querySelectorAll('.if-build-menu__group').length).toBe(categories.size);
   });
 
-  it('starts with the build menu closed and the hand empty', () => {
+  it('has no build menu: building starts from the hotbar or the bag', () => {
+    const { root } = harness;
+    expect(root.querySelector('.if-build-menu')).toBeNull();
+    const labels = [...root.querySelectorAll('.if-toolbar__menu')].map((button) => button.textContent);
+    expect(labels).not.toContain('BUILD');
+  });
+
+  it('starts with the hand empty', () => {
     const { root, controller } = harness;
-    expect(query<HTMLElement>(root, '.if-build-menu').hidden).toBe(true);
     expect(controller.getSelectedBuilding()).toBeNull();
     expect(root.querySelectorAll('.if-slot.is-selected').length).toBe(0);
   });
 
-  it('shows the eight icons from §11 across the HUD and the build menu', () => {
+  it('shows the icons from §11 as inline SVG', () => {
     const { root } = harness;
     // Every icon is inline SVG with a path, never an <img> and never a font.
     expect(root.querySelectorAll('.if-icon').length).toBeGreaterThan(0);
@@ -170,23 +188,53 @@ describe('the toolbar drives the game through commands only', () => {
     expect(controller.getSelectedBuilding()).toBeNull();
   });
 
-  it('selects the same building from the build menu as from the hotbar', () => {
+  it('takes a building dropped from the bag onto a slot, and moves it rather than copying it', () => {
     const { root, controller } = harness;
-    query<HTMLButtonElement>(root, '.if-build-row[data-building="miner"]').click();
-    expect(controller.getSelectedBuilding()).toBe('miner');
+    const target = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
+
+    drop(target, 'splitter');
+    expect(query<HTMLElement>(target, '.if-slot__name').textContent).toBe('Splitter');
+    target.click();
+    expect(controller.getSelectedBuilding()).toBe('splitter');
+
+    // Splitter was on slot 3 by default; a number key means one thing.
+    const three = query<HTMLButtonElement>(root, '.if-slot[data-slot="3"]');
+    expect(three.classList.contains('is-empty')).toBe(true);
   });
 
-  it('opens and closes the build menu', () => {
+  it('ignores a drag of anything that is not a building', () => {
     const { root } = harness;
-    const menu = query<HTMLElement>(root, '.if-build-menu');
-    const button = query<HTMLButtonElement>(root, '.if-toolbar__menu');
+    const target = query<HTMLButtonElement>(root, '.if-slot[data-slot="9"]');
+    const over = dragEvent('dragover', 'text/plain', 'hello');
+    target.dispatchEvent(over);
+    expect(over.defaultPrevented).toBe(false);
+  });
 
-    button.click();
-    expect(menu.hidden).toBe(false);
-    expect(button.classList.contains('is-active')).toBe(true);
+  it('empties a slot on right-click, without opening the browser menu', () => {
+    const { root, controller } = harness;
+    const slot = query<HTMLButtonElement>(root, '.if-slot[data-slot="1"]');
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+    slot.dispatchEvent(menu);
 
-    button.click();
-    expect(menu.hidden).toBe(true);
+    expect(menu.defaultPrevented).toBe(true);
+    expect(slot.classList.contains('is-empty')).toBe(true);
+    expect(controller.getHotbarLayout()[0]).toBeNull();
+    // An empty slot empties the hand, and still takes a drop.
+    slot.click();
+    expect(controller.getSelectedBuilding()).toBeNull();
+    expect(slot.disabled).toBe(false);
+  });
+
+  it('says a hotbar building is locked, and which technology reveals it', () => {
+    const { root, controller, simulation } = harness;
+    controller.pump();
+    const splitter = query<HTMLElement>(root, '.if-slot[data-slot="3"]');
+    expect(splitter.classList.contains('is-locked')).toBe(true);
+    expect(splitter.title).toContain('Logistics 1');
+
+    simulation.researchSystem.grant('logistics_1');
+    controller.pump();
+    expect(splitter.classList.contains('is-locked')).toBe(false);
   });
 
   it('marks a building the player cannot afford without disabling it', () => {
@@ -201,6 +249,39 @@ describe('the toolbar drives the game through commands only', () => {
     // Still clickable: §7 says the simulation is the authority, and a player
     // who cannot see why a building is refused learns nothing.
     expect((slot as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('pause and Escape', () => {
+  it('pauses into the game menu, and plays on when it closes', () => {
+    const { root, ui } = harness;
+    query<HTMLButtonElement>(root, '.if-hud__pause').click();
+    expect(ui.isSaveMenuOpen()).toBe(true);
+
+    ui.togglePauseMenu();
+    expect(ui.isSaveMenuOpen()).toBe(false);
+  });
+
+  it('closes whichever panel is open on Escape, and only that', () => {
+    const { ui } = harness;
+    for (const open of [() => ui.toggleInventory(), () => ui.toggleResearch(), () => ui.toggleMap(), () => ui.openSaveMenu()]) {
+      open();
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      window.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(true);
+      expect([ui.isInventoryOpen(), ui.isResearchOpen(), ui.isMapOpen(), ui.isSaveMenuOpen()]).toEqual([
+        false,
+        false,
+        false,
+        false,
+      ]);
+    }
+  });
+
+  it('lets Escape through to the game when no panel is open', () => {
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    window.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
   });
 });
 

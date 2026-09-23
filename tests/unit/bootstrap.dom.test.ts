@@ -137,7 +137,7 @@ describe('DebugOverlay', () => {
   it('builds its DOM once and updates by assignment', () => {
     const root = document.createElement('div');
     document.body.append(root);
-    const overlay = new DebugOverlay(root);
+    const overlay = new DebugOverlay(root, true);
 
     const node = root.querySelector('.debug-overlay');
     expect(node).not.toBeNull();
@@ -161,7 +161,7 @@ describe('DebugOverlay', () => {
 
   it('colours a row by its budget verdict (C28)', () => {
     const root = document.createElement('div');
-    const overlay = new DebugOverlay(root);
+    const overlay = new DebugOverlay(root, true);
     overlay.update(200, rows(1));
 
     const values = [...root.querySelectorAll('.debug-overlay__value')];
@@ -181,7 +181,7 @@ describe('DebugOverlay', () => {
   it('throttles updates, and collects nothing on a frame it will not draw', () => {
     const root = document.createElement('div');
     document.body.append(root);
-    const overlay = new DebugOverlay(root);
+    const overlay = new DebugOverlay(root, true);
 
     overlay.update(200, rows(1)); // crosses the interval
     const after = root.textContent ?? '';
@@ -194,10 +194,10 @@ describe('DebugOverlay', () => {
     expect(root.textContent).toBe(after);
   });
 
-  it('writes nothing while hidden, and can start hidden', () => {
+  it('starts hidden, writes nothing while hidden, and paints as soon as it opens', () => {
     const root = document.createElement('div');
     document.body.append(root);
-    const overlay = new DebugOverlay(root, false);
+    const overlay = new DebugOverlay(root);
     expect(overlay.isVisible()).toBe(false);
 
     overlay.update(500, rows(777));

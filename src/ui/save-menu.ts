@@ -39,7 +39,7 @@
  * ## It builds its DOM once (§13)
  *
  * A fixed pool of rows, made in `mount()` and never created or destroyed — the
- * same rule `BuildMenu`, `InventoryPanel` and `ResearchPanel` follow. A save
+ * same rule `InventoryPanel` and `ResearchPanel` follow. A save
  * list is the first panel in the game whose length is not decided by a content
  * table, so the pool is a *cap*: `SAVE_ROWS` rows are drawn and a line says
  * how many more exist. The cap is generous against the three autosaves plus

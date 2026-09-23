@@ -47,6 +47,11 @@ export interface InventorySlotView {
   readonly slots: number;
   /** How many fit in one slot. Shown as "142 / 200" on a part-filled stack. */
   readonly stackSize: number;
+  /**
+   * The building this item places, or `null`. A placeable item can be picked
+   * up to build with, or dragged onto the hotbar.
+   */
+  readonly buildingId: string | null;
 }
 
 /**

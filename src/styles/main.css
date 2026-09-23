@@ -53,10 +53,12 @@ body {
 
 .debug-overlay {
   position: fixed;
-  /* Below the HUD bar (C07), which owns the top edge, and to the right of the
-     inspector (C12), which owns the top-left corner whenever it is open. */
+  /* Below the HUD bar (C07), which owns the top edge, against the right edge:
+     the inspector (C12) owns the top-left corner and the panels open in the
+     middle, so the right is the one side nothing else wants. */
   top: 56px;
-  left: 260px;
+  right: 12px;
+  z-index: 5;
   min-width: 190px;
   padding: 8px 10px;
   border: 1px solid var(--if-stroke);
@@ -320,6 +322,17 @@ body {
   cursor: default;
 }
 
+/* C22's lock, now shown on the hotbar since there is no build menu to say it. */
+.if-slot.is-locked {
+  opacity: 0.45;
+}
+
+/* A building being dragged over a slot it would land on. */
+.if-slot.is-drop-target {
+  border-color: var(--if-accent-high);
+  border-style: dashed;
+}
+
 .if-slot__key {
   position: absolute;
   top: 3px;
@@ -339,110 +352,6 @@ body {
 .if-slot__count {
   color: var(--if-text-muted);
   font-variant-numeric: tabular-nums;
-}
-
-/* --- Build menu ----------------------------------------------------------- */
-
-.if-build-menu {
-  position: fixed;
-  top: 56px;
-  right: 12px;
-  bottom: 76px;
-  width: 248px;
-  overflow-y: auto;
-  padding: 10px;
-  border: 1px solid var(--if-stroke);
-  border-radius: var(--if-radius);
-  background: color-mix(in srgb, var(--if-panel) 95%, transparent);
-}
-
-.if-build-menu__title {
-  margin: 0 0 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--if-stroke);
-  color: var(--if-accent);
-  font-size: 12px;
-  font-weight: normal;
-  letter-spacing: 0.12em;
-}
-
-.if-build-menu__group + .if-build-menu__group {
-  margin-top: 12px;
-}
-
-.if-build-menu__heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-  color: var(--if-text-dim);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-}
-
-.if-build-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--if-radius);
-  background: var(--if-bg);
-  color: var(--if-text);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.if-build-row + .if-build-row {
-  margin-top: 3px;
-}
-
-.if-build-row:hover:not(:disabled) {
-  border-color: var(--if-blue);
-}
-
-.if-build-row.is-selected {
-  border-color: var(--if-accent);
-  background: var(--if-accent-dim);
-}
-
-.if-build-row.is-unaffordable .if-build-row__cost {
-  color: var(--if-danger);
-}
-
-.if-build-row.is-locked {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.if-build-row__name {
-  flex: 1;
-}
-
-.if-build-row__cost {
-  color: var(--if-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The technology that would reveal a locked row, drawn in the cost's place. */
-.if-build-row__lock {
-  color: var(--if-blue-high);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-}
-
-.if-build-row__hotkey:not(:empty) {
-  /* A key cap, so the hotkey does not read as another digit of the cost. */
-  min-width: 16px;
-  padding: 1px 0;
-  border: 1px solid var(--if-stroke);
-  border-radius: 2px;
-  color: var(--if-text-dim);
-  font-size: 10px;
-  text-align: center;
 }
 
 /* --- Inspector (C12) ------------------------------------------------------ */
@@ -785,6 +694,16 @@ body {
   padding: 4px 6px;
   border-radius: var(--if-radius);
   background: var(--if-bg);
+}
+
+/* A carried building: click to hold it, or drag it onto the hotbar. */
+.if-bag-cell.is-placeable {
+  cursor: grab;
+}
+
+.if-bag-cell.is-placeable:hover,
+.if-bag-cell.is-placeable:focus-visible {
+  outline: 1px solid var(--if-blue);
 }
 
 .if-bag-cell + .if-bag-cell {

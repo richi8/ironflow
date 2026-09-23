@@ -206,6 +206,45 @@ describe('GameController build tool', () => {
     expect(controller.getSelectedBuilding()).toBeNull();
   });
 
+  it('lets the player arrange the hotbar, one slot per building', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game });
+    let changes = 0;
+    controller.subscribe('buildMenuChanged', () => (changes += 1));
+
+    controller.assignSlot(9, 'splitter');
+    controller.selectSlot(9);
+    expect(controller.getSelectedBuilding()).toBe('splitter');
+    // Moved, not copied: slot 3 held the splitter by default.
+    expect(controller.getHotbarLayout()[2]).toBeNull();
+    expect(controller.getBuildMenuView().entries.find((entry) => entry.buildingId === 'splitter')?.hotkey).toBe(9);
+
+    controller.clearSlot(9);
+    expect(controller.getBuildMenuView().hotbar[8]).toBeNull();
+    expect(changes).toBe(2);
+
+    // Nonsense is ignored rather than thrown, and announces nothing.
+    controller.assignSlot(0, 'chest');
+    controller.assignSlot(4, 'no_such_building');
+    controller.clearSlot(HOTBAR_SLOTS + 1);
+    expect(changes).toBe(2);
+  });
+
+  it('starts from a remembered hotbar, forgetting buildings that no longer exist', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game, hotbar: ['chest', 'gone', null] });
+    expect(controller.getHotbarLayout()).toEqual(['chest', null, null, null, null, null, null, null, null]);
+  });
+
+  it('knows which building an item places', () => {
+    const { game } = makeGame();
+    const controller = new GameController({ game });
+    expect(controller.buildingForItem('belt')).toBe('belt');
+    expect(controller.buildingForItem('iron_ore')).toBeNull();
+    const view = controller.getInventoryView();
+    expect(view.items.find((item) => item.itemId === 'miner')?.buildingId).toBe('miner');
+  });
+
   it('reads the cursor live, so a rotation pressed elsewhere shows up at once', () => {
     const { game } = makeGame();
     const cursor = new DetachedCursor();

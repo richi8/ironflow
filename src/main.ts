@@ -261,16 +261,43 @@ function saveMenuView(state: SaveSessionState): SaveMenuView {
   });
 }
 
+/** Where the hotbar arrangement is kept between sessions. */
+const HOTBAR_KEY = 'ironflow.hotbar';
+
+/**
+ * The hotbar the player left, or `undefined` for the default.
+ *
+ * Storage that is missing, blocked or holding something else is the default
+ * rather than an error: a preference lost is a hotbar to fill again, and a
+ * private window is allowed to forget.
+ */
+function loadHotbar(): readonly (string | null)[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HOTBAR_KEY) ?? 'null');
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed.map((value) => (typeof value === 'string' ? value : null));
+  } catch {
+    return undefined;
+  }
+}
+
+function saveHotbar(layout: readonly (string | null)[]): void {
+  try {
+    localStorage.setItem(HOTBAR_KEY, JSON.stringify(layout));
+  } catch {
+    // See `loadHotbar`: a hotbar that is not remembered still works.
+  }
+}
+
 async function bootstrap(): Promise<void> {
   const canvas = requireElement<HTMLCanvasElement>('#game');
   const uiRoot = requireElement<HTMLElement>('#ui');
 
   const surface = new CanvasSurface(canvas);
-  // Open while developing and closed in a release build, where F3 still opens
-  // it. This is C28's "compile-time-ish flag": Vite replaces `DEV` with a
-  // literal, and the profiler is attached only while the overlay is open, so
-  // a release build ticks with no timer at all unless somebody asks.
-  const overlay = new DebugOverlay(uiRoot, import.meta.env.DEV);
+  // Closed until F3 opens it, in every build. The profiler is attached only
+  // while it is open, so the game ticks with no timer at all unless somebody
+  // asks — which is C28's "zero-cost when disabled" without a build flag.
+  const overlay = new DebugOverlay(uiRoot, false);
 
   /**
    * Performance numbers measured once, or once per event (C28). Written where
@@ -464,10 +491,6 @@ async function bootstrap(): Promise<void> {
       syncProfiler();
       return;
     }
-    if (action === 'ui.toggleBuildMenu') {
-      ui.toggleBuildMenu();
-      return;
-    }
     if (action === 'ui.toggleInventory') {
       ui.toggleInventory();
       return;
@@ -489,7 +512,8 @@ async function bootstrap(): Promise<void> {
       return;
     }
     if (action === 'game.togglePause') {
-      controller.togglePause();
+      // Pausing is opening the game menu, which pauses behind it (§8).
+      ui.togglePauseMenu();
       return;
     }
     const slot = /^build\.slot([1-9])$/.exec(action);
@@ -663,7 +687,7 @@ async function bootstrap(): Promise<void> {
       rows.row(
         'build',
         held === null
-          ? '— (1-9 or B to select, R rotates)'
+          ? '— (1-9, or pick from the bag; R rotates)'
           : `${held} r${input.buildRotation} x${simulation.inventory.count(held)}`,
       );
       rows.row(
@@ -691,7 +715,13 @@ async function bootstrap(): Promise<void> {
   // `InputManager` satisfies `BuildCursor` structurally and has never heard of
   // it: what the player holds is pointer state (C04) and the UI has to see it
   // without importing `input/**` (§4).
-  const controller: GameController = new GameController({ game, cursor: input });
+  const controller: GameController = new GameController({ game, cursor: input, hotbar: loadHotbar() });
+  // The hotbar is the player's arrangement, remembered between sessions. It
+  // is a preference rather than game state (§10), so it lives beside the
+  // browser's other preferences and not in the save; every change to it is a
+  // `buildMenuChanged`, and writing nine short strings is cheaper than
+  // working out whether this one was the hotbar.
+  controller.subscribe('buildMenuChanged', () => saveHotbar(controller.getHotbarLayout()));
 
   /* ------------------------------------------------------------------ *
    * Saving and loading (C25).

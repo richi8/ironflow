@@ -48,7 +48,7 @@ import { splitterOutputTile, asSplitter } from './entities/splitter-entity.js';
 import { asMiner } from './entities/miner-entity.js';
 import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
-import { BuildingRegistry, type BuildingDefinition } from './registries/building-registry.js';
+import { BuildingRegistry } from './registries/building-registry.js';
 import { CANNOT_CRAFT } from './registries/craft-durations.js';
 import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-registry.js';
 import type { Simulation } from './simulation.js';
@@ -161,6 +161,17 @@ export interface GameControllerOptions {
    * test can drive the controller without an input layer or a DOM.
    */
   readonly cursor?: Cursor;
+  /**
+   * What the player last put on the hotbar, slot by slot — a building id or
+   * `null` for an empty slot. Defaults to the first nine buildings in content
+   * order, which is what the hotbar was before the player could arrange it.
+   *
+   * The arrangement is a preference, not game state: it is not in the save
+   * (§10), it survives a load, and the composition root keeps it wherever it
+   * keeps preferences. An id the content table no longer has is an empty
+   * slot rather than an error.
+   */
+  readonly hotbar?: readonly (string | null)[] | undefined;
 }
 
 /** A `Cursor` with nothing on the other end of it. For tests and headless use. */
@@ -227,9 +238,20 @@ export class GameController {
    */
   private readonly mapChunks = new Map<string, { revision: number; view: MapChunkView }>();
 
+  /**
+   * The hotbar, slot by slot: a building id or `null`. See `hotbar` in the
+   * options. Length is always `HOTBAR_SLOTS`.
+   */
+  private readonly hotbar: (string | null)[];
+
   constructor(options: GameControllerOptions) {
     this.game = options.game;
     this.cursor = options.cursor ?? new DetachedCursor();
+    const buildings = this.simulation.buildings;
+    this.hotbar = Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
+      const id = options.hotbar === undefined ? (buildings.all()[index]?.id ?? null) : (options.hotbar[index] ?? null);
+      return id !== null && buildings.has(id) ? id : null;
+    });
     this.menuSignature = this.buildMenuSignature();
     this.lastSelection = this.cursor.selectedEntityId;
   }
@@ -432,7 +454,8 @@ export class GameController {
     const held = this.cursor.buildTool;
     const entries: BuildMenuEntry[] = [];
 
-    this.simulation.buildings.all().forEach((definition, index) => {
+    this.simulation.buildings.all().forEach((definition) => {
+      const slot = this.hotbar.indexOf(definition.id);
       const cost: BuildMenuCost[] = definition.buildCost.map((stack) =>
         freeze({ itemId: stack.itemId, count: stack.count, held: this.simulation.inventory.count(stack.itemId) }),
       );
@@ -450,13 +473,14 @@ export class GameController {
           unlocked: this.simulation.unlocks.isBuildingUnlocked(definition.entityType),
           unlockedBy: this.simulation.technologies.unlockedBy('building', definition.id)?.name ?? null,
           selected: held?.buildingId === definition.id,
-          hotkey: index < HOTBAR_SLOTS ? index + 1 : null,
+          hotkey: slot < 0 ? null : slot + 1,
         }),
       );
     });
 
     return freeze({
       entries: freeze(entries),
+      hotbar: freeze(this.hotbar.map((id) => entries.find((entry) => entry.buildingId === id) ?? null)),
       selectedBuildingId: held?.buildingId ?? null,
       rotation: this.cursor.buildRotation,
     });
@@ -490,6 +514,7 @@ export class GameController {
           // the rows beneath it can never disagree about what a bag is full of.
           slots: Math.ceil(count / definition.stackSize),
           stackSize: definition.stackSize,
+          buildingId: this.buildingForItem(definition.id),
         }),
       );
     }
@@ -1011,17 +1036,55 @@ export class GameController {
   }
 
   /**
-   * Select hotbar slot `slot` (1-based). Slots past the content table do nothing.
+   * Select hotbar slot `slot` (1-based). An empty slot empties the hand.
    *
-   * This is C06's composition-root hotkey resolution, moved where §4 puts it.
-   * The mapping is still pure content: slot *n* is the *n*th entry of
-   * `data/buildings.ts`, so a building added there gains a hotkey, a toolbar
-   * tile and a menu row with no code change anywhere.
+   * What a slot holds is the player's arrangement (`assignSlot`), starting
+   * from the first nine buildings in content order.
    */
   selectSlot(slot: number): void {
-    if (!Number.isInteger(slot) || slot < 1 || slot > HOTBAR_SLOTS) return;
-    const definition: BuildingDefinition | undefined = this.simulation.buildings.all()[slot - 1];
-    this.selectBuilding(definition?.id ?? null);
+    if (!isHotbarSlot(slot)) return;
+    this.selectBuilding(this.hotbar[slot - 1] ?? null);
+  }
+
+  /**
+   * Put a building on hotbar slot `slot` (1-based) — an item dragged there
+   * from the inventory. A building already on another slot moves rather than
+   * appearing twice, so a number key always means one thing.
+   */
+  assignSlot(slot: number, buildingId: string): void {
+    if (!isHotbarSlot(slot) || !this.simulation.buildings.has(buildingId)) return;
+    const previous = this.hotbar.indexOf(buildingId);
+    if (previous === slot - 1) return;
+    if (previous >= 0) this.hotbar[previous] = null;
+    this.hotbar[slot - 1] = buildingId;
+    this.emit({ type: 'buildMenuChanged' });
+  }
+
+  /** Empty hotbar slot `slot` (1-based) — a right-click on it. */
+  clearSlot(slot: number): void {
+    if (!isHotbarSlot(slot) || this.hotbar[slot - 1] === null) return;
+    this.hotbar[slot - 1] = null;
+    this.emit({ type: 'buildMenuChanged' });
+  }
+
+  /** The hotbar as building ids, for the composition root to remember. */
+  getHotbarLayout(): readonly (string | null)[] {
+    return freeze([...this.hotbar]);
+  }
+
+  /**
+   * The building an item places, or `null` for an item that places nothing.
+   *
+   * §15 makes every build cost exactly one of the building's own item, so this
+   * is the building whose cost is that one item. Asked by the inventory view,
+   * which is how a building in the bag becomes something to pick up and drag.
+   */
+  buildingForItem(itemId: string): string | null {
+    for (const definition of this.simulation.buildings.all()) {
+      const cost = definition.buildCost;
+      if (cost.length === 1 && cost[0]?.itemId === itemId) return definition.id;
+    }
+    return null;
   }
 
   /* ---------------------------------------------------------------- *
@@ -1365,4 +1428,9 @@ const RESOURCE_NAMES: readonly string[] = Object.freeze(
 
 function freeze<T>(value: T): Readonly<T> {
   return Object.freeze(value);
+}
+
+/** Is `slot` a 1-based hotbar slot? */
+function isHotbarSlot(slot: number): boolean {
+  return Number.isInteger(slot) && slot >= 1 && slot <= HOTBAR_SLOTS;
 }
