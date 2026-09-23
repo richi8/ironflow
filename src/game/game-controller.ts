@@ -92,7 +92,9 @@ import {
   MINE_RANGE_TILES,
   type CraftOrder,
 } from './player/player-state.js';
-import { NORTH, type Rotation, type TileCoord } from './world/coordinates.js';
+import { DIRECTION_OFFSETS, EAST, NORTH, SOUTH, type Rotation, type TileCoord } from './world/coordinates.js';
+import type { ObjectiveGoal } from './views/objective-view.js';
+import { GAME_SPEEDS } from './game.js';
 import { CHUNK_SIZE } from './world/chunk.js';
 import { unpackChunkKey } from './world/explored.js';
 import { TILE_TYPE_COUNT, tileProperties, type TileType } from './world/tile.js';
@@ -432,6 +434,7 @@ export class GameController {
       alerts: this.alerts,
       power: this.powerView(),
       research: this.researchTileView(),
+      speed: this.game.getSpeed(),
     });
   }
 
@@ -1522,6 +1525,112 @@ export class GameController {
 
   togglePause(): void {
     this.setPaused(!this.game.isPaused());
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Speed (C30 task 5)
+   * ---------------------------------------------------------------- */
+
+  /** Simulated seconds per real second. See `GAME_SPEEDS`. */
+  getSpeed(): number {
+    return this.game.getSpeed();
+  }
+
+  /**
+   * One step faster (`+1`) or slower (`-1`) through `GAME_SPEEDS`, stopping
+   * at either end. Returns the speed now in effect.
+   *
+   * "A speed control for testing": watching a furnace column fill or a
+   * patch run dry is minutes at 1x. It changes how many ticks a frame runs
+   * and nothing about what a tick does, so a factory run at 8x is the factory
+   * run at 1x, sooner — §8's "production speed must never depend on FPS" is
+   * the same sentence about the same loop.
+   */
+  stepSpeed(direction: 1 | -1): number {
+    const current = GAME_SPEEDS.indexOf(this.game.getSpeed());
+    const index = Math.min(GAME_SPEEDS.length - 1, Math.max(0, (current < 0 ? 0 : current) + direction));
+    const speed = GAME_SPEEDS[index] ?? 1;
+    this.game.setSpeed(speed);
+    return speed;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * The keyboard's target, and the first-run objectives (C30)
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Where the keyboard is pointing: the tile in front of the player, and the
+   * entity standing on it.
+   *
+   * With a building held, the tile is where that building's footprint would
+   * have its north-west corner if it stood **entirely** in front of the
+   * player, centred on the way they face. A footprint anchored on the front
+   * tile would reach back over the player for anything wider than a tile
+   * facing north or west, and the placement would be refused for standing on
+   * them — or, worse, not refused.
+   *
+   * The entity is the one on the front tile itself, which is what a player
+   * facing a machine means by "this one".
+   */
+  getFacingTarget(): { readonly tile: TileCoord; readonly entityId: EntityId | null } | null {
+    const player = this.simulation.player;
+    const ahead = DIRECTION_OFFSETS[player.facing];
+    if (ahead === undefined) return null;
+    const front = { x: player.tileX + ahead.x, y: player.tileY + ahead.y };
+    const occupant = this.simulation.entities.at(front.x, front.y);
+    const entityId = occupant?.id ?? null;
+
+    const tool = this.cursor.buildTool;
+    if (tool === null || !this.simulation.buildings.has(tool.buildingId)) {
+      return freeze({ tile: freeze(front), entityId });
+    }
+    const definition = this.simulation.buildings.get(tool.buildingId);
+    const rotation = BuildingRegistry.normalizeRotation(definition, this.cursor.buildRotation);
+    const { width, height } = footprintExtent(definition.size, rotation);
+    // Centred across the facing axis; along it, the near edge touches the
+    // front tile. Floor division, so an even width leans the same way for
+    // every building rather than by rounding accident.
+    const across = { x: front.x - Math.floor((width - 1) / 2), y: front.y - Math.floor((height - 1) / 2) };
+    let tile: TileCoord;
+    if (player.facing === NORTH) tile = { x: across.x, y: front.y - (height - 1) };
+    else if (player.facing === SOUTH) tile = { x: across.x, y: front.y };
+    else if (player.facing === EAST) tile = { x: front.x, y: across.y };
+    else tile = { x: front.x - (width - 1), y: across.y };
+    return freeze({ tile: freeze(tile), entityId });
+  }
+
+  /**
+   * How far the world has got towards one goal. See `views/objective-view.ts`.
+   *
+   * A count rather than a yes-or-no, so that "mine 20 iron ore" can say
+   * "12 of 20". An id the content table does not have counts nothing rather
+   * than throwing: the objectives are words written in `ui/`, and a typo in
+   * them should read as a goal nobody can finish, not take the frame down.
+   */
+  countObjective(goal: ObjectiveGoal): number {
+    const simulation = this.simulation;
+    switch (goal.kind) {
+      case 'carried':
+        return simulation.items.has(goal.itemId) ? simulation.inventory.count(goal.itemId) : 0;
+      case 'built': {
+        if (!simulation.buildings.has(goal.buildingId)) return 0;
+        return simulation.entities.byType(simulation.buildings.get(goal.buildingId).entityType).length;
+      }
+      case 'stored': {
+        if (!simulation.items.has(goal.itemId)) return 0;
+        const itemId = simulation.items.idOf(goal.itemId);
+        let total = 0;
+        for (const definition of simulation.buildings.all()) {
+          if (definition.storage === undefined) continue;
+          for (const entity of simulation.entities.byType(definition.entityType)) {
+            const chest = asChest(entity);
+            if (chest === null) continue;
+            for (const [, id, count] of chest.contents) if (id === itemId) total += count;
+          }
+        }
+        return total;
+      }
+    }
   }
 
   /* ---------------------------------------------------------------- *

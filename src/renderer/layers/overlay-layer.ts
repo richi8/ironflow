@@ -298,11 +298,44 @@ export class OverlayLayer {
     ctx.fill();
     ctx.strokeStyle = ghost.valid ? color('ok') : color('danger');
     ctx.lineWidth = Math.max(1, OUTLINE_WIDTH * camera.zoom);
+    // C30: never colour alone. A refused spot is also a *shape* — a dashed
+    // edge and a cross — so red and green need not be told apart to read it.
+    if (!ghost.valid) ctx.setLineDash([4 * camera.zoom, 3 * camera.zoom]);
     ctx.stroke();
+    ctx.setLineDash(EMPTY_DASH);
+    if (!ghost.valid) this.drawCross(ctx, camera, ghost);
 
     if (ghost.resourceTiles !== null) {
       this.drawResourceCount(ctx, camera, ghost, ghost.resourceTiles);
     }
+  }
+
+  /**
+   * An X across a refused footprint, corner to corner (C30). Drawn over a dark
+   * edge so it reads on any terrain, and asked of the camera corner by corner
+   * rather than sized from the tile, because §5 keeps the projection in one
+   * file.
+   */
+  private drawCross(ctx: CanvasRenderingContext2D, camera: Camera, ghost: GhostView): void {
+    const inset = 0.2;
+    const nw = camera.worldToScreen(ghost.x + inset, ghost.y + inset);
+    const ne = camera.worldToScreen(ghost.x + ghost.width - inset, ghost.y + inset);
+    const sw = camera.worldToScreen(ghost.x + inset, ghost.y + ghost.height - inset);
+    const se = camera.worldToScreen(ghost.x + ghost.width - inset, ghost.y + ghost.height - inset);
+    ctx.beginPath();
+    ctx.moveTo(nw.x, nw.y);
+    ctx.lineTo(se.x, se.y);
+    ctx.moveTo(ne.x, ne.y);
+    ctx.lineTo(sw.x, sw.y);
+    ctx.lineCap = 'round';
+    const width = Math.max(2, OUTLINE_WIDTH * 2 * camera.zoom);
+    ctx.lineWidth = width + 2;
+    ctx.strokeStyle = color('bg-deep');
+    ctx.stroke();
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color('danger');
+    ctx.stroke();
+    ctx.lineCap = 'butt';
   }
 
   /**

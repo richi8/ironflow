@@ -13,6 +13,13 @@ import { Simulation } from './simulation.js';
  * the `Renderer` interface does not exist until C03 and inventing it now would
  * be an abstraction for a hypothetical (§19 rule 10).
  */
+/**
+ * The speeds C30's control steps through. Whole numbers only — see
+ * `SimulationClock.setSpeed` — and no slower than real time, because the
+ * control is for watching a factory get somewhere, and pause already exists.
+ */
+export const GAME_SPEEDS: readonly number[] = Object.freeze([1, 2, 4, 8]);
+
 export interface GameOptions {
   readonly simulation: Simulation;
   readonly scheduler: FrameScheduler;
@@ -77,6 +84,15 @@ export class Game {
   /** Hold the simulation still, or let it run again. C07's HUD owns the button. */
   setPaused(paused: boolean): void {
     this.loop.setPaused(paused);
+  }
+
+  /** Run faster than real time, for testing (C30 task 5). One of `GAME_SPEEDS`. */
+  setSpeed(speed: number): void {
+    this.loop.setSpeed(speed);
+  }
+
+  getSpeed(): number {
+    return this.loop.getSpeed();
   }
 
   /** Resume timing after the page was hidden, without crediting the gap. */

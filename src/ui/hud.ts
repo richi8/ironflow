@@ -127,7 +127,14 @@ export class Hud {
     this.setValue('alerts', formatCount(view.alerts));
     this.updatePower(view);
     this.updateResearch(view);
-    this.setValue('rate', this.ticksPerSecond.toFixed(1));
+    // C30's speed control says so where the rate is, and only when it is on:
+    // a factory at 4x that looked like 1x would look broken.
+    this.setValue('rate', view.speed === 1 ? this.ticksPerSecond.toFixed(1) : `${this.ticksPerSecond.toFixed(0)} ×${view.speed}`);
+    const rate = this.tiles.get('rate');
+    if (rate !== undefined) {
+      rate.root.classList.toggle('is-fast', view.speed !== 1);
+      rate.root.title = view.speed === 1 ? 'TPS — ticks per second. [ and ] change the game speed' : `TPS — running at ${view.speed}x speed. [ slows it back down`;
+    }
     this.setValue('time', formatClock(view.playtimeSeconds));
 
     this.tiles.get('alerts')?.root.classList.toggle('is-warning', view.alerts > 0);

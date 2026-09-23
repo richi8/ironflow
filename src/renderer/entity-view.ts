@@ -136,8 +136,11 @@ export function buildingSprite(definition: BuildingDefinition, rotation: Rotatio
  * that into one of the atlas's seventeen arm positions. Rounded rather than
  * floored so the two ends of the sweep are reached, and reached symmetrically.
  */
-function inserterSpriteFor(inserter: InserterEntity, config: InserterConfig): SpriteId {
-  const swing = Math.round(inserterArmPosition(inserter, config) * INSERTER_SWING_STEPS);
+function inserterSpriteFor(inserter: InserterEntity, config: InserterConfig, sweep: boolean): SpriteId {
+  const position = inserterArmPosition(inserter, config);
+  // Reduced motion (C30) keeps the arm's *answer* — which side it is over,
+  // and whether it holds something — and drops the sweep between the two.
+  const swing = sweep ? Math.round(position * INSERTER_SWING_STEPS) : position < 0.5 ? 0 : INSERTER_SWING_STEPS;
   return inserterSprite(inserter.rotation, swing, inserter.heldItem !== NO_ITEM);
 }
 
@@ -183,10 +186,11 @@ function spriteFor(
   buildings: BuildingRegistry,
   store: EntityStore,
   phase: number,
+  sweep: boolean,
 ): SpriteId {
   const inserter = definition.inserter === undefined ? null : asInserter(entity);
   const config = inserter === null ? null : buildings.inserterFor(entity.type);
-  if (inserter !== null && config !== null) return inserterSpriteFor(inserter, config);
+  if (inserter !== null && config !== null) return inserterSpriteFor(inserter, config, sweep);
   // The second building whose appearance depends on what it is doing rather
   // than only on how it is turned: which end of a run a mouth is depends on
   // where its partner stands, which is a fact about the pair (C23).
@@ -227,7 +231,7 @@ export function activityFrame(seconds: number, fps = MACHINE_FPS): number {
  * stalled reason, is at rest: a machine that is not working should *look*
  * stopped, which is pillar 3 before the player has opened the inspector.
  */
-function isWorking(entity: Entity): boolean {
+export function isWorking(entity: Entity): boolean {
   const status = (entity as { readonly status?: unknown }).status;
   return status === MachineStatus.Running || status === MachineStatus.LowPower;
 }
@@ -244,6 +248,12 @@ function isWorking(entity: Entity): boolean {
 export interface DescribeOptions {
   readonly within?: { readonly index: EntityIndex; readonly bounds: TileBounds };
   readonly animate?: boolean;
+  /**
+   * The player asked for less motion (C30, `prefers-reduced-motion` or the
+   * setting). Everything `animate: false` stops, and the inserter arm too:
+   * it snaps to whichever end it is nearer instead of sweeping between them.
+   */
+  readonly reducedMotion?: boolean;
 }
 
 /**
@@ -263,14 +273,15 @@ export function describeEntities(
   options: DescribeOptions = {},
 ): RenderEntity[] {
   const out: RenderEntity[] = [];
-  const animate = options.animate ?? true;
+  const still = options.reducedMotion === true;
+  const animate = (options.animate ?? true) && !still;
   const frame = animate ? activityFrame(seconds) : 0;
   const visit = (entity: Entity): void => {
     const definition = buildings.forEntityType(entity.type);
     const extent = footprintExtent(definition.size, entity.rotation);
     const speed = carrierSpeed(definition);
     const phase = speed === null || !animate ? 0 : beltPhase(speed, seconds);
-    let sprite = spriteFor(entity, definition, buildings, store, phase);
+    let sprite = spriteFor(entity, definition, buildings, store, phase, !still);
     // An inserter shows what it is doing through its arm, which is state,
     // not animation; everything else with a status gets the activity cycle.
     if (frame !== 0 && definition.inserter === undefined && isWorking(entity)) {
@@ -643,7 +654,7 @@ export function describeAnnotations(
       sprite: itemSprite(badge.itemId),
       count: badge.count,
       // Measured from the machine's own sprite, which is the one standing up.
-      lift: spriteLift(spriteFor(entity, definition, buildings, store, 0)),
+      lift: spriteLift(spriteFor(entity, definition, buildings, store, 0, true)),
     });
   });
 

@@ -65,6 +65,27 @@ export class SimulationClock {
   private lastUs: number | null = null;
   private shedCount = 0;
   private tickBudgetTotal = 0;
+  /** Simulated time per real time. An integer, so the accumulator stays exact. */
+  private speed = 1;
+
+  /**
+   * Run `speed` simulated seconds per real one (C30 task 5).
+   *
+   * A whole number, which is what keeps the note at the top of this file
+   * true: a frame's microseconds times an integer is still an integer. The
+   * step cap scales with it, or 8x would be 5 ticks a frame and not 8x; the
+   * 250 ms clamp does not, because it is about real time away from the tab.
+   */
+  setSpeed(speed: number): void {
+    if (!Number.isInteger(speed) || speed < 1) {
+      throw new RangeError(`SimulationClock.setSpeed: ${speed} is not a whole number of at least 1.`);
+    }
+    this.speed = speed;
+  }
+
+  getSpeed(): number {
+    return this.speed;
+  }
 
   /**
    * Begin (or resume) timing at `nowUs` without crediting the gap since the
@@ -94,10 +115,11 @@ export class SimulationClock {
     if (dtUs < 0) dtUs = 0;
     if (dtUs > MAX_FRAME_US) dtUs = MAX_FRAME_US;
 
-    this.accumulator += dtUs * UNITS_PER_US;
+    this.accumulator += dtUs * UNITS_PER_US * this.speed;
 
+    const cap = MAX_STEPS_PER_FRAME * this.speed;
     let steps = 0;
-    while (this.accumulator >= UNITS_PER_TICK && steps < MAX_STEPS_PER_FRAME) {
+    while (this.accumulator >= UNITS_PER_TICK && steps < cap) {
       this.accumulator -= UNITS_PER_TICK;
       steps += 1;
     }
@@ -107,7 +129,7 @@ export class SimulationClock {
     // sub-tick remainder on a frame that happened to consume exactly its budget,
     // which makes render interpolation stutter at low frame rates.
     let shed = false;
-    if (steps === MAX_STEPS_PER_FRAME && this.accumulator >= UNITS_PER_TICK) {
+    if (steps === cap && this.accumulator >= UNITS_PER_TICK) {
       this.accumulator = 0;
       this.shedCount += 1;
       shed = true;

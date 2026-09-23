@@ -62,8 +62,9 @@ import type { RecipeView } from '../game/views/recipe-view.js';
 
 import type { InventoryCellView } from '../game/views/inventory-view.js';
 
-import { createIcon } from './icons.js';
-import { CELL_DRAG_TYPE, decodeCell, encodeCell, type CellRef } from './inventory.js';
+import { TONE_ICONS, createIcon, setIcon, type Tone } from './icons.js';
+import { BAG_COLUMNS, CELL_DRAG_TYPE, decodeCell, encodeCell, type CellRef } from './inventory.js';
+import { gridKeys } from './keyboard.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
 
 /** Buffer lines drawn per section. See the file header. */
@@ -95,8 +96,11 @@ const STATUS_TEXT: Readonly<Record<MachineStatus, string>> = Object.freeze({
   low_power: 'Low power — the network cannot keep up',
 });
 
-/** Which of §11's status tokens each one is painted in. */
-type StatusTone = 'ok' | 'warn' | 'danger' | 'idle';
+/**
+ * Which of §11's status tokens each one is painted in. Each tone has its own
+ * shape as well (`TONE_ICONS`, C30), so the row reads in greyscale.
+ */
+type StatusTone = Exclude<Tone, 'info'>;
 
 const STATUS_TONE: Readonly<Record<MachineStatus, StatusTone>> = Object.freeze({
   idle: 'idle',
@@ -161,7 +165,9 @@ export class Inspector {
   private readonly title = document.createElement('h2');
   private readonly closeButton = document.createElement('button');
   private readonly statusRow = document.createElement('div');
+  private readonly statusIcon = createIcon('idle');
   private readonly statusText = document.createElement('span');
+  private releaseGridKeys: (() => void) | null = null;
   private readonly progressRow = document.createElement('div');
   private readonly progressBar = document.createElement('div');
   private readonly progressValue = document.createElement('span');
@@ -255,7 +261,7 @@ export class Inspector {
     head.append(this.title, this.closeButton);
 
     this.statusRow.className = 'if-inspector__status';
-    this.statusRow.append(createIcon('alert'), this.statusText);
+    this.statusRow.append(this.statusIcon, this.statusText);
 
     this.progressRow.className = 'if-inspector__progress';
     const track = document.createElement('div');
@@ -336,6 +342,14 @@ export class Inspector {
     storageLabel.textContent = 'CONTENTS';
     this.storageGrid.className = 'if-bag if-chest-grid';
     this.storageSection.append(storageLabel, this.storageGrid);
+    // C30: arrows walk the chest, shift+arrow carries a stack a cell over.
+    this.releaseGridKeys = gridKeys(this.storageGrid, {
+      columns: BAG_COLUMNS,
+      onMove: (from, to) => {
+        const id = this.view?.id;
+        if (id !== undefined) this.options.onMoveStack({ entityId: id, slot: from }, { entityId: id, slot: to });
+      },
+    });
 
     const where = document.createElement('div');
     where.className = 'if-inspector__where';
@@ -387,6 +401,7 @@ export class Inspector {
     // the tone, and there is then no set of stale classes to remember to
     // remove when a machine goes from running to stalled and back.
     this.statusRow.dataset['tone'] = STATUS_TONE[view.status];
+    setIcon(this.statusIcon, TONE_ICONS[STATUS_TONE[view.status]]);
 
     const progress = view.progress;
     this.progressRow.hidden = progress === null;
@@ -423,6 +438,7 @@ export class Inspector {
 
   destroy(): void {
     this.closeButton.removeEventListener('click', this.handleClose);
+    this.releaseGridKeys?.();
     for (const section of [this.inputs, this.outputs]) {
       for (const row of section.rows) row.take.removeEventListener('click', this.handleTake);
     }

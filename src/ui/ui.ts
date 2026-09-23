@@ -75,12 +75,21 @@ import type { MapPoint } from '../game/views/map-view.js';
 
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
+import { activateRoleButtons } from './keyboard.js';
 import { MapPanel } from './map-panel.js';
 import { InventoryPanel } from './inventory.js';
 import { Notifications, alertMessage, rejectionMessage } from './notifications.js';
+import { OBJECTIVES, ObjectivesPanel, objectivesView } from './objectives.js';
 import { ResearchPanel } from './research-panel.js';
 import { SaveMenu, type SaveMenuView } from './save-menu.js';
+import { SettingsPanel, type MotionChoice, type SettingsView } from './settings-panel.js';
 import { Toolbar } from './toolbar.js';
+
+/** The panels that open in the middle of the screen, one at a time. */
+type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings';
+
+/** Their roots, for focus (C30). */
+const PANEL_SELECTOR = '.if-inventory, .if-research, .if-map, .if-saves, .if-settings';
 
 /** §13's HUD rate: counters, power, research. */
 export const HUD_HZ = 5;
@@ -122,6 +131,40 @@ export interface GameUIOptions {
    * do nothing, which is what they would do with no storage behind them.
    */
   readonly saves?: SaveBridge;
+  /**
+   * The player's preferences (C30), for the settings panel. Injected for
+   * `saves`' reason: they live in `localStorage`, which is the composition
+   * root's to touch. Omitted, the panel is not built.
+   */
+  readonly settings?: SettingsBridge;
+  /**
+   * The first-run objectives (C30 task 4): whether they are showing, which
+   * are done, and where to report a change so it outlives the tab. Omitted,
+   * there is no list.
+   */
+  readonly objectives?: ObjectivesBridge;
+}
+
+/** What the settings panel reads and asks for (C30). */
+export interface SettingsBridge {
+  readonly view: () => SettingsView;
+  readonly onVolume: (volume: number) => void;
+  readonly onMuted: (muted: boolean) => void;
+  readonly onScale: (scale: number) => void;
+  readonly onMotion: (motion: MotionChoice) => void;
+  readonly onBind: (action: string, code: string) => void;
+  readonly onResetBindings: () => void;
+}
+
+/** The objectives' remembered state. Structurally `platform/settings-store.ts`'s. */
+export interface ObjectiveProgress {
+  readonly visible: boolean;
+  readonly done: readonly string[];
+}
+
+export interface ObjectivesBridge {
+  readonly initial: ObjectiveProgress;
+  readonly onChange: (progress: ObjectiveProgress) => void;
 }
 
 /** What the save menu asks the composition root to do (C25). */
@@ -158,6 +201,13 @@ export class GameUI {
   private readonly map: MapPanel;
   private readonly saveMenu: SaveMenu;
   private readonly saves: SaveBridge | null;
+  private readonly settingsBridge: SettingsBridge | null;
+  private readonly settings: SettingsPanel | null;
+  private readonly objectivesBridge: ObjectivesBridge | null;
+  private readonly objectives: ObjectivesPanel;
+  /** Objectives met so far, in the order they were met. See `refreshObjectives`. */
+  private readonly objectivesDone: Set<string>;
+  private objectivesVisible: boolean;
   private readonly notifications = new Notifications();
   private readonly unsubscribes: (() => void)[] = [];
 
@@ -173,6 +223,31 @@ export class GameUI {
     this.root = options.root;
     this.controller = options.controller;
     this.saves = options.saves ?? null;
+    this.settingsBridge = options.settings ?? null;
+    this.objectivesBridge = options.objectives ?? null;
+    this.objectivesDone = new Set(this.objectivesBridge?.initial.done ?? []);
+    this.objectivesVisible = this.objectivesBridge?.initial.visible ?? false;
+    this.objectives = new ObjectivesPanel({ onDismiss: () => this.setObjectivesVisible(false) });
+    const bridge = this.settingsBridge;
+    this.settings =
+      bridge === null
+        ? null
+        : new SettingsPanel({
+            onVolume: bridge.onVolume,
+            onMuted: bridge.onMuted,
+            onScale: bridge.onScale,
+            onMotion: bridge.onMotion,
+            onObjectives: (visible) => this.setObjectivesVisible(visible),
+            onBind: (action, code) => {
+              bridge.onBind(action, code);
+              this.refreshSettings();
+            },
+            onResetBindings: () => {
+              bridge.onResetBindings();
+              this.refreshSettings();
+            },
+            onClose: () => this.toggleSettings(),
+          });
 
     this.hud = new Hud({
       onTogglePause: () => this.togglePauseMenu(),
@@ -194,6 +269,7 @@ export class GameUI {
       onToggleResearch: () => this.toggleResearch(),
       onToggleMap: () => this.toggleMap(),
       onToggleSaveMenu: () => this.toggleSaveMenu(),
+      onToggleSettings: () => this.toggleSettings(),
     });
     this.inspector = new Inspector({
       // The panel names an item and a count; which machine that means is the
@@ -243,6 +319,8 @@ export class GameUI {
         this.controller.holdItem(itemId);
         this.setInventoryOpen(false);
       },
+      // C30: a number pressed on a focused stack, the keyboard's drag.
+      onAssignHotbar: (slot, itemId) => this.controller.assignSlot(slot, itemId),
       onClose: () => this.toggleInventory(),
     });
     this.map = new MapPanel({
@@ -287,12 +365,23 @@ export class GameUI {
     this.research.mount(this.root, this.controller.getResearchView());
     this.map.mount(this.root);
     this.saveMenu.mount(this.root);
+    if (this.settings !== null && this.settingsBridge !== null) {
+      this.settings.mount(this.root, this.settingsBridge.view());
+    }
+    this.objectives.mount(this.root);
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
 
     this.toolbar.update(menuView);
     this.refreshHud();
+    this.objectives.setOpen(this.objectivesVisible);
+    this.refreshObjectives();
     window.addEventListener('keydown', this.handleEscape, true);
+    // C30: every `role="button"` in the UI presses on Enter and Space.
+    this.unsubscribes.push(activateRoleButtons(this.root));
+    // A panel's root takes focus when it opens (see `focusPanel`) and is not
+    // a tab stop of its own.
+    for (const panel of this.root.querySelectorAll<HTMLElement>(PANEL_SELECTOR)) panel.tabIndex = -1;
 
     this.unsubscribes.push(
       // §7: never fail silently. Every rejection — the shape ones refused at
@@ -385,6 +474,9 @@ export class GameUI {
       // And the map, for a reason one step slower again: what it shows moves
       // at the speed of a walk and of a radar sweep (C23).
       this.refreshMap();
+      // The first-run objectives (C30), for the bag's reason: what they
+      // count moves at the speed of a pick swing and a placed building.
+      this.refreshObjectives();
     }
 
     this.liveAccumulatorMs += frameMs;
@@ -412,30 +504,46 @@ export class GameUI {
    * the one Escape forgets.
    */
   closeDialog(): boolean {
-    const open = this.saveMenu.isOpen() || this.inventory.isOpen() || this.research.isOpen() || this.map.isOpen();
-    this.setSaveMenuOpen(false);
-    if (this.inventory.isOpen()) this.setInventoryOpen(false);
-    if (this.research.isOpen()) this.setResearchOpen(false);
-    if (this.map.isOpen()) this.setMapOpen(false);
+    const open =
+      this.saveMenu.isOpen() ||
+      this.inventory.isOpen() ||
+      this.research.isOpen() ||
+      this.map.isOpen() ||
+      this.settings?.isOpen() === true;
+    this.closeOthers(null);
     return open;
   }
 
   /** Open or close the inventory. Returns the new state (C21A). */
   toggleInventory(): boolean {
     const open = this.setInventoryOpen(!this.inventory.isOpen());
-    if (open && this.research.isOpen()) this.setResearchOpen(false);
-    if (open && this.map.isOpen()) this.setMapOpen(false);
-    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
+    if (open) this.closeOthers('inventory');
     return open;
   }
 
   /** Open or close the research panel. Returns the new state (C22). */
   toggleResearch(): boolean {
     const open = this.setResearchOpen(!this.research.isOpen());
-    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
-    if (open && this.map.isOpen()) this.setMapOpen(false);
-    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
+    if (open) this.closeOthers('research');
     return open;
+  }
+
+  /** Open or close the settings. Returns the new state (C30). */
+  toggleSettings(): boolean {
+    if (this.settings === null) return false;
+    const open = this.setSettingsOpen(!this.settings.isOpen());
+    if (open) this.closeOthers('settings');
+    return open;
+  }
+
+  /** Is the settings panel on screen? For the composition root and the tests. */
+  isSettingsOpen(): boolean {
+    return this.settings?.isOpen() === true;
+  }
+
+  /** Are the first-run objectives on screen? For the tests. */
+  isObjectivesOpen(): boolean {
+    return this.objectives.isOpen();
   }
 
   /**
@@ -463,9 +571,7 @@ export class GameUI {
   /** Open or close the save menu. Returns the new state (C25). */
   toggleSaveMenu(): boolean {
     const open = this.setSaveMenuOpen(!this.saveMenu.isOpen());
-    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
-    if (open && this.research.isOpen()) this.setResearchOpen(false);
-    if (open && this.map.isOpen()) this.setMapOpen(false);
+    if (open) this.closeOthers('saves');
     return open;
   }
 
@@ -477,12 +583,24 @@ export class GameUI {
   /** Open or close the map. Returns the new state (C23). */
   toggleMap(): boolean {
     const open = this.setMapOpen(!this.map.isOpen());
-    // Panels want the same half of the screen. One at a time: they answer
-    // different questions and stacking them answers neither.
-    if (open && this.inventory.isOpen()) this.setInventoryOpen(false);
-    if (open && this.research.isOpen()) this.setResearchOpen(false);
-    if (open && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
+    if (open) this.closeOthers('map');
     return open;
+  }
+
+  /**
+   * Close every panel but `keep` (`null` closes all of them).
+   *
+   * Panels want the same half of the screen. One at a time: they answer
+   * different questions and stacking them answers neither. One method rather
+   * than a list in every toggle, so a panel added later — C30's settings was
+   * the fifth — cannot be the one some toggle forgets to close.
+   */
+  private closeOthers(keep: PanelName | null): void {
+    if (keep !== 'inventory' && this.inventory.isOpen()) this.setInventoryOpen(false);
+    if (keep !== 'research' && this.research.isOpen()) this.setResearchOpen(false);
+    if (keep !== 'map' && this.map.isOpen()) this.setMapOpen(false);
+    if (keep !== 'saves' && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
+    if (keep !== 'settings' && this.settings?.isOpen() === true) this.setSettingsOpen(false);
   }
 
   /** Is the map on screen? For the composition root and the tests. */
@@ -505,6 +623,8 @@ export class GameUI {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
+    this.objectives.destroy();
+    this.settings?.destroy();
     this.saveMenu.destroy();
     this.map.destroy();
     this.research.destroy();
@@ -518,6 +638,9 @@ export class GameUI {
   /** Escape, before the keyboard layer hears it. See the header and `closeDialog`. */
   private readonly handleEscape = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || event.repeat) return;
+    // The settings panel is listening for a key to bind, and Escape is how
+    // that is cancelled — it is the panel's, not a request to close it.
+    if (this.settings?.isCapturing() === true) return;
     if (!this.closeDialog()) {
       // Something in hand: the input layer's Escape drops it (see the header).
       if (
@@ -545,6 +668,7 @@ export class GameUI {
     this.inventory.setOpen(open);
     this.toolbar.setInventoryOpen(open);
     if (open) this.refreshInventory();
+    this.focusPanel('.if-inventory', open);
     return open;
   }
 
@@ -565,6 +689,7 @@ export class GameUI {
     this.research.setOpen(open);
     this.toolbar.setResearchOpen(open);
     if (open) this.refreshResearch();
+    this.focusPanel('.if-research', open);
     return open;
   }
 
@@ -584,6 +709,7 @@ export class GameUI {
     this.map.setOpen(open);
     this.toolbar.setMapOpen(open);
     if (open) this.refreshMap();
+    this.focusPanel('.if-map', open);
     return open;
   }
 
@@ -604,7 +730,81 @@ export class GameUI {
     this.saveMenu.setOpen(open);
     this.toolbar.setSaveMenuOpen(open);
     this.saves?.onVisibility(open);
+    this.focusPanel('.if-saves', open);
     return open;
+  }
+
+  /** Show or hide the settings, repainting on the way in (C30). */
+  private setSettingsOpen(open: boolean): boolean {
+    if (this.settings === null) return false;
+    this.settings.setOpen(open);
+    this.toolbar.setSettingsOpen(open);
+    if (open) this.refreshSettings();
+    this.focusPanel('.if-settings', open);
+    return open;
+  }
+
+  private refreshSettings(): void {
+    if (this.settings === null || this.settingsBridge === null || !this.settings.isOpen()) return;
+    this.settings.update(this.settingsBridge.view());
+  }
+
+  /**
+   * Show or hide the first-run objectives, and remember it (C30 task 4).
+   * Called by SKIP, by CLOSE once they are finished, and by the settings
+   * checkbox that brings them back.
+   */
+  private setObjectivesVisible(visible: boolean): void {
+    this.objectivesVisible = visible;
+    this.objectives.setOpen(visible);
+    this.reportObjectives();
+    this.refreshObjectives();
+    this.refreshSettings();
+  }
+
+  /**
+   * Count, tick, and tell the composition root when a line newly ticks.
+   *
+   * Only while the list is showing: a player who skipped it pays nothing for
+   * it, and on §12's reference factory the `stored` count walks every chest.
+   * A ticked line stays ticked (see `objectives.ts`), which is why the done
+   * set is the UI's and not recomputed from the world each time.
+   */
+  private refreshObjectives(): void {
+    if (!this.objectivesVisible) return;
+    const view = objectivesView(OBJECTIVES, this.objectivesDone, (goal) => this.controller.countObjective(goal));
+    let changed = false;
+    for (const line of view.lines) {
+      if (line.done && !this.objectivesDone.has(line.id)) {
+        this.objectivesDone.add(line.id);
+        changed = true;
+      }
+    }
+    this.objectives.update(view);
+    if (changed) this.reportObjectives();
+  }
+
+  private reportObjectives(): void {
+    this.objectivesBridge?.onChange({ visible: this.objectivesVisible, done: [...this.objectivesDone] });
+  }
+
+  /**
+   * Move focus into a panel as it opens, and out as it closes (C30 task 3).
+   *
+   * Into the panel's own root, which is focusable but not a tab stop, so the
+   * next Tab lands on its first control and nothing is pressed by accident.
+   * Out, only if focus was inside it: a panel closing must not take focus
+   * away from wherever the player had moved it since.
+   */
+  private focusPanel(selector: string, open: boolean): void {
+    const panel = this.root.querySelector<HTMLElement>(selector);
+    if (panel === null) return;
+    if (open) {
+      panel.focus({ preventScroll: true });
+      return;
+    }
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && panel.contains(active)) active.blur();
   }
 
   /** Read a fresh snapshot of the selected machine, or close the panel. */

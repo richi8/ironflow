@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C29 complete — the renderer is inside §12, and the game has art.** Measured first. At the far zoom, drawing cost 38 of a 45 ms frame. At every zoom, describing all 20,000 entities cost about 2 ms, even with one on screen. Three of §16's paths fixed it: terrain caching (verified, and a world-chunk seam found and fixed), an image atlas, and a spatial index. The depth sort also computes each key once. The atlas is baked at startup from code-drawn art (`sprite-painter.ts`) into a JSON-described sheet per scale, each painted on first use. Render is now 1.7 ms at zoom 1 over the reference factory (was 4.8), and §12's 5,000 entities on screen at max zoom-out draw in 3.2 ms at 60 fps. Machines, the worker, belts and inserters animate from render-side time and stored status, and nothing animates below zoom 0.5. The simulation is unchanged. Next: C30 — audio, UX & accessibility polish. |
+| **Status** | **C30 complete — Part II is finished, and v1 is feature-complete.** The game has sound, synthesised with `AudioContext` under a hard cap of 16 sources: four hum voices follow the nearest working machines, and the rest are culled by distance. It can be played entirely from the keyboard: Enter acts on the tile in front of the player, Delete removes, and every panel has Tab and arrow navigation. Keys can be rebound in a new settings panel. Reduced motion (system or setting) stops belts, machines and the player, and snaps inserter arms to an end. Every status colour now has a shape beside it. UI text is at least 14 px, with a UI scale from 85% to 150%. A skippable first-run list of five objectives ends at C20's first automated plate. A 1x-8x speed control and a close guard for unsaved play complete it. Preferences live in `localStorage`, never in a save. One acceptance line stays open: nobody has yet watched a first-time player follow the objectives. Next: nothing is scheduled. C31 (enemies) stays gated, NO-GO since C23. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C30 — Audio, UX & accessibility polish** |
+| **First action** | None scheduled. Part II ends at C30, and C31 is gated (NO-GO). The open item is a first-time playtest of C30's objectives. |
 
 ---
 
@@ -280,6 +280,11 @@ src/
     ui.ts
     hud.ts  build-menu.ts  inspector.ts  inventory-panel.ts
     research-panel.ts  save-menu.ts  notifications.ts  toolbar.ts
+    settings-panel.ts  objectives.ts   # C30
+    keyboard.ts                        # C30: Enter/Space on role=button, grid arrows
+
+  audio/
+    audio-engine.ts            # C30: synthesised sounds, a hard source cap
 
   persistence/
     save-repository.ts         # the interface, SaveSlot, SaveError
@@ -295,6 +300,7 @@ src/
   platform/                    # browser adapters behind interfaces game/ defines
     browser-clock.ts           # FrameScheduler: rAF + performance.now
     canvas-surface.ts          # canvas sizing, devicePixelRatio, ResizeObserver
+    settings-store.ts          # C30: preferences in localStorage, never in a save
 
   debug/
     debug-overlay.ts
@@ -323,6 +329,7 @@ These are enforceable and must be enforced (see C00, lint boundaries).
 | `ui/**` | `game/game-controller`, view models | simulation internals, `renderer/**` |
 | `persistence/**` | `game/save/**` types | simulation systems, DOM rendering |
 | `platform/**` | `game/**` interfaces | simulation state, `ui/**`, `renderer/**` internals |
+| `audio/**` *(C30)* | nothing | every other layer, `game/**` included. `main.ts` tells it what to play |
 | `main.ts` | everything | — |
 
 **Corollaries:**
@@ -816,6 +823,13 @@ actually remains, rather than unconditionally on hitting the step cap, so a
 frame that consumed exactly its budget keeps its legitimate sub-tick remainder
 for interpolation. Both are refinements of this section, not departures from it.
 
+**Implementation note (C30).** The speed control (1x to 8x) is an integer
+multiplier inside `SimulationClock`, so the accumulator above stays exact. The
+step cap is `MAX_STEPS_PER_FRAME` times the speed, and `MAX_FRAME_MS` is not
+scaled, because it measures real time away from the tab. It changes how many
+ticks a frame runs and never what a tick does, which is the next paragraph's
+rule seen from the other side.
+
 **Simulation rate and render rate are independent.** Production speed must never
 depend on FPS. A test at C18 runs 1,000 ticks with three different frame
 patterns and asserts identical output.
@@ -1203,8 +1217,16 @@ GameUI
  +-- ResearchPanel  tech tree, current research, queue
  +-- MapPanel      the explored world, and where the camera is looking
  +-- SaveMenu      list, save, load, delete, export, import
+ +-- SettingsPanel sound, UI scale, motion, key bindings        (C30)
+ +-- Objectives    the first-run list, top right, non-modal     (C30)
  +-- Notifications  transient toasts, including command rejections
 ```
+
+**C30 changed three things every panel shares** (see C30's decisions):
+nothing outside the debug overlay is set below 14 px, and the whole layer
+scales with the UI-scale setting; every status colour is paired with a shape
+(`TONE_ICONS`); and every panel works from the keyboard. Raising the text
+made **the bag five columns wide, not six**, in a 780 px panel.
 
 These are UI classes. They are not game entities and they do not appear in
 `game/`.
@@ -7094,6 +7116,195 @@ settings persistence.
 **Out of scope.** Music, voice, localisation *(design the UI so strings are
 centralised, but do not translate in v1)*.
 
+### What implementing it decided
+
+**Audio is a layer of its own, `src/audio/`, and knows no game.** It is
+`AudioEngine`, one file, and it imports nothing from `game/`, `ui/`,
+`renderer/` or anywhere else. A lint block holds that (§4's table has the
+row). The composition root turns what happened into calls: `play('place')`,
+`setHum(sources)`, `setBeltLevel(level)`. Everything is synthesised with
+oscillators, a filter and a looped second of noise, so, like C29's art, there
+are no asset files.
+
+- **Where the sounds come from.** Placement and removal are read off the entity
+  store's two counters, not off commands. Ids are never reused (§6 R5), so ids
+  handed out since the last frame are buildings placed, and those less the
+  store's growth are buildings removed. A belt drag that lays thirty in a frame
+  is one sound. `research_complete` gets a rising triad, and every other alert
+  a two-note fall. Command rejections get no sound; the toast is enough, and a
+  drag across occupied tiles would be a drum roll.
+- **The cap is hard and counted at `start()`.** `MAX_SOURCES` is 16. The hum is
+  a fixed pool of `HUM_VOICES` (4) persistent voices, retuned every 200 ms to
+  the nearest working machines on screen. The rest are culled by distance from
+  the screen centre, so a thousand running machines are four oscillators. The
+  belt ambience is one looped source whose level follows the belt items on
+  screen. One-shots get what is left and are dropped, never queued, when they
+  would go over. The same sound twice inside 60 ms is one sound.
+- **It never clicks because no gain is ever assigned.** Every source starts at
+  zero and ramps in over at least 5 ms, ramps back to zero before its
+  `stop()`, and every level change on a running voice is a `setTargetAtTime`
+  glide, master volume and mute included. The test records every call a fake
+  context receives and asserts exactly this.
+- **It waits for a gesture.** Browsers refuse audio before the player has done
+  something, so the context is built on the first key or click. Before that,
+  and in a browser with no Web Audio, every call is a no-op.
+- **A paused factory is silent.** The hum and the belts glide to zero while the
+  loop is paused (the game menu included); one-shots still play.
+
+**Preferences are one record in `localStorage`**, `platform/settings-store.ts`:
+volume, mute, UI scale, motion, key bindings and the first-run objectives'
+progress. None of it enters a save (C30's "UI preference — not game state"),
+so a factory moved to another machine does not bring the old machine's volume
+with it. Every field is read back through its own check and falls back on its
+own. A store that throws (some private modes) is a store with defaults in it.
+Bindings are kept raw and checked by `keybindings.ts`'s `parseBindings`,
+because only the input layer knows what an action is.
+
+**The keyboard points where the player faces.** "Full keyboard control
+including build" needed a way to aim, and the answer is the tile in front of
+the player rather than a second cursor to steer, because walking is already
+how a keyboard player points. Four new actions:
+
+```text
+world.interact   Enter, Num Enter   build what is held / feed the machine there /
+                                    open it / mine the ground while held
+world.remove     Delete, X          demolish what is in front
+ui.toggleSettings  O
+game.speedUp / game.speedDown   ]  [
+```
+
+- **`GameController.getFacingTarget()` answers where.** For an empty hand it is
+  the front tile. For a held building it is the anchor that puts the whole
+  footprint in front of the player, centred across the way they face. A 3x3
+  anchored on the front tile would reach back over the player facing north or
+  west.
+- **Aim switches, it does not merge.** `InputManager` points with the keyboard
+  after a world key, a hotbar number or R, and with the mouse again the moment
+  the pointer moves. Walking does not switch it: a mouse player walks with WASD
+  too, and their ghost must stay under the cursor. While the keyboard points,
+  hover is the target, so the ghost, its validity and the ore count all appear
+  in front of the player.
+- **Enter held while walking lays a line**, one building per tile reached, which
+  is the keyboard's drag.
+- **A focused button wins Enter and Space**, but only one focused by the
+  keyboard (`:focus-visible`). A mouse player who clicked MAP and then pressed
+  Enter meant the world. A hotbar slot gives focus back after it is pressed,
+  because the next thing done with a building in hand is put it down.
+
+**The panels, without a mouse.** `ui/keyboard.ts` holds two helpers every
+panel shares. `activateRoleButtons` makes Enter and Space press every
+`role="button"` (bag cells, chest cells, HUD tiles), carrying shift, so
+shift+Enter is shift-click. `gridKeys` makes arrows walk a grid and
+shift+arrow carry the focused stack one cell over. On top of those: a number
+key on a focused bag cell puts that item on the hotbar (the drag onto the
+hotbar), Delete or Backspace empties a focused hotbar slot, and shift+left or
+right swaps it with its neighbour. A panel's root takes focus as it opens and
+gives it back as it closes, so the next Tab lands inside. The five centre
+panels now close each other through one `closeOthers`, which is how the
+settings panel, the fifth, got the rule for free.
+
+**Rebinding** is the settings panel's KEYS column: every action from
+`ACTION_LABELS`, its keys, and CHANGE, which takes the next key. It listens on
+`window` in the capture phase so neither the game nor the UI's Escape hears
+it. Escape and Tab cancel instead of binding: a game with Escape bound to
+"walk left" has no way back out of anything, and Tab is how a keyboard moves
+between those buttons. CHANGE replaces the action's keys, and a key taken from
+another action leaves it, since a binding is a map from key to action.
+`ACTION_LABELS` is a `Record` over the action union, so an action added
+without a label, and therefore one a player could never rebind, is a type
+error. A test asserts every action has a default key.
+
+**Reduced motion** is `prefers-reduced-motion`, or a setting that overrides it
+either way (`system` / `reduce` / `full`). Reduced, the renderer's `animate`
+is off (belts, machines and the player's walk stand still). The inserter arm
+**snaps** to whichever end it is nearer instead of sweeping, which keeps the
+arm's answer (which side it is over, and whether it holds something) and drops
+the motion. CSS transitions go with it, through one class on `<html>` set
+from both sources, so `full` really is full on a system that asks for less.
+
+**Colour is never alone.** `ui/icons.ts` gained `TONE_ICONS`, one shape per
+status tone: a tick, the warning triangle, an octagon with a bar, a hollow
+ring, an i. The inspector's status row, every toast and the objectives use it,
+and a test asserts no two tones share a shape, which is what "distinguishable
+in greyscale" comes down to. Elsewhere:
+
+- a refused placement ghost has a dashed edge and a cross, not only red;
+- a HUD tile in its warning tone grows a `!`;
+- a research card's state is a glyph before its name (`✓ ▶ … ⊘`);
+- a full bag says FULL, and a blocked craft says BAG FULL.
+
+**14 px and a UI scale.** Every font size outside the debug overlay (a
+developer tool) is now at least 14 px. The scale (85% to 150%) is CSS `zoom`
+on the UI layer. It scales every panel's text, box and gap together and
+leaves the canvas, which has its own zoom, alone. Raising the text forced
+three layout changes, recorded here so a later chunk does not undo them:
+
+- **the bag is five columns, not six**, in a 780 px panel. `BAG_COLUMNS` in
+  `inventory.ts` is the keyboard's copy, and a test holds it to the stylesheet;
+- the hotbar slot's key number moved to the bottom-right corner;
+- at a large scale the HUD labels shorten with an ellipsis before anything
+  leaves the screen, and the toolbar wraps to a second row.
+
+**The first-run objectives** (`ui/objectives.ts`) are five lines: mine 20 iron
+ore, place a miner, place a furnace, connect a belt, and get an iron plate
+into a chest untouched. The last is C20's own milestone, read the way
+`first-factory.test.ts` reads it.
+
+- **Each line is a question the game can answer**, `ObjectiveGoal` (carried /
+  built / stored, in content ids). `GameController.countObjective` answers it
+  generically, so no tutorial is named in `game/` and no content id either
+  (§19 rule 17).
+- **A line once ticked stays ticked.** Ore gets smelted and belts get picked
+  up, and a list that un-ticks itself nags. Which lines are done, and whether
+  the list is showing, is stored with the other preferences, so it is about
+  this player and not about a world.
+- **It is non-modal and one tab stop.** It sits top right, takes no focus,
+  pauses nothing, and is counted on the 5 Hz lane only while showing. SKIP
+  hides it for good; the settings panel brings it back.
+- **The first line not done carries a hint** that names the mouse gesture and
+  then the key one. It is the only teaching there is.
+
+**The speed control** is 1x, 2x, 4x and 8x (`GAME_SPEEDS`), stepped with `[`
+and `]` and shown in the HUD's TPS tile only when it is not 1x. It lives in
+`SimulationClock` as an integer multiplier, so §8's integer accumulator stays
+exact. The per-frame step cap scales with it, or 8x would be five ticks a
+frame; the 250 ms clamp does not, since that is about real time away. It
+changes when ticks run and never what they do, and a test runs 2x for N
+frames against 1x for 2N and gets the same tick count. It is not saved.
+
+**Pause** stays what §13 decided on 2026-09-23: the HUD's button (the
+reference sheet's icon) and P open the game menu, and the loop is held behind
+it. C30 added nothing there.
+
+**The close guard** is `beforeunload`, armed whenever the tick has moved since
+the factory last reached storage or a file: a manual save, an export, an
+autosave, or a load. `SaveController` gained `onSaved` to report the first two.
+The browser shows its own wording. The `visibilitychange` autosave still runs
+behind it.
+
+**Acceptance, as verified.**
+
+```text
+every action reachable without a mouse     tests/unit/keyboard-access.dom.test.ts;
+                                           and by hand in headless Chromium: a
+                                           chest placed, refused, opened and
+                                           tabbed into with keys alone
+prefers-reduced-motion reduces motion      the class is set under Playwright's
+                                           reducedMotion: 'reduce'; describeEntities
+                                           with reducedMotion draws belts and machines
+                                           at rest and arms at an end
+status distinguishable in greyscale        TONE_ICONS distinct (test); ghost cross,
+                                           HUD mark, card glyphs, FULL (by hand)
+audio never exceeds the cap or clicks      tests/unit/audio-engine.test.ts
+new player reaches the first automated     the objectives lead there and every goal
+plate without external instruction         names real content (test); not yet
+                                           watched with a real first-time player
+```
+
+The last line is the one a test cannot close. The objectives make the path
+visible and each step checkable, but whether a stranger follows them is a
+playtest, and none has been run.
+
 ---
 
 ## C31 — Enemies  ⚠️ **GATED — do not implement by default**
@@ -7951,6 +8162,7 @@ Recommended next chunk
 | After C20 | **The game is fun.** Answered honestly, in writing. Failing this means staying in C20. |
 | After C24 | The save round-trip determinism test passes. |
 | After C29 | Every §12 budget is met on the reference factory. **Passed**, in headless Chromium at 1920x1080. Render 1.7 ms, 60 fps, 5,000 entities on screen at max zoom-out in 3.2 ms, tick 2.5 ms, load 155 ms, serialize 114 ms, 0.19 MB save, worldgen 199 ms, cold start under 70 ms. The longest frame interval is 20-26 ms, which is under the 50 ms hard fail and was not chased (see C29). |
+| After C30 | v1 is feature-complete: every C30 acceptance line verified. **Passed, with one open line** — the first-run objectives lead to the first automated plate, but no first-time player has yet been watched following them (see C30). |
 
 ---
 

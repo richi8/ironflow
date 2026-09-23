@@ -102,4 +102,11 @@ export interface HudView {
    * progress, which is a fact about the game rather than about the code.
    */
   readonly research: HudResearchView | null;
+  /**
+   * How many simulated seconds pass per real one (C30's speed control). 1
+   * almost always; the HUD says so only when it is not, because a factory
+   * running at four times speed and not saying so is a factory that looks
+   * broken.
+   */
+  readonly speed: number;
 }

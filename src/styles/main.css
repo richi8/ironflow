@@ -162,11 +162,15 @@ body {
 
 .if-hud__tile {
   display: flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
+  /* At a large UI scale (C30) the labels give way before anything leaves
+     the screen: they shorten, the numbers do not. */
+  min-width: 0;
   padding: 0 10px;
   color: var(--if-text-muted);
-  font-size: 12px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -196,6 +200,9 @@ body {
 }
 
 .if-hud__label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
   color: var(--if-text-dim);
   letter-spacing: 0.08em;
 }
@@ -218,7 +225,7 @@ body {
   background: var(--if-panel-high);
   color: var(--if-text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
@@ -242,6 +249,11 @@ body {
   bottom: 12px;
   transform: translateX(-50%);
   display: flex;
+  /* A second row rather than off the edge, at a large UI scale (C30). */
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 24px);
   align-items: stretch;
   gap: 4px;
   padding: 6px;
@@ -258,7 +270,7 @@ body {
   background: var(--if-panel-high);
   color: var(--if-text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -275,7 +287,7 @@ body {
   justify-content: center;
   min-width: 28px;
   color: var(--if-text-dim);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .if-toolbar__rotation.is-active {
@@ -289,7 +301,7 @@ body {
   align-items: flex-start;
   justify-content: center;
   gap: 2px;
-  width: 74px;
+  width: 84px;
   height: 44px;
   padding: 4px 6px;
   border: 1px solid var(--if-stroke);
@@ -297,7 +309,7 @@ body {
   background: var(--if-bg);
   color: var(--if-text);
   font: inherit;
-  font-size: 11px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
@@ -338,12 +350,14 @@ body {
   border-style: dashed;
 }
 
+/* Bottom right, on the count's row, since C30 raised the text to 14px: at
+   the top it sat on the end of the name. */
 .if-slot__key {
   position: absolute;
-  top: 3px;
-  right: 5px;
+  right: 6px;
+  bottom: 4px;
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .if-slot__name {
@@ -370,12 +384,14 @@ body {
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 95%, transparent);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* A chest: wide enough for its grid of slots, six to a row like the bag. */
 .if-inspector.is-wide {
-  width: 300px;
+  /* Wide enough for 14px names in five columns, and short of the bag, which
+     opens beside a chest and starts 390px left of centre. */
+  width: 392px;
 }
 
 .if-chest-grid {
@@ -396,7 +412,7 @@ body {
   flex: 1;
   margin: 0;
   color: var(--if-accent);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: normal;
   letter-spacing: 0.12em;
 }
@@ -489,7 +505,7 @@ body {
 
 .if-inspector__label {
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.12em;
 }
 
@@ -550,7 +566,7 @@ body {
 
 .if-recipe__rate {
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -558,7 +574,7 @@ body {
   grid-column: 1 / -1;
   overflow: hidden;
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -592,7 +608,7 @@ body {
   background: var(--if-panel-high);
   color: var(--if-text-muted);
   font: inherit;
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
@@ -624,12 +640,14 @@ body {
   left: 50%;
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100vw - 24px));
+  /* 780 since C30: at 14px text a bag cell needs about 84px for a nine-letter
+     word like "Transport" to sit on one line. */
+  width: min(780px, calc(100vw - 24px));
   padding: 10px;
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 96%, transparent);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateX(-50%);
 }
 
@@ -646,7 +664,7 @@ body {
 .if-inventory__title {
   margin: 0;
   color: var(--if-accent);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: normal;
   letter-spacing: 0.12em;
 }
@@ -654,7 +672,7 @@ body {
 .if-inventory__slots {
   flex: 1;
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.12em;
   text-align: right;
 }
@@ -666,7 +684,7 @@ body {
 .if-inventory__body {
   display: grid;
   flex: 1;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 3fr 2fr;
   gap: 12px;
   min-height: 0;
 }
@@ -692,14 +710,15 @@ body {
   flex: none;
   padding: 6px 2px;
   color: var(--if-text-dim);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
 .if-bag {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(6, 1fr);
+  /* Five, and `BAG_COLUMNS` in inventory.ts says the same for the keyboard. */
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   align-content: start;
   overflow-y: auto;
@@ -719,7 +738,7 @@ body {
   border-radius: var(--if-radius);
   background: var(--if-bg);
   cursor: grab;
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .if-bag-cell.is-empty {
@@ -747,7 +766,9 @@ body {
   line-height: 1.2;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  word-break: break-word;
+  /* Break between words; inside one only when it cannot fit at all. */
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .if-bag-cell__count {
@@ -804,7 +825,7 @@ body {
 
 .if-craft__time {
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -812,7 +833,7 @@ body {
   grid-column: 1 / -1;
   overflow: hidden;
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -918,7 +939,7 @@ body {
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 96%, transparent);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateX(-50%);
 }
 
@@ -1015,7 +1036,7 @@ body {
 .if-tech__cost,
 .if-tech__needs {
   color: var(--if-text-muted);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
@@ -1098,7 +1119,7 @@ body {
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel-high) 95%, transparent);
   color: var(--if-text);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -1138,7 +1159,7 @@ body {
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 96%, transparent);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateX(-50%);
 }
 
@@ -1183,7 +1204,7 @@ body {
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: color-mix(in srgb, var(--if-panel) 96%, transparent);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateX(-50%);
 }
 
@@ -1263,7 +1284,7 @@ body {
 .if-save-row__playtime,
 .if-save-row__size {
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.08em;
 }
 
@@ -1271,7 +1292,7 @@ body {
   flex: none;
   padding: 6px 2px;
   color: var(--if-text-dim);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .if-saves__actions {
@@ -1291,7 +1312,7 @@ body {
   background: var(--if-bg);
   color: var(--if-text);
   font: inherit;
-  font-size: 11px;
+  font-size: 14px;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
@@ -1330,7 +1351,7 @@ body {
   min-height: 16px;
   padding-top: 8px;
   color: var(--if-text-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -1340,4 +1361,329 @@ body {
 
 .if-saves__status.is-error {
   color: var(--if-danger);
+}
+
+/* -------------------------------------------------------------------------- *
+ * Accessibility (C30)
+ *
+ * Three rules that apply to every panel at once: the UI scale, a focus ring
+ * a keyboard player can find, and a floor under motion.
+ *
+ * The scale is `zoom` on the UI layer, which scales every panel's text, box
+ * and gap together and leaves the canvas — which has its own zoom — alone.
+ * The minimum text size is the other half of the same task and is in the
+ * rules above: nothing outside the debug overlay is set below 14px.
+ * -------------------------------------------------------------------------- */
+
+#ui {
+  zoom: var(--if-ui-scale, 1);
+}
+
+/* An ID beats every panel's own `outline: none`, which is the point: a focus
+   ring that some panel turned off is a panel the keyboard gets lost in. */
+#ui :focus-visible {
+  outline: 2px solid var(--if-accent-high);
+  outline-offset: 1px;
+}
+
+/* A panel's root takes focus when it opens so the next Tab lands inside it
+   (see `GameUI.focusPanel`). It is not a control, so it draws no ring. */
+#ui [tabindex='-1']:focus {
+  outline: none;
+}
+
+/* Reduced motion: set on <html> from the setting or the system's
+   `prefers-reduced-motion`, whichever the player chose (see `main.ts`). */
+.if-reduce-motion *,
+.if-reduce-motion *::before,
+.if-reduce-motion *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* Never colour alone. A HUD tile in its warning tone also grows a mark. */
+.if-hud__tile.is-warning .if-hud__value::after {
+  content: ' !';
+  font-weight: 700;
+}
+
+/* Running faster than real time says so in words and in the accent. */
+.if-hud__tile.is-fast {
+  color: var(--if-accent-high);
+}
+
+/* A research card's state as a glyph in front of its name, so researched,
+   active, queued and locked differ in shape and not only in border tone. */
+.if-tech[data-state='researched'] .if-tech__name::before {
+  content: '✓ ';
+}
+
+.if-tech[data-state='active'] .if-tech__name::before {
+  content: '▶ ';
+}
+
+.if-tech[data-state='queued'] .if-tech__name::before {
+  content: '… ';
+}
+
+.if-tech[data-state='locked'] .if-tech__name::before {
+  content: '⊘ ';
+}
+
+/* A toast leads with its kind's shape (see `TONE_ICONS`). */
+.if-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.if-toast > .if-icon {
+  margin-top: 2px;
+}
+
+.if-toast--reject > .if-icon {
+  color: var(--if-danger);
+}
+
+.if-toast--warn > .if-icon {
+  color: var(--if-warn);
+}
+
+.if-toast--info > .if-icon {
+  color: var(--if-blue-high);
+}
+
+/* The settings button: an icon, square, beside the four words. */
+.if-toolbar__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* -------------------------------------------------------------------------- *
+ * First steps (C30 task 4)
+ *
+ * Top right, under the HUD, where nothing else lives: the inspector has the
+ * left, the panels the middle, the toasts the bottom. Narrow, and it takes no
+ * clicks but its own button, so it never covers something the player is
+ * trying to reach.
+ * -------------------------------------------------------------------------- */
+
+.if-objectives {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  width: 300px;
+  padding: 10px 12px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 92%, transparent);
+  font-size: 14px;
+}
+
+.if-objectives__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.if-objectives__title {
+  margin: 0;
+  color: var(--if-accent);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.if-objectives__skip {
+  padding: 2px 8px;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-panel-high);
+  color: var(--if-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.if-objectives__skip:hover {
+  color: var(--if-text);
+}
+
+.if-objectives__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.if-objective {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--if-text);
+}
+
+.if-objective__text {
+  flex: 1;
+}
+
+.if-objective__count {
+  color: var(--if-text-muted);
+}
+
+/* Done: a tick (the icon), dimmed, and struck through — three cues, and not
+   one of them is a hue. */
+.if-objective.is-done {
+  color: var(--if-text-dim);
+}
+
+.if-objective.is-done .if-objective__text {
+  text-decoration: line-through;
+}
+
+.if-objective.is-done > .if-icon {
+  color: var(--if-ok);
+}
+
+.if-objectives__hint {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--if-stroke);
+  color: var(--if-text-muted);
+  line-height: 1.4;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Settings (C30)
+ * -------------------------------------------------------------------------- */
+
+.if-settings {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(820px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+.if-settings__body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(240px, 1fr) 1.6fr;
+  gap: 16px;
+  min-height: 0;
+}
+
+.if-settings__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.if-settings__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.if-settings__field > span:first-child {
+  flex: 1;
+  color: var(--if-text-muted);
+}
+
+.if-settings__field select,
+.if-settings__range {
+  max-width: 60%;
+  font: inherit;
+}
+
+.if-settings__field select {
+  padding: 3px 4px;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-bg);
+  color: var(--if-text);
+}
+
+.if-settings__range {
+  accent-color: var(--if-accent);
+}
+
+.if-settings__field input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--if-accent);
+}
+
+.if-settings__value {
+  min-width: 4ch;
+  text-align: right;
+}
+
+.if-settings .if-inspector__close {
+  margin-left: auto;
+}
+
+.if-settings__keys {
+  overflow: hidden;
+}
+
+.if-settings__bindings {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.if-binding {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--if-stroke) 50%, transparent);
+}
+
+.if-binding__label {
+  color: var(--if-text-muted);
+}
+
+.if-binding__keys {
+  color: var(--if-text);
+  white-space: nowrap;
+}
+
+.if-binding.is-unbound .if-binding__keys {
+  color: var(--if-text-dim);
+  font-style: italic;
+}
+
+.if-binding__change {
+  padding: 2px 8px;
+  border: 1px solid var(--if-stroke);
+  border-radius: 2px;
+  background: var(--if-panel-high);
+  color: var(--if-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.if-binding__change:hover {
+  border-color: var(--if-accent);
+}
+
+.if-settings__note {
+  margin: 0;
+  color: var(--if-text-dim);
 }

@@ -68,6 +68,7 @@ export class KeyboardInput {
   private readonly handleKeyDown = (event: Event): void => {
     const key = event as KeyboardEvent;
     if (isTypingTarget(key.target)) return;
+    if (pressesControl(key)) return;
 
     const action = actionFor(this.bindings, key.code);
     if (action === null) return;
@@ -105,6 +106,34 @@ export class KeyboardInput {
       this.held.delete(action);
       this.onAction(action, 'up');
     }
+  }
+}
+
+/**
+ * Is this Enter or Space pressing a button the player moved focus to (C30)?
+ *
+ * Those two keys are how a keyboard presses a button, and both are bound to
+ * the world — Enter builds, Space drags the view. A focused button has to
+ * win, or Tab-ing to BAG and pressing Enter would place a building instead.
+ *
+ * Only a button focused *by the keyboard*: a button keeps focus after a
+ * mouse click, and a mouse player who clicked MAP and then pressed Enter
+ * meant the world. `:focus-visible` is the browser's own answer to "how did
+ * focus get here". Where the selector is not understood (an old engine, a
+ * test DOM) any focused control counts, which errs towards the button.
+ */
+function pressesControl(key: KeyboardEvent): boolean {
+  if (key.code !== 'Enter' && key.code !== 'NumpadEnter' && key.code !== 'Space') return false;
+  const target = key.target as { tagName?: unknown; getAttribute?: unknown; matches?: unknown } | null;
+  if (target === null || typeof target !== 'object') return false;
+  const tag = typeof target.tagName === 'string' ? target.tagName : '';
+  const role = typeof target.getAttribute === 'function' ? (target as Element).getAttribute('role') : null;
+  if (tag !== 'BUTTON' && tag !== 'A' && role !== 'button') return false;
+  if (typeof target.matches !== 'function') return true;
+  try {
+    return (target as Element).matches(':focus-visible');
+  } catch {
+    return true;
   }
 }
 

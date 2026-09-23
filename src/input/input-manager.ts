@@ -233,6 +233,16 @@ export interface InputManagerOptions {
    * without one simply has nothing to copy.
    */
   readonly recipeOf?: (entityId: EntityId) => string | null;
+  /**
+   * The tile in front of the player, and what stands on it (C30).
+   *
+   * Where the keyboard points. Walking is already how a keyboard player
+   * aims, so the target is the tile they face rather than a second cursor to
+   * steer. It comes from outside for `recipeOf`'s reason: which tile that is
+   * depends on the player and on the footprint of what they hold, and this
+   * layer knows neither. Optional; without it the world keys do nothing.
+   */
+  readonly keyboardTarget?: () => ScenePickResult | null;
 }
 
 /** Keyboard pan speed, in CSS pixels per second. About a screen every 1.5 s. */
@@ -372,6 +382,23 @@ export class InputManager {
   /** See `InputManagerOptions.recipeOf`. Undefined in tests that predate C20. */
   private readonly recipeOf: ((entityId: EntityId) => string | null) | undefined;
 
+  /** See `InputManagerOptions.keyboardTarget`. */
+  private readonly keyboardTarget: (() => ScenePickResult | null) | undefined;
+
+  /**
+   * Is the keyboard doing the pointing (C30)?
+   *
+   * Set by a key that acts on the world or picks something up, cleared by the
+   * pointer moving. While it is set, hover — and with it the ghost and the
+   * placement check — is the tile in front of the player. Not set by walking:
+   * a mouse player walks with WASD too, and their ghost must stay under the
+   * cursor.
+   */
+  private keyboardAim = false;
+
+  /** Is the interact key held? It builds a line as the player walks, like a drag. */
+  private interactHeld = false;
+
   constructor(options: InputManagerOptions) {
     this.canvas = options.canvas;
     this.camera = options.camera;
@@ -379,6 +406,7 @@ export class InputManager {
     this.commands = options.commands;
     this.onAction = options.onAction;
     this.recipeOf = options.recipeOf;
+    this.keyboardTarget = options.keyboardTarget;
 
     this.mouse = new MouseInput(options.canvas, {
       onPointerDown: (sample) => this.handleDown(sample),
@@ -510,6 +538,15 @@ export class InputManager {
     }
     this.updateWalk();
     this.refreshHover();
+    // Interact held while walking lays one building per tile reached, which is
+    // the keyboard's drag. Only with a building: a held material feeds once
+    // per press, and held mining is already one command until release.
+    if (this.interactHeld && this.keyboardAim && this.tool !== null) this.actOnTile(this.hovered);
+  }
+
+  /** Is the keyboard doing the pointing? For the tests. See `keyboardAim`. */
+  get isKeyboardAiming(): boolean {
+    return this.keyboardAim;
   }
 
   /**
@@ -545,6 +582,7 @@ export class InputManager {
   private handleDown(sample: PointerSample): void {
     this.pointerX = sample.x;
     this.pointerY = sample.y;
+    this.keyboardAim = false;
     this.refreshHover();
 
     if (this.drag !== null) return; // a second button during a drag is ignored
@@ -614,6 +652,7 @@ export class InputManager {
   private handleMove(sample: PointerSample): void {
     this.pointerX = sample.x;
     this.pointerY = sample.y;
+    this.keyboardAim = false;
 
     const drag = this.drag;
     if (drag === null || drag.pointerId !== sample.pointerId) {
@@ -662,6 +701,7 @@ export class InputManager {
   private handleExit(): void {
     this.pointerX = null;
     this.pointerY = null;
+    if (this.keyboardAim) return;
     this.hovered = null;
     this.hoveredEntity = null;
   }
@@ -718,8 +758,51 @@ export class InputManager {
       // share the left button, and a held-over mining target would keep ticking
       // under a ghost the player is now placing.
       if (action === 'selection.clear') this.stopMining();
+      // Picking something up from the number row, or turning it, is the moment
+      // a keyboard player wants to see where it would go (C30).
+      if (action === 'build.rotate' || action.startsWith('build.slot')) this.aimWithKeyboard();
+      if (action === 'world.interact') this.interact();
+      if (action === 'world.remove') this.removeInFront();
+    } else if (action === 'world.interact') {
+      this.interactHeld = false;
+      this.lastActedTile = null;
+      this.stopMining();
     }
     this.onAction?.(action, phase);
+  }
+
+  /** Point with the keyboard, if there is a target to point at. */
+  private aimWithKeyboard(): boolean {
+    if (this.keyboardTarget === undefined) return false;
+    this.keyboardAim = true;
+    this.refreshHover();
+    return this.hovered !== null;
+  }
+
+  /**
+   * The keyboard's left click (C30), on the tile in front of the player.
+   *
+   * The same four answers a click gives, in the same order: a held building
+   * is placed, a held material feeds the machine there, an empty hand opens
+   * the machine, and bare ground is mined for as long as the key is down.
+   */
+  private interact(): void {
+    if (!this.aimWithKeyboard()) return;
+    this.interactHeld = true;
+    this.lastActedTile = null;
+    this.fed.clear();
+    if (this.tool === null && this.item === null && this.hoveredEntity !== null) {
+      this.selection = this.hoveredEntity;
+      return;
+    }
+    this.actOnTile(this.hovered);
+  }
+
+  /** The keyboard's right click on a building: demolish what is in front. */
+  private removeInFront(): void {
+    if (!this.aimWithKeyboard()) return;
+    this.selection = null;
+    this.removeAt(this.hovered);
   }
 
   private applyHeldKeys(dtMs: number): void {
@@ -758,6 +841,12 @@ export class InputManager {
    * ---------------------------------------------------------------- */
 
   private refreshHover(): void {
+    if (this.keyboardAim && this.keyboardTarget !== undefined) {
+      const target = this.keyboardTarget();
+      this.hovered = target?.tile ?? null;
+      this.hoveredEntity = target?.entityId ?? null;
+      return;
+    }
     if (this.pointerX === null || this.pointerY === null) {
       this.hovered = null;
       this.hoveredEntity = null;

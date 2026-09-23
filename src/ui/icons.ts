@@ -26,7 +26,14 @@ export type IconName =
   | 'map'
   | 'pause'
   | 'play'
-  | 'save';
+  | 'save'
+  | 'check'
+  | 'stop'
+  | 'idle'
+  | 'info'
+  | 'settings'
+  | 'sound'
+  | 'muted';
 
 /**
  * One path per icon, on a 16×16 grid, `evenodd` so a hole is a hole.
@@ -58,14 +65,54 @@ const PATHS: Readonly<Record<IconName, string>> = Object.freeze({
   play: 'M4 2.5 13 8l-9 5.5Z',
   /** A disk: the shutter above, the label below (C25). */
   save: 'M2 2h9.5L14 4.5V14H2Zm2 2v3.5h6V4Zm1 6v4h6v-4Zm2-5.5h2V7H7Z',
+  /*
+   * C30: a shape for every status, so no status is told by colour alone.
+   * Four silhouettes that differ in greyscale and at a glance — a tick, the
+   * triangle above, an octagon with a bar, and a hollow ring — one per tone
+   * the inspector, the toasts and the objectives use.
+   */
+  /** A tick in a disc: running, done, good news. */
+  check: 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1Zm3.3 4L7 9.3 4.7 7 3.6 8.1 7 11.5l5.4-5.4Z',
+  /** An octagon with a bar: stopped, and it will not start by itself. */
+  stop: 'M5.1 1h5.8L15 5.1v5.8L10.9 15H5.1L1 10.9V5.1ZM4 7v2h8V7Z',
+  /** A hollow ring: nothing to do. */
+  idle: 'M8 2a6 6 0 1 1 0 12A6 6 0 0 1 8 2Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
+  /** An i in a disc: something to know. */
+  info: 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1ZM7 7v5h2V7Zm0-3v2h2V4Z',
+  /** A gear: the settings (C30). */
+  settings:
+    'M7 1h2l.4 1.9 1.3.6 1.7-1 1.4 1.4-1 1.7.6 1.3L15 7v2l-1.9.4-.6 1.3 1 1.7-1.4 1.4-1.7-1-1.3.6L9 15H7l-.4-1.9-1.3-.6-1.7 1-1.4-1.4 1-1.7-.6-1.3L1 9V7l1.9-.4.6-1.3-1-1.7 1.4-1.4 1.7 1 1.3-.6ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
+  /** A speaker with a wave. */
+  sound: 'M2 6h3l4-3.5v11L5 10H2Zm9 .2a2.5 2.5 0 0 1 0 3.6l1 1a4 4 0 0 0 0-5.6Z',
+  /** A speaker with a cross. */
+  muted: 'M2 6h3l4-3.5v11L5 10H2Zm9.2-.2 1.3 1.3 1.3-1.3.9.9L13.4 8l1.3 1.3-.9.9-1.3-1.3-1.3 1.3-.9-.9L11.6 8l-1.3-1.3Z',
+});
+
+/** The tones §11's status colours paint. See `TONE_ICONS`. */
+export type Tone = 'ok' | 'warn' | 'danger' | 'idle' | 'info';
+
+/**
+ * The shape that goes with each status colour (C30: "never colour alone;
+ * pair every status colour with an icon or a shape"). One table, so the
+ * inspector, the toasts and the objectives cannot pair them differently, and
+ * a test can assert that no two tones share a shape — which is what
+ * "distinguishable in greyscale" comes down to.
+ */
+export const TONE_ICONS: Readonly<Record<Tone, IconName>> = Object.freeze({
+  ok: 'check',
+  warn: 'alert',
+  danger: 'stop',
+  idle: 'idle',
+  info: 'info',
 });
 
 /**
  * A 16×16 icon element, ready to be appended once and left alone.
  *
  * `aria-hidden`, because every icon in this UI sits beside its own text label
- * and a screen reader repeating "alert alert" is worse than silence. C30 is
- * where accessibility gets a proper pass.
+ * and a screen reader repeating "alert alert" is worse than silence. C30 kept
+ * that: the words are what a screen reader needs, and the shape is what a
+ * player who cannot tell amber from green needs.
  */
 export function createIcon(name: IconName): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');

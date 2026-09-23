@@ -17,6 +17,8 @@
 import type { Alert, AlertType } from '../game/views/alert.js';
 import type { CommandRejectionReason } from '../game/commands/command.js';
 
+import { TONE_ICONS, createIcon, type Tone } from './icons.js';
+
 /** How long a toast stays up. Long enough to read twice, short enough to forgive. */
 export const TOAST_LIFETIME_MS = 4000;
 
@@ -99,7 +101,14 @@ export function alertMessage(alert: Alert): string {
   return ALERT_TEXT[alert.type](alert);
 }
 
-type ToastKind = 'reject' | 'warn' | 'info';
+export type ToastKind = 'reject' | 'warn' | 'info';
+
+/** Which status tone, and so which shape, each kind of toast wears. */
+const TOAST_TONES: Readonly<Record<ToastKind, Tone>> = Object.freeze({
+  reject: 'danger',
+  warn: 'warn',
+  info: 'info',
+});
 
 interface Toast {
   readonly element: HTMLElement;
@@ -127,7 +136,11 @@ export class Notifications {
   push(text: string, kind: ToastKind = 'info'): void {
     const element = document.createElement('div');
     element.className = `if-toast if-toast--${kind}`;
-    element.textContent = text;
+    // The kind's shape as well as its colour (C30): a refusal, a warning and
+    // good news must be told apart by a player who sees the border as grey.
+    const words = document.createElement('span');
+    words.textContent = text;
+    element.append(createIcon(TONE_ICONS[TOAST_TONES[kind]]), words);
     this.root.append(element);
     this.toasts.push({ element, remainingMs: TOAST_LIFETIME_MS });
 

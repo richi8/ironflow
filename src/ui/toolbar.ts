@@ -17,6 +17,8 @@
 import type { BuildMenuEntry, BuildMenuView, HotbarSlotView } from '../game/views/build-menu-view.js';
 import { HOTBAR_SLOTS } from '../game/game-controller.js';
 
+import { createIcon } from './icons.js';
+
 /**
  * The drag payload for an item on its way to the hotbar: its id. A type of
  * its own, so the slots ignore a drag of anything else — a file, a link, text.
@@ -49,6 +51,8 @@ export interface ToolbarOptions {
   readonly onToggleMap: () => void;
   /** Open or close the save menu (C25). */
   readonly onToggleSaveMenu: () => void;
+  /** Open or close the settings (C30). Optional for the tests that predate it. */
+  readonly onToggleSettings?: () => void;
 }
 
 /** Rotation as the player reads it, in tile space (§5 — no isometric words). */
@@ -61,6 +65,7 @@ export class Toolbar {
   private readonly techButton = document.createElement('button');
   private readonly mapButton = document.createElement('button');
   private readonly saveButton = document.createElement('button');
+  private readonly settingsButton = document.createElement('button');
   private readonly rotationLabel = document.createElement('span');
   private readonly options: ToolbarOptions;
 
@@ -108,6 +113,16 @@ export class Toolbar {
     this.saveButton.addEventListener('click', this.handleSave);
     this.root.append(this.saveButton);
 
+    // C30. Sound, size, motion and keys — the things a player changes once
+    // and then forgets, so the button is an icon and the smallest of the six.
+    this.settingsButton.type = 'button';
+    this.settingsButton.className = 'if-toolbar__menu if-toolbar__icon';
+    this.settingsButton.title = 'Settings: sound, size, motion and keys (O)';
+    this.settingsButton.setAttribute('aria-label', 'Settings');
+    this.settingsButton.append(createIcon('settings'));
+    this.settingsButton.addEventListener('click', this.handleSettings);
+    this.root.append(this.settingsButton);
+
     for (let slot = 1; slot <= HOTBAR_SLOTS; slot++) {
       this.root.append(this.createSlot(slot));
     }
@@ -153,12 +168,19 @@ export class Toolbar {
     this.saveButton.setAttribute('aria-pressed', String(open));
   }
 
+  setSettingsOpen(open: boolean): void {
+    this.settingsButton.classList.toggle('is-active', open);
+    this.settingsButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.bagButton.removeEventListener('click', this.handleBag);
     this.techButton.removeEventListener('click', this.handleTech);
     this.mapButton.removeEventListener('click', this.handleMap);
     this.saveButton.removeEventListener('click', this.handleSave);
+    this.settingsButton.removeEventListener('click', this.handleSettings);
     for (const slot of this.slots) {
+      slot.button.removeEventListener('keydown', this.handleSlotKey);
       slot.button.removeEventListener('click', this.handleSlot);
       slot.button.removeEventListener('contextmenu', this.handleClear);
       slot.button.removeEventListener('dragstart', this.handleDragStart);
@@ -186,16 +208,48 @@ export class Toolbar {
     this.options.onToggleSaveMenu();
   };
 
+  private readonly handleSettings = (): void => {
+    this.options.onToggleSettings?.();
+  };
+
   /**
    * One listener for all nine slots, reading the slot number off the element.
    *
    * The alternative — a closure per slot — allocates nine functions that can
    * never be removed by the same reference they were added with, which is how
    * a `destroy()` quietly stops working.
+   *
+   * The slot gives focus back after it is pressed (C30). What a player does
+   * next with a building in hand is put it down, and a slot still holding
+   * focus would take their Enter for itself instead of the world.
    */
   private readonly handleSlot = (event: Event): void => {
     const slot = slotOf(event);
     if (slot !== null) this.options.onSelectSlot(slot);
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.blur();
+  };
+
+  /**
+   * The keyboard's two slot gestures (C30): Delete or Backspace empties a
+   * slot, the right-click's other half; shift+left or right swaps it with its
+   * neighbour, the drag's.
+   */
+  private readonly handleSlotKey = (event: KeyboardEvent): void => {
+    const slot = slotOf(event);
+    if (slot === null) return;
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.options.onClearSlot(slot);
+      return;
+    }
+    if (!event.shiftKey || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const to = slot + (event.key === 'ArrowLeft' ? -1 : 1);
+    if (to < 1 || to > HOTBAR_SLOTS) return;
+    this.options.onMoveSlot(slot, to);
+    this.slots[to - 1]?.button.focus();
   };
 
   /** Right-click takes an item off the bar. The browser's menu never opens over a slot. */
@@ -259,6 +313,7 @@ export class Toolbar {
     button.className = 'if-slot';
     button.dataset['slot'] = String(slot);
     button.addEventListener('click', this.handleSlot);
+    button.addEventListener('keydown', this.handleSlotKey);
     button.addEventListener('contextmenu', this.handleClear);
     button.addEventListener('dragstart', this.handleDragStart);
     button.addEventListener('dragover', this.handleDragOver);
@@ -294,7 +349,7 @@ export class Toolbar {
       delete button.dataset['item'];
       // Not disabled: a disabled button receives no drag events, and an empty
       // slot is exactly where an item gets dropped.
-      button.title = 'Empty — drag an item here from your inventory';
+      button.title = 'Empty — drag an item here from your inventory, or focus one there and press this number';
       return;
     }
 
@@ -307,7 +362,7 @@ export class Toolbar {
     button.classList.toggle('is-selected', view.selected);
 
     const entry = view.building;
-    const edit = 'Drag to move, right-click to remove.';
+    const edit = 'Drag to move, right-click to remove (shift+arrows and Delete from the keyboard).';
     if (entry === null) {
       button.classList.remove('is-unaffordable', 'is-locked');
       button.classList.toggle('is-spent', view.count === 0);

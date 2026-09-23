@@ -124,7 +124,118 @@ export type InputAction =
    * the save menu for now; the loop is held still behind it.
    */
   | 'game.togglePause'
+  /**
+   * Act on the tile in front of the player (C30): place what is held, feed
+   * the machine there, open it, or mine the ground. Held, like the mouse
+   * button it stands in for, so mining stops when it is let go.
+   *
+   * This and `world.remove` are what make the world reachable without a
+   * mouse. The target is the tile the player faces, not a second cursor to
+   * steer, because walking is already how a keyboard player points.
+   */
+  | 'world.interact'
+  /** Demolish what stands in front of the player (C30). A right-click's other half. */
+  | 'world.remove'
+  /** Open and close the settings panel (C30). */
+  | 'ui.toggleSettings'
+  /** Run the simulation faster or slower (C30 task 5: "a speed control for testing"). */
+  | 'game.speedUp'
+  | 'game.speedDown'
   | 'debug.toggleOverlay';
+
+/**
+ * Every action, in the order the settings panel lists them, with the words it
+ * uses (C30 task 3: rebindable keys).
+ *
+ * A `Record` over the union, so an action added above without a line here
+ * is a type error — an action a player cannot see is an action they cannot
+ * rebind.
+ */
+export const ACTION_LABELS: Readonly<Record<InputAction, string>> = Object.freeze({
+  'player.moveUp': 'Walk up',
+  'player.moveDown': 'Walk down',
+  'player.moveLeft': 'Walk left',
+  'player.moveRight': 'Walk right',
+  'world.interact': 'Use the tile in front: build, feed, open, mine',
+  'world.remove': 'Remove the building in front',
+  'build.rotate': 'Rotate the held building',
+  'build.slot1': 'Hotbar slot 1',
+  'build.slot2': 'Hotbar slot 2',
+  'build.slot3': 'Hotbar slot 3',
+  'build.slot4': 'Hotbar slot 4',
+  'build.slot5': 'Hotbar slot 5',
+  'build.slot6': 'Hotbar slot 6',
+  'build.slot7': 'Hotbar slot 7',
+  'build.slot8': 'Hotbar slot 8',
+  'build.slot9': 'Hotbar slot 9',
+  'selection.clear': 'Put down / deselect',
+  'machine.copyModifier': 'Copy / paste recipe (hold, with a click)',
+  'camera.panUp': 'Look up',
+  'camera.panDown': 'Look down',
+  'camera.panLeft': 'Look left',
+  'camera.panRight': 'Look right',
+  'camera.zoomIn': 'Zoom in',
+  'camera.zoomOut': 'Zoom out',
+  'camera.dragModifier': 'Drag the view (hold, with a click)',
+  'ui.toggleInventory': 'Inventory',
+  'ui.toggleResearch': 'Technology tree',
+  'ui.toggleMap': 'Map',
+  'ui.toggleAltMode': 'Show what machines make',
+  'ui.toggleSaveMenu': 'Save menu',
+  'ui.toggleSettings': 'Settings',
+  'game.togglePause': 'Pause / game menu',
+  'game.speedUp': 'Game speed up',
+  'game.speedDown': 'Game speed down',
+  'debug.toggleOverlay': 'Debug overlay',
+});
+
+/** Every action, in `ACTION_LABELS` order. */
+export const INPUT_ACTIONS: readonly InputAction[] = Object.freeze(Object.keys(ACTION_LABELS) as InputAction[]);
+
+/** Is this string an action? For bindings read back from storage (C30). */
+export function isInputAction(value: unknown): value is InputAction {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ACTION_LABELS, value);
+}
+
+/**
+ * A key as a player reads it: `KeyW` is `W`, `Digit1` is `1`, `ArrowUp` is
+ * `↑`. `code` names a physical key (see the header), so this is a label for
+ * the key's usual legend, not a promise about the player's layout.
+ */
+export function keyLabel(code: string): string {
+  const named: Readonly<Record<string, string>> = {
+    ArrowUp: '↑',
+    ArrowDown: '↓',
+    ArrowLeft: '←',
+    ArrowRight: '→',
+    Equal: '=',
+    Minus: '-',
+    NumpadAdd: 'Num +',
+    NumpadSubtract: 'Num -',
+    NumpadEnter: 'Num Enter',
+    BracketLeft: '[',
+    BracketRight: ']',
+    ShiftLeft: 'Shift',
+    ShiftRight: 'Right Shift',
+    AltLeft: 'Alt',
+    AltRight: 'Right Alt',
+    ControlLeft: 'Ctrl',
+    ControlRight: 'Right Ctrl',
+    Semicolon: ';',
+    Quote: "'",
+    Comma: ',',
+    Period: '.',
+    Slash: '/',
+    Backslash: '\\',
+    Backquote: '`',
+  };
+  const name = named[code];
+  if (name !== undefined) return name;
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return `Num ${code.slice(6)}`;
+  return code;
+}
 
 /** A map from `KeyboardEvent.code` to the action that key performs. */
 export type KeyBindings = Readonly<Record<string, InputAction>>;
@@ -174,6 +285,16 @@ export const DEFAULT_KEYBINDINGS: KeyBindings = Object.freeze({
   F2: 'ui.toggleSaveMenu',
   KeyP: 'game.togglePause',
   Pause: 'game.togglePause',
+  // C30. Enter acts on the tile in front of the player and Delete clears it;
+  // X beside the left hand's WASD, so a keyboard player need not reach
+  // across. O for options. The brackets are the genre's speed keys.
+  Enter: 'world.interact',
+  NumpadEnter: 'world.interact',
+  Delete: 'world.remove',
+  KeyX: 'world.remove',
+  KeyO: 'ui.toggleSettings',
+  BracketRight: 'game.speedUp',
+  BracketLeft: 'game.speedDown',
   Digit1: 'build.slot1',
   Digit2: 'build.slot2',
   Digit3: 'build.slot3',
@@ -204,6 +325,25 @@ export function rebind(bindings: KeyBindings, code: string, action: InputAction 
     delete next[code];
   } else {
     next[code] = action;
+  }
+  return Object.freeze(next);
+}
+
+/**
+ * Bindings read back from storage, or null if they are not bindings (C30).
+ *
+ * Every entry is checked: `localStorage` is written by this game and by
+ * anyone with a console, and a map with one bad entry is refused whole
+ * rather than half-applied — half a keyboard is harder to notice than none.
+ * An action this build does not have is the one exception, and is dropped:
+ * that is a save from a later build, and the rest of it is still good.
+ */
+export function parseBindings(raw: unknown): KeyBindings | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const next: Record<string, InputAction> = {};
+  for (const [code, action] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[A-Za-z0-9]{1,32}$/.test(code) || typeof action !== 'string') return null;
+    if (isInputAction(action)) next[code] = action;
   }
   return Object.freeze(next);
 }

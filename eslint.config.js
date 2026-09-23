@@ -238,6 +238,44 @@ export default tseslint.config(
     },
   },
 
+  /* ---------------------------------------------------------------------- *
+   * §4 — audio (C30) plays what it is told. It knows no game, no panel and
+   * no picture: the composition root turns events and positions into calls.
+   * ---------------------------------------------------------------------- */
+  {
+    files: ['src/audio/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/game',
+                '**/game/**',
+                '**/renderer',
+                '**/renderer/**',
+                '**/ui',
+                '**/ui/**',
+                '**/input',
+                '**/input/**',
+                '**/persistence',
+                '**/persistence/**',
+                '**/platform',
+                '**/platform/**',
+                '**/debug',
+                '**/debug/**',
+              ],
+              message:
+                'ironflow.md §4: src/audio/** imports nothing from the game or the other layers. ' +
+                'main.ts tells it what to play.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   /* Tests, dev tools and config files legitimately touch everything. `tools/`
      is not the game: it runs in Node, it prints, and it reads across every
      layer on purpose, which is why the dev-tool boundary is the directory

@@ -57,6 +57,7 @@ import type {
 } from '../game/views/inventory-view.js';
 
 import { createIcon } from './icons.js';
+import { digitOf, gridKeys } from './keyboard.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
 
 /**
@@ -95,6 +96,14 @@ export const QUEUE_ROWS = 16;
 /** How many a shift-click queues. The genre's "a handful", written down once. */
 export const BATCH_CRAFT = 5;
 
+/**
+ * Cells per row in the bag and in a chest, as `.if-bag` lays them out. The
+ * keyboard needs it to know what "down" is (C30); the stylesheet's
+ * `repeat(5, 1fr)` is the other copy, and a test holds them together. Five
+ * since C30 raised the text to 14px, when six no longer fitted a word.
+ */
+export const BAG_COLUMNS = 5;
+
 interface Cell {
   readonly root: HTMLElement;
   readonly name: HTMLElement;
@@ -127,6 +136,12 @@ export interface InventoryPanelOptions {
   readonly onMoveStack: (from: CellRef, to: number) => void;
   /** Shift-click on a bag stack: send it across to an open chest, if there is one. */
   readonly onQuickMove: (slot: number) => void;
+  /**
+   * A number key pressed on a focused cell: put its item on that hotbar slot
+   * (C30). The keyboard's drag onto the hotbar. Optional for the tests that
+   * predate it.
+   */
+  readonly onAssignHotbar?: (slot: number, itemId: string) => void;
   readonly onClose: () => void;
 }
 
@@ -144,6 +159,7 @@ export class InventoryPanel {
   private readonly cells: Cell[] = [];
   private readonly craftButtons = new Map<string, CraftButton>();
   private readonly queueRows: QueueRow[] = [];
+  private releaseGridKeys: (() => void) | null = null;
 
   private open = false;
 
@@ -195,11 +211,13 @@ export class InventoryPanel {
 
   /** Repaint from a snapshot. Assignment and class toggles only (§13). */
   update(view: InventoryView): void {
-    setText(this.slotsLabel, `${view.usedSlots} / ${view.slots} SLOTS`);
     // The bag is full at the moment the last slot goes, which is also the
     // moment mining starts being refused — so the panel says it in the same
     // place the number is, rather than leaving the toast to explain it alone.
-    this.slotsLabel.classList.toggle('is-warning', view.usedSlots >= view.slots);
+    // In words as well as in amber (C30: never colour alone).
+    const full = view.usedSlots >= view.slots;
+    setText(this.slotsLabel, `${view.usedSlots} / ${view.slots} SLOTS${full ? ' — FULL' : ''}`);
+    this.slotsLabel.classList.toggle('is-warning', full);
 
     let carried = 0;
     view.cells.forEach((cellView, index) => {
@@ -221,6 +239,8 @@ export class InventoryPanel {
 
   destroy(): void {
     this.closeButton.removeEventListener('click', this.handleClose);
+    this.releaseGridKeys?.();
+    this.bag.removeEventListener('keydown', this.handleCellKey);
     for (const button of this.craftButtons.values()) button.root.removeEventListener('click', this.handleCraft);
     for (const cell of this.cells) {
       cell.root.removeEventListener('click', this.handlePick);
@@ -307,6 +327,21 @@ export class InventoryPanel {
     if (from.entityId !== null || from.slot !== to) this.options.onMoveStack(from, to);
   };
 
+  /**
+   * 1-9 on a focused cell puts its item on that hotbar slot, and stops there
+   * — without the stop, the same key would also pick up whatever the slot
+   * held before, since the number row selects hotbar slots everywhere else.
+   */
+  private readonly handleCellKey = (event: KeyboardEvent): void => {
+    const digit = digitOf(event);
+    const target = event.target;
+    if (digit === null || !(target instanceof HTMLElement) || target.parentElement !== this.bag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const itemId = target.dataset['item'];
+    if (itemId !== undefined) this.options.onAssignHotbar?.(digit, itemId);
+  };
+
   private readonly handleCancel = (event: Event): void => {
     const target = event.currentTarget;
     if (!(target instanceof HTMLElement)) return;
@@ -321,9 +356,16 @@ export class InventoryPanel {
 
     this.bag.className = 'if-bag';
     for (const cell of view.cells) this.bag.append(this.createCell(cell.index));
+    // C30: arrows walk the bag, shift+arrow carries a stack a cell over, and
+    // a number puts the focused item on that hotbar slot.
+    this.releaseGridKeys = gridKeys(this.bag, {
+      columns: BAG_COLUMNS,
+      onMove: (from, to) => this.options.onMoveStack({ entityId: null, slot: from }, to),
+    });
+    this.bag.addEventListener('keydown', this.handleCellKey);
 
     this.bagEmpty.className = 'if-inventory__empty';
-    this.bagEmpty.textContent = 'Nothing yet. Hold left-click on ore to mine it.';
+    this.bagEmpty.textContent = 'Nothing yet. Hold left-click on ore to mine it, or face it and hold Enter.';
 
     column.append(this.bag, this.bagEmpty);
     return column;
@@ -473,7 +515,8 @@ export class InventoryPanel {
       if (order === undefined) continue;
 
       setText(row.name, order.name);
-      setText(row.remaining, `×${order.remaining}`);
+      // A blocked order says so in words, not only in amber (C30).
+      setText(row.remaining, order.blocked ? `×${order.remaining} BAG FULL` : `×${order.remaining}`);
       // Only the head is being worked on, so only the head has a bar. A queued
       // order showing 0% would claim it had started.
       row.bar.style.width = order.progress === null ? '0%' : `${clampPercent(order.progress)}%`;

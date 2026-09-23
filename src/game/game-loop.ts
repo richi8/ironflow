@@ -101,6 +101,15 @@ export class GameLoop {
     this.paused = paused;
   }
 
+  /** Simulated seconds per real one. See `SimulationClock.setSpeed` (C30). */
+  setSpeed(speed: number): void {
+    this.clock.setSpeed(speed);
+  }
+
+  getSpeed(): number {
+    return this.clock.getSpeed();
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;

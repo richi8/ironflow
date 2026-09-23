@@ -95,6 +95,12 @@ export interface SaveControllerOptions {
   readonly download?: (bytes: SaveBytes, filename: string) => void;
   /** Wall clock, for an exported file's name. The UI layer's, not the game's. */
   readonly now?: () => number;
+  /**
+   * The factory reached a slot or a file: a manual save or an export, with
+   * the playtime the snapshot was taken at (C30). The close guard reads it —
+   * a tab closed after this, with nothing played since, has lost nothing.
+   */
+  readonly onSaved?: (playtimeTicks: number) => void;
 }
 
 export class SaveController {
@@ -326,6 +332,7 @@ export class SaveController {
       return;
     }
     this.busy = false;
+    this.options.onSaved?.(snapshot.playtimeTicks);
     this.say(`Exported "${name}".`, 'info');
   }
 
@@ -461,6 +468,7 @@ export class SaveController {
 
     this.busy = false;
     this.currentId = id;
+    this.options.onSaved?.(snapshot.playtimeTicks);
     // A manual save resets the rotation's clock: an autosave one second later
     // would be three minutes of insurance spent on nothing.
     this.options.autosave?.reset();

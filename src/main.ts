@@ -15,8 +15,22 @@ import { ResourceType, resourceName } from './game/world/resource.js';
 import { createStartingWorld, WORLD_SPAWN } from './game/world/starting-area.js';
 import { toChunkCoord, toLocalCoord, localIndex } from './game/world/chunk.js';
 import type { World } from './game/world/world.js';
+import { AudioEngine, type HumSource } from './audio/audio-engine.js';
+import { footprintExtent } from './game/entities/entity.js';
 import { InputManager } from './input/input-manager.js';
-import type { InputAction } from './input/keybindings.js';
+import {
+  ACTION_LABELS,
+  DEFAULT_KEYBINDINGS,
+  INPUT_ACTIONS,
+  isInputAction,
+  keyLabel,
+  keysFor,
+  parseBindings,
+  rebind,
+  type InputAction,
+  type KeyBindings,
+} from './input/keybindings.js';
+import { browserStorage, SettingsStore, UI_SCALES, type Settings } from './platform/settings-store.js';
 import { Autosave, AUTOSAVE_IDS } from './persistence/autosave.js';
 import { downloadSaveFile, watchSaveFileDrops } from './persistence/export-import.js';
 import { IndexedDbSaveRepository } from './persistence/indexeddb-save-repository.js';
@@ -37,6 +51,7 @@ import {
   describeBeltItems,
   describeEntities,
   describePlayer,
+  isWorking,
 } from './renderer/entity-view.js';
 import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
 import type { PlayerView } from './game/views/player-view.js';
@@ -44,6 +59,7 @@ import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
 import { DETAIL_ZOOM, ProceduralAtlas, spriteLift, type SpriteAtlas } from './renderer/sprite-atlas.js';
 import { SAVE_ROWS, type SaveMenuView, type SaveSlotRow } from './ui/save-menu.js';
+import type { SettingsView } from './ui/settings-panel.js';
 import { GameUI } from './ui/ui.js';
 
 /**
@@ -251,6 +267,46 @@ function slotRow(slot: SaveSlot, currentId: string | null): SaveSlotRow {
   };
 }
 
+/** How often the hum and the belts are re-aimed, in ms. Sound moves slower than a frame. */
+const AUDIO_UPDATE_MS = 200;
+
+/** Belt items on screen at which the belt ambience is at full level. */
+const BELT_ITEMS_FULL = 80;
+
+/** The player's bindings: what they saved, or the shipped ones. */
+function bindingsFrom(settings: Settings): KeyBindings {
+  return settings.bindings === null ? DEFAULT_KEYBINDINGS : (parseBindings(settings.bindings) ?? DEFAULT_KEYBINDINGS);
+}
+
+/**
+ * Put `code` on `action` in place of whatever keys `action` had (C30's
+ * rebinding). A code that belonged to another action moves — `rebind` is a
+ * map from key to action, so a key cannot do two things.
+ */
+function replaceBinding(bindings: KeyBindings, action: InputAction, code: string): KeyBindings {
+  let next = bindings;
+  for (const old of keysFor(next, action)) next = rebind(next, old, null);
+  return rebind(next, code, action);
+}
+
+/** The settings as the panel's view model. */
+function settingsView(settings: Settings, bindings: KeyBindings, systemReduces: boolean): SettingsView {
+  return Object.freeze({
+    volume: settings.volume,
+    muted: settings.muted,
+    uiScale: settings.uiScale,
+    scales: UI_SCALES,
+    motion: settings.motion,
+    systemReducesMotion: systemReduces,
+    objectivesVisible: settings.objectives.visible,
+    bindings: Object.freeze(
+      INPUT_ACTIONS.map((action) =>
+        Object.freeze({ action, label: ACTION_LABELS[action], keys: Object.freeze(keysFor(bindings, action).map(keyLabel)) }),
+      ),
+    ),
+  });
+}
+
 /** The save session as the panel's view model — frozen, like every other (§13). */
 function saveMenuView(state: SaveSessionState): SaveMenuView {
   return Object.freeze({
@@ -269,6 +325,45 @@ async function bootstrap(): Promise<void> {
   const uiRoot = requireElement<HTMLElement>('#ui');
 
   const surface = new CanvasSurface(canvas);
+
+  /* ------------------------------------------------------------------ *
+   * Preferences (C30): sound, size, motion, keys, the first-run list.
+   *
+   * Read first, because the first frame should already be the right size
+   * and the right amount of still. Kept in `localStorage`, never in a save:
+   * C30 calls them "UI preference — not game state".
+   * ------------------------------------------------------------------ */
+  const preferences = new SettingsStore(browserStorage());
+  let bindings = bindingsFrom(preferences.get());
+
+  /** The system's answer to "less motion, please", live. */
+  const motionQuery = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  /** Does the player want less motion, by their setting or by the system's? */
+  let reducedMotion = false;
+  function applyDisplay(): void {
+    const settings = preferences.get();
+    reducedMotion = settings.motion === 'reduce' || (settings.motion === 'system' && motionQuery?.matches === true);
+    // One class for the stylesheet's transitions (C30), set from both
+    // sources, so "full" really is full even where the system says reduce.
+    document.documentElement.classList.toggle('if-reduce-motion', reducedMotion);
+    document.documentElement.style.setProperty('--if-ui-scale', String(settings.uiScale));
+  }
+  applyDisplay();
+  motionQuery?.addEventListener?.('change', applyDisplay);
+
+  /**
+   * Sound (C30 task 1). Built now and silent until the first key or click,
+   * which is the earliest a browser will let a page make a noise.
+   */
+  const audio = new AudioEngine({
+    createContext: () => (typeof AudioContext === 'function' ? new AudioContext() : null),
+    volume: preferences.get().volume,
+    muted: preferences.get().muted,
+  });
+  const unlockAudio = (): void => audio.unlock();
+  window.addEventListener('pointerdown', unlockAudio, true);
+  window.addEventListener('keydown', unlockAudio, true);
+
   // Closed until F3 opens it, in every build. The profiler is attached only
   // while it is open, so the game ticks with no timer at all unless somebody
   // asks — which is C28's "zero-cost when disabled" without a build flag.
@@ -482,6 +577,11 @@ async function bootstrap(): Promise<void> {
     camera,
     picker,
     commands: commandSink,
+    bindings,
+    // C30: where the keyboard points — the tile in front of the player. The
+    // controller answers, because which tile depends on the held building's
+    // footprint; deferred for `recipeOf`'s reason below.
+    keyboardTarget: () => controller.getFacingTarget(),
     // Copy-settings (C20 task 5). Deferred through a closure because the
     // controller is built *from* this manager — it is the cursor — so the two
     // cannot both be constructed first. It is only ever called from a click,
@@ -529,6 +629,14 @@ async function bootstrap(): Promise<void> {
     if (action === 'game.togglePause') {
       // Pausing is opening the game menu, which pauses behind it (§8).
       ui.togglePauseMenu();
+      return;
+    }
+    if (action === 'ui.toggleSettings') {
+      ui.toggleSettings();
+      return;
+    }
+    if (action === 'game.speedUp' || action === 'game.speedDown') {
+      controller.stepSpeed(action === 'game.speedUp' ? 1 : -1);
       return;
     }
     const slot = /^build\.slot([1-9])$/.exec(action);
@@ -607,6 +715,66 @@ async function bootstrap(): Promise<void> {
   let followedX = Number.NaN;
   let followedY = Number.NaN;
 
+  /*
+   * Sound, fed from the frame (C30 task 1).
+   *
+   * Placement and removal are read off the entity store's two counters
+   * rather than off the commands: ids are never reused (§6 R5), so ids
+   * handed out since the last frame are buildings placed, and those less the
+   * growth in the store are buildings removed. A belt drag that lays thirty
+   * in a frame is one sound, which is what the ear wants anyway.
+   */
+  let heardNextId = simulation.entities.nextId;
+  let heardSize = simulation.entities.size;
+  let audioAccumulatorMs = 0;
+
+  function updateAudio(elapsedMs: number, beltItems: number): void {
+    const nextId = simulation.entities.nextId;
+    const size = simulation.entities.size;
+    const placed = nextId - heardNextId;
+    const removed = placed - (size - heardSize);
+    heardNextId = nextId;
+    heardSize = size;
+    if (placed > 0) audio.play('place');
+    if (removed > 0) audio.play('remove');
+
+    audioAccumulatorMs += elapsedMs;
+    if (audioAccumulatorMs < AUDIO_UPDATE_MS) return;
+    audioAccumulatorMs %= AUDIO_UPDATE_MS;
+    if (game.isPaused() || !audio.ready) {
+      // A stopped factory is a silent one.
+      audio.setHum([]);
+      audio.setBeltLevel(0);
+      return;
+    }
+    audio.setHum(humSources());
+    audio.setBeltLevel(beltItems / BELT_ITEMS_FULL);
+  }
+
+  /**
+   * Every working machine on screen, placed for the ear: across the screen
+   * for the pan, and out from its centre for the distance the engine culls
+   * by. Inserters are left out — they tick rather than hum, and there are
+   * three for every machine.
+   */
+  function humSources(): HumSource[] {
+    const { cssWidth, cssHeight } = surface.getSize();
+    if (cssWidth <= 0 || cssHeight <= 0) return [];
+    const halfW = cssWidth / 2;
+    const halfH = cssHeight / 2;
+    const sources: HumSource[] = [];
+    entityIndex.forEachIn(simulation.entities, simulation.buildings, camera.visibleTileBounds(), (entity) => {
+      const definition = simulation.buildings.forEntityType(entity.type);
+      if (definition.inserter !== undefined || !isWorking(entity)) return;
+      const extent = footprintExtent(definition.size, entity.rotation);
+      const at = camera.worldToScreen(entity.x + extent.width / 2, entity.y + extent.height / 2);
+      const dx = (at.x - halfW) / halfW;
+      const dy = (at.y - halfH) / halfH;
+      sources.push({ pan: dx, distance: Math.hypot(dx, dy) / Math.SQRT2 });
+    });
+    return sources;
+  }
+
   let lastFrameUs = scheduler.now();
 
   const render = (alpha: number): void => {
@@ -632,14 +800,19 @@ async function bootstrap(): Promise<void> {
 
     // Below `DETAIL_ZOOM` nothing animates (C29 art task 4): a moving slat a
     // pixel wide is shimmer, and the atlas's plain levels have no frames.
-    const animate = camera.zoom >= DETAIL_ZOOM;
+    // Nor with reduced motion (C30), where the player's walk is still too.
+    const animate = camera.zoom >= DETAIL_ZOOM && !reducedMotion;
     const player = describePlayer(controller.getPlayerView(), renderSeconds, animate);
     followPlayer(player.x, player.y);
 
     // Described after the camera has settled for the frame, over the same
     // padded rectangle the renderer culls to, so nothing drawn is missing.
     const within = { index: entityIndex, bounds: padBounds(camera.visibleTileBounds(), SPRITE_OVERHANG_TILES) };
-    renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds, { within, animate });
+    renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds, {
+      within,
+      animate,
+      reducedMotion,
+    });
 
     // The read-only view the renderer is allowed to see (C03 task 2).
     const state: RenderState = {
@@ -665,6 +838,7 @@ async function bootstrap(): Promise<void> {
     // and only then does the controller hand anything to the UI.
     controller.pump();
     ui.update(elapsedMs);
+    updateAudio(elapsedMs, state.items.length);
     // C25 task 4. Driven from the frame rather than from a timer, so "every
     // three minutes" is three minutes of *play* — see `autosave.ts` — and so
     // the snapshot it takes is between ticks by construction: the loop has
@@ -813,7 +987,20 @@ async function bootstrap(): Promise<void> {
     renderEntities = describeEntities(loaded.entities, loaded.buildings, renderSeconds);
     centreOnPlayer();
     origin = 'loaded';
+    // A different world's counters: without this the load itself would be
+    // heard as a thousand buildings going down (C30).
+    heardNextId = loaded.entities.nextId;
+    heardSize = loaded.entities.size;
+    savedTick = loaded.getTick();
   }
+
+  /**
+   * The tick the factory was last written at, to a slot or to a file (C30
+   * task 5's close guard). A world just loaded or resumed is saved as it
+   * stands; a brand-new one is not, but it has nothing in it to lose until
+   * it has run.
+   */
+  let savedTick = simulation.getTick();
 
   const autosave = new Autosave({
     write: async (id) => {
@@ -825,6 +1012,7 @@ async function bootstrap(): Promise<void> {
         playtimeTicks: snapshot.playtimeTicks,
         hotbar: snapshot.hotbar,
       });
+      savedTick = snapshot.playtimeTicks;
       saves.noteAutosave();
     },
     onError: (error) => saves.noteAutosaveFailed(error),
@@ -840,6 +1028,9 @@ async function bootstrap(): Promise<void> {
     // are the browser's, not its — so the one line of DOM a download needs is
     // wired here, where every other browser dependency is.
     download: (bytes, filename) => downloadSaveFile(bytes, filename),
+    onSaved: (tick) => {
+      savedTick = tick;
+    },
     onChange: (state) => {
       if (wired) ui.setSaveMenuView(saveMenuView(state));
     },
@@ -902,8 +1093,62 @@ async function bootstrap(): Promise<void> {
         }
       },
     },
+    // C30. Every change is applied and written at once: a slider that only
+    // took effect on a SAVE button would be a slider nobody trusts.
+    settings: {
+      view: () => settingsView(preferences.get(), bindings, motionQuery?.matches === true),
+      onVolume: (volume) => {
+        audio.setVolume(preferences.update({ volume }).volume);
+      },
+      onMuted: (muted) => {
+        audio.setMuted(preferences.update({ muted }).muted);
+      },
+      onScale: (uiScale) => {
+        preferences.update({ uiScale });
+        applyDisplay();
+      },
+      onMotion: (motion) => {
+        preferences.update({ motion });
+        applyDisplay();
+      },
+      onBind: (action, code) => {
+        if (!isInputAction(action)) return;
+        bindings = replaceBinding(bindings, action, code);
+        input.setBindings(bindings);
+        preferences.update({ bindings: { ...bindings } });
+      },
+      onResetBindings: () => {
+        bindings = DEFAULT_KEYBINDINGS;
+        input.setBindings(bindings);
+        preferences.update({ bindings: null });
+      },
+    },
+    objectives: {
+      initial: preferences.get().objectives,
+      onChange: (progress) => {
+        preferences.update({ objectives: progress });
+      },
+    },
   });
   ui.mount();
+
+  // C30: the two one-shots that are not a building. Good news gets the
+  // chord, and everything else the game had to tell the player gets the
+  // alert — once per event, which the engine's repeat guard holds to one per
+  // burst when twenty miners run dry on the same tick.
+  controller.subscribe('alert', (event) => {
+    audio.play(event.alert.type === 'research_complete' ? 'research' : 'alert');
+  });
+
+  // C30 task 5: a confirm-on-close guard when there are unsaved changes. A
+  // browser shows its own wording and asks nothing else of the page; the
+  // autosave on `visibilitychange` below still runs if the player leaves.
+  window.addEventListener('beforeunload', (event) => {
+    if (simulation.getTick() === savedTick) return;
+    event.preventDefault();
+    // Older engines ask for this instead; the text itself is not shown.
+    event.returnValue = '';
+  });
   wired = true;
   centreOnPlayer();
   publishSaves();
