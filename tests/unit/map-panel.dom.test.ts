@@ -391,6 +391,42 @@ describe('click to jump', () => {
     expect(jump?.y).toBe(view.minCy * view.chunkTiles);
   });
 
+  it('refuses a click on unexplored ground inside the map', () => {
+    harness.simulation.tick();
+    harness.ui.toggleMap();
+    settle();
+    // Walk far enough, diagonally, that the explored rectangle holds a gap:
+    // the first square stays explored, the one around the new spot joins it,
+    // and the ground between them is inside the bounds but not seen.
+    const far = 6 * harness.controller.getMapView().chunkTiles;
+    const player = harness.simulation.player;
+    player.setTilePosition(player.tileX + far, player.tileY + far);
+    harness.simulation.tick();
+    settle();
+
+    const view = harness.controller.getMapView();
+    const seen = new Set(view.chunks.map((chunk) => `${chunk.cx},${chunk.cy}`));
+    const element = canvas();
+    const width = element.width;
+    const height = element.height;
+    element.getBoundingClientRect = (): DOMRect =>
+      ({ left: 0, top: 0, width, height, right: width, bottom: height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const pxPerChunk = width / (view.maxCx - view.minCx + 1);
+    const click = (cx: number, cy: number): void => {
+      const x = (cx - view.minCx + 0.5) * pxPerChunk;
+      const y = (cy - view.minCy + 0.5) * pxPerChunk;
+      element.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, bubbles: true }));
+    };
+
+    // The north-east corner is neither square; the north-west is the first.
+    expect(seen.has(`${view.maxCx},${view.minCy}`)).toBe(false);
+    click(view.maxCx, view.minCy);
+    expect(harness.jumps).toHaveLength(0);
+
+    click(view.minCx, view.minCy);
+    expect(harness.jumps).toHaveLength(1);
+  });
+
   it('does nothing before anything has been explored', () => {
     harness.ui.toggleMap();
     settle();

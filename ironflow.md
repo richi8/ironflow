@@ -7592,6 +7592,16 @@ the bag. `null` keeps meaning the default layout, because that is what a save
 from before v2 carries, and such a save still gets it. `GameController` is
 unchanged, and so are its tests.
 
+**Later on 2026-09-23: the map will not jump to unexplored ground.** C23's map
+is drawn from the explored set, but its rectangle holds unexplored gaps, and a
+click there jumped the camera onto them. The world renderer has no fog, so the
+main view then showed that ground's terrain and ore: the map revealed what it
+hides. `MapPanel` now remembers which world chunks its last repaint drew and
+ignores a click outside them (`map-panel.dom.test.ts` covers it). The player's
+own reveal radius is untouched. A jump to the edge of explored ground can still
+show a strip of unexplored ground at the screen's rim, which is the reveal
+radius's balance question rather than this bug.
+
 ---
 ---
 

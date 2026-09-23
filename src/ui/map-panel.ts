@@ -8,7 +8,7 @@
  * ```text
  *   MAP        a canvas, one pixel per map cell, scaled to fit the panel
  *   footprint  how much has been explored, and how
- *   click      jumps the camera to the tile under the pointer
+ *   click      jumps the camera to the tile under the pointer, if explored
  * ```
  *
  * ## It is a canvas, and it is the only panel that is
@@ -98,6 +98,17 @@ export class MapPanel {
    * click.
    */
   private placement: { cellPx: number; originTileX: number; originTileY: number } | null = null;
+
+  /**
+   * The world chunks the last repaint drew, as `"cx,cy"`. A click outside
+   * them is refused: the world renderer has no fog, so a camera sent to
+   * unexplored ground would show its terrain and ore. That would be the
+   * map revealing it (2026-09-23).
+   */
+  private explored = new Set<string>();
+
+  /** Tiles per world chunk in the last repaint. */
+  private chunkTiles = 1;
 
   private open = false;
 
@@ -196,6 +207,9 @@ export class MapPanel {
     const pixelY = ((event.clientY - box.top) / box.height) * this.canvas.height;
     const tileX = placement.originTileX + (pixelX / placement.cellPx) * this.cellTiles;
     const tileY = placement.originTileY + (pixelY / placement.cellPx) * this.cellTiles;
+    const cx = Math.floor(tileX / this.chunkTiles);
+    const cy = Math.floor(tileY / this.chunkTiles);
+    if (!this.explored.has(`${cx},${cy}`)) return;
     this.options.onJumpTo(Math.floor(tileX), Math.floor(tileY));
   };
 
@@ -220,6 +234,8 @@ export class MapPanel {
    */
   private paint(view: MapView): void {
     this.cellTiles = view.cellTiles;
+    this.chunkTiles = view.chunkTiles;
+    this.explored = new Set(view.chunks.map((chunk) => `${chunk.cx},${chunk.cy}`));
     const cellsPerChunk = view.chunkTiles / view.cellTiles;
     const chunksWide = view.maxCx - view.minCx + 1;
     const chunksTall = view.maxCy - view.minCy + 1;
