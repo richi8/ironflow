@@ -3732,6 +3732,33 @@ neighbour-removed-mid-swing safety; rate verification.
   map lookups every thirty ticks per inserter and nowhere near §12's budget;
   C28 is where it would show up if it ever mattered.
 
+**Changed 2026-09-23, on request: an inserter chooses what it picks up.**
+Until then it offered the destination one item — a belt tile's front item, a
+container's first stack — and waited if that was refused, so a chest of mixed
+plates beside an assembler fed whatever sat in slot 0, and one stray item at
+the front of a stopped belt blocked an arm for good. Now, in `choose`:
+
+- **From a belt**, the front-most item on the tile the destination accepts;
+  anything else rides on. Taking an item from mid-tile leaves a gap the items
+  behind close as they advance.
+- **From a chest into a machine that has a recipe**, the *neediest*
+  ingredient: the smallest `have / need` against one craft, compared by
+  cross-multiplication (§6 R3). A missing ingredient always comes first, and
+  after that the buffers fill in the recipe's proportions. A fuelled machine
+  ranks its fuel buffer as one more ingredient needing one item. Ties go to
+  recipe order, then fuel, never to where things sit in the chest (§6 R4).
+- **From a chest into anything else**, the first stack in slot order that the
+  destination accepts.
+- **Miners and machine outputs** are unchanged: one kind of item, one question.
+
+An arm with something behind it that nothing in front will take reports
+`output_full`, as it does for a full destination. When the source holds one
+kind of item, pickup takes it exactly as C14's did, so a belt-merging arm and
+§15's backpressure behave as before (`tests/balance/ratios.test.ts` guards the
+backpressure). The source is read before the destination's port is built,
+which keeps an idle arm as cheap as it was: the inserter phase measures within
+3% of C28's baseline.
+
 ---
 
 ## C15 — Furnace and the first vertical slice

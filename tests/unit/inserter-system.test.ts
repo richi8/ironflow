@@ -14,6 +14,7 @@ import {
   type InserterEntity,
 } from '../../src/game/entities/inserter-entity.js';
 import { MachineStatus } from '../../src/game/entities/machine-status.js';
+import { newMachine, type MachineEntity } from '../../src/game/entities/machine-entity.js';
 import { newMiner, type MinerEntity } from '../../src/game/entities/miner-entity.js';
 import { BUILDINGS } from '../../src/game/data/buildings.js';
 import { BuildingRegistry, type InserterConfig } from '../../src/game/registries/building-registry.js';
@@ -383,5 +384,64 @@ describe('contention', () => {
 
     expect(JSON.stringify(first.west.contents)).toBe(JSON.stringify(second.west.contents));
     expect(JSON.stringify(first.east.contents)).toBe(JSON.stringify(second.east.contents));
+  });
+});
+
+describe('what an inserter reaches for', () => {
+  /**
+   * An assembler at (0, 0)..(2, 2) set to `recipeId`, fed by an inserter at
+   * (1, 3) facing north from whatever `source` is built at (1, 4). It crafts
+   * as it is fed, so the tests count what left the source, not what is in its
+   * buffer.
+   */
+  function feeding(recipeId: string): { simulation: Simulation; assembler: MachineEntity } {
+    const simulation = new Simulation({ world: flatWorld() });
+    const type = simulation.buildings.get('assembler').entityType;
+    const assembler = simulation.entities.create<MachineEntity>(newMachine(type, 0, 0, NORTH));
+    assembler.recipe = simulation.recipes.get(recipeId).recipeId;
+    simulation.entities.create<InserterEntity>(newInserter(1, 3, NORTH));
+    return { simulation, assembler };
+  }
+
+  it('feeds a machine the ingredient it is shortest of, not the chests first stack', () => {
+    const { simulation } = feeding('make_circuit');
+    const plate = simulation.items.idOf('iron_plate');
+    const wire = simulation.items.idOf('copper_wire');
+    const chest = simulation.entities.create<ChestEntity>(newChest(1, 4, NORTH));
+    // Plates in slot 0: an inserter that took the first stack would deliver
+    // nothing but plates.
+    chest.contents = stacked(simulation, [[plate, 50], [wire, 50]]);
+
+    run(simulation, CONFIG.ticksPerItem * 8);
+    // A circuit is three wire to one plate, and the buffers fill in step.
+    expect(50 - heldIn(chest.contents, wire)).toBe(6);
+    expect(50 - heldIn(chest.contents, plate)).toBe(2);
+  });
+
+  it('looks past a stack the machine will not take', () => {
+    const { simulation, assembler } = feeding('make_gear');
+    const plate = simulation.items.idOf('iron_plate');
+    const copper = simulation.items.idOf('copper_plate');
+    const chest = simulation.entities.create<ChestEntity>(newChest(1, 4, NORTH));
+    chest.contents = stacked(simulation, [[copper, 10], [plate, 10]]);
+
+    run(simulation, CONFIG.ticksPerItem * 3);
+    expect(heldIn(chest.contents, plate)).toBe(7);
+    expect(heldIn(chest.contents, copper)).toBe(10);
+    expect(assembler.input.some((entry) => entry[0] === copper)).toBe(false);
+  });
+
+  it('takes only the recipes items off a belt, leaving the rest to ride on', () => {
+    const { simulation, assembler } = feeding('make_gear');
+    const plate = simulation.items.idOf('iron_plate');
+    const copper = simulation.items.idOf('copper_plate');
+    // A belt that goes nowhere, so the copper at its front never moves off.
+    const belt = simulation.entities.create<BeltEntity>(newBelt(1, 4, WEST));
+    laneAccept(belt.items, copper, BELT_MAX_POSITION);
+    laneAccept(belt.items, plate, BELT_MAX_POSITION);
+
+    run(simulation, CONFIG.ticksPerItem);
+    expect(assembler.input).toEqual([[plate, 1]]);
+    expect(belt.items.map((item) => item.itemId)).toEqual([copper]);
   });
 });

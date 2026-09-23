@@ -57,7 +57,7 @@
  * the hand system already make:
  *
  * ```text
- * source       a belt (its front item) | a mining buffer | a container
+ * source       a belt (any item on it) | a mining buffer | a container
  * destination  a belt (if a slot fits) | a container (if a slot fits)
  * ```
  *
@@ -67,6 +67,32 @@
  * carry their own copy of "how an item gets into a chest" today, which is one
  * copy too many — C15 is the chunk that has to touch all three, and therefore
  * the chunk to unify them.
+ *
+ * ## Which item it reaches for (2026-09-23)
+ *
+ * An inserter takes **only what the thing in front of it will accept**, and
+ * looks past anything that will not:
+ *
+ * ```text
+ * belt source   the front-most item on the tile the destination accepts
+ * other source  into a machine with a recipe: the neediest ingredient (below)
+ *               into anything else: the first stack, in slot order, it accepts
+ * ```
+ *
+ * Until then an inserter offered the destination one item — a belt's front
+ * item, a chest's first stack — and stalled if it was refused. A chest of
+ * iron and copper beside an assembler making circuits fed whichever stack sat
+ * in slot 0 until the assembler's buffer for it was full, and a single stray
+ * item at the front of a stopped belt blocked an arm for ever.
+ *
+ * **Neediest** is the ingredient whose buffer holds the smallest share of what
+ * one craft consumes — `have / need`, compared by cross-multiplication so it
+ * stays in integers (§6 R3). An ingredient the machine is short of therefore
+ * always comes before one it has enough of, and among ingredients it has
+ * enough of the buffers fill in step with the recipe rather than one at a
+ * time. A machine that burns fuel counts its fuel buffer as one more
+ * ingredient needing one item. Ties go to recipe order, then fuel, so the
+ * answer never depends on how the chest happens to be laid out (§6 R4).
  */
 
 import {
@@ -84,9 +110,18 @@ import {
   inserterStageTicks,
   type InserterEntity,
 } from '../entities/inserter-entity.js';
+import { asChest } from '../entities/chest-entity.js';
+import { asMachine, type MachineEntity } from '../entities/machine-entity.js';
 import { MachineStatus } from '../entities/machine-status.js';
 import type { AlertLog } from '../alerts.js';
-import { inputPortOf, outputPortOf, type PortContext } from '../items/item-port.js';
+import { slotsCount } from '../items/inventory.js';
+import {
+  inputPortOf,
+  outputPortOf,
+  type ItemSink,
+  type ItemSource,
+  type PortContext,
+} from '../items/item-port.js';
 import type { Unlocks } from '../research/unlocks.js';
 import type { BuildingRegistry, InserterConfig } from '../registries/building-registry.js';
 import { NO_ITEM, type ItemId, type ItemRegistry } from '../registries/item-registry.js';
@@ -139,6 +174,16 @@ export class InserterSystem {
    */
   private readonly configs: readonly (InserterConfig | null)[];
 
+  /**
+   * Whether the last `choose` found anything at all behind the inserter — the
+   * difference between "nothing to take" and "nothing it may take". Scratch,
+   * written by every `choose` and read straight after; never authoritative.
+   */
+  private sourceHeldAny = false;
+
+  /** Every item that burns, in id order: what a fuelled machine may be fed. */
+  private readonly fuels: readonly ItemId[];
+
   constructor(options: InserterSystemOptions) {
     this.entities = options.entities;
     this.buildings = options.buildings;
@@ -149,6 +194,13 @@ export class InserterSystem {
       recipes: options.recipes,
       unlocks: options.unlocks,
     };
+    this.fuels = Object.freeze(
+      options.items
+        .all()
+        .map((definition) => options.items.idOf(definition.id))
+        .filter((itemId) => options.items.fuelTicksOf(itemId) > 0)
+        .sort((a, b) => a - b),
+    );
     this.configs = Object.freeze(
       Array.from({ length: ENTITY_TYPE_COUNT }, (_unused, type) =>
         this.buildings.inserterFor(type as EntityType),
@@ -253,13 +305,11 @@ export class InserterSystem {
       return;
     }
 
-    const itemId = this.sourceItem(inserter);
-    if (itemId === NO_ITEM) {
-      this.setStatus(inserter, MachineStatus.Idle);
-      return;
-    }
-    if (!this.hasRoom(inserter, itemId)) {
-      this.setStatus(inserter, MachineStatus.OutputFull);
+    if (this.choose(inserter) === NO_ITEM) {
+      // Something to take that nothing in front will have is the same stall,
+      // to the player, as a full destination: the arm waits with empty hands
+      // until the far end changes.
+      this.setStatus(inserter, this.sourceHeldAny ? MachineStatus.OutputFull : MachineStatus.Idle);
       return;
     }
     this.enter(inserter, InserterState.Pickup);
@@ -276,8 +326,8 @@ export class InserterSystem {
    * inserter.
    *
    * It asks about the *destination's shape* and not about its contents, which
-   * is what separates it from `hasRoom`: a chest with no room is a chest that
-   * will have room, and a splitter will never have a port.
+   * is what separates it from the room check in `choose`: a chest with no
+   * room is a chest that will have room, and a splitter will never have a port.
    */
   private canEverDeliver(inserter: InserterEntity): boolean {
     const target = this.destination(inserter);
@@ -364,56 +414,153 @@ export class InserterSystem {
   /**
    * What this inserter would pick up, without taking it. `NO_ITEM` for nothing.
    *
-   * A belt offers its **front** item — the one nearest its output end, which
-   * is `items[0]` by the invariant `belt-entity.ts` states. Everything else
-   * offers whatever its output port offers, which is its lowest item id,
-   * because a container's slots are kept sorted and "whatever is first" must
-   * not depend on the order things were put in (§6 R4).
+   * Only ever an item the destination has room for right now — C14 task 6 —
+   * and see the file header for which one when several qualify. A belt's items
+   * are looked at front first, which is `items` in order by the invariant
+   * `belt-entity.ts` states; every other source through its output port.
+   *
+   * `atPickup` is the second asking, from `grab`, and it lets a belt in front
+   * be full: the arm already committed to it in `beginCycle`, and it holds the
+   * item at the drop until a slot opens, as it always has. Re-checking there
+   * would park it empty-handed each time the belt behind it filled the gap
+   * first, and an inserter merging onto a busy belt would never get on.
    */
-  private sourceItem(inserter: InserterEntity): ItemId {
+  private choose(inserter: InserterEntity, atPickup = false): ItemId {
+    this.sourceHeldAny = false;
     const source = this.source(inserter);
     if (source === undefined) return NO_ITEM;
 
+    // What is behind first, and before building anything for what is in
+    // front: most arms that stop to decide are waiting on an empty source,
+    // and for them this is the whole answer, as cheaply as C14's.
     const belt = asBelt(source);
-    if (belt !== null) return belt.items[0]?.itemId ?? NO_ITEM;
+    const port = belt === null ? outputPortOf(source, this.ports) : null;
+    const first = belt !== null ? (belt.items[0]?.itemId ?? NO_ITEM) : (port?.peek() ?? NO_ITEM);
+    if (first === NO_ITEM) return NO_ITEM;
+    this.sourceHeldAny = true;
 
-    return outputPortOf(source, this.ports)?.peek() ?? NO_ITEM;
+    const target = this.destination(inserter);
+    if (target === undefined) return NO_ITEM;
+
+    const targetBelt = asBelt(target);
+    if (targetBelt !== null) {
+      // A belt takes anything while its tile has a slot.
+      return atPickup || laneEntryPosition(targetBelt.items, BELT_MAX_POSITION) >= 0 ? first : NO_ITEM;
+    }
+
+    const sink = inputPortOf(target, this.ports);
+    if (sink === null) return NO_ITEM;
+
+    // A refused item is not asked about twice in a row: a belt of plates in
+    // front of a full machine is one refusal, not four.
+    if (belt !== null) {
+      let refused = NO_ITEM;
+      for (const item of belt.items) {
+        if (item.itemId === refused) continue;
+        if (sink.spaceFor(item.itemId) > 0) return item.itemId;
+        refused = item.itemId;
+      }
+      return NO_ITEM;
+    }
+    if (port === null) return NO_ITEM;
+
+    // Only a chest holds several kinds of item worth choosing between. A miner
+    // offers one, and a machine's output is its recipe's product, so both keep
+    // C14's single question — which is also what keeps a stalled arm cheap.
+    if (asChest(source) === null) return sink.spaceFor(first) > 0 ? first : NO_ITEM;
+
+    const machine = asMachine(target, this.buildings);
+    if (machine !== null) {
+      const needed = this.neediest(port, machine, sink);
+      if (needed !== undefined) return needed;
+    }
+
+    // The common case first, and without building a list: the first stack is
+    // one the destination takes.
+    if (sink.spaceFor(first) > 0) return first;
+    let refused = first;
+    for (const stack of port.stacks()) {
+      if (stack.itemId === refused) continue;
+      if (sink.spaceFor(stack.itemId) > 0) return stack.itemId;
+      refused = stack.itemId;
+    }
+    return NO_ITEM;
+  }
+
+  /**
+   * The ingredient `machine` is shortest of that `source` can supply, or
+   * `NO_ITEM` for none; `undefined` when the machine has no recipe to be short
+   * against and the caller should fall back to slot order. See the file header.
+   */
+  private neediest(source: ItemSource, machine: MachineEntity, sink: ItemSink): ItemId | undefined {
+    const recipes = this.ports.recipes;
+    if (!recipes.isRecipeId(machine.recipe)) return undefined;
+    const recipe = recipes.byId(machine.recipe);
+    const config = this.buildings.productionFor(machine.type);
+    if (config === null || recipe.category !== config.category) return undefined;
+
+    let best = NO_ITEM;
+    let bestHave = 0;
+    let bestNeed = 1;
+    for (const input of recipe.inputs) {
+      const itemId = input.itemId;
+      if (source.count(itemId) === 0 || sink.spaceFor(itemId) === 0) continue;
+      const have = slotsCount(machine.input, itemId);
+      if (best === NO_ITEM || have * bestNeed < bestHave * input.count) {
+        best = itemId;
+        bestHave = have;
+        bestNeed = input.count;
+      }
+    }
+
+    if (config.fuelCapacity !== undefined) {
+      let fuelHave = 0;
+      for (const entry of machine.fuel) fuelHave += entry[1];
+      for (const itemId of this.fuels) {
+        if (source.count(itemId) === 0 || sink.spaceFor(itemId) === 0) continue;
+        if (best === NO_ITEM || fuelHave * bestNeed < bestHave) {
+          best = itemId;
+          bestHave = fuelHave;
+          bestNeed = 1;
+        }
+        // One fuel is enough to rank: the buffer is shared, so every fuel
+        // the source holds is exactly as needed as the first.
+        break;
+      }
+    }
+    return best;
   }
 
   /**
    * Take one item out of the source. Returns what was taken, or `NO_ITEM`.
    *
-   * Asked again rather than trusting what `beginCycle` saw a few ticks ago:
+   * Chosen again rather than trusting what `beginCycle` saw a few ticks ago:
    * the source may have been emptied by another inserter, taken by hand, or
-   * demolished in between, and this is the moment the item actually moves.
+   * demolished in between, the destination may have filled, and this is the
+   * moment the item actually moves.
    */
   private grab(inserter: InserterEntity): ItemId {
     const source = this.source(inserter);
     if (source === undefined) return NO_ITEM;
 
+    // With one kind of item behind it there is nothing to choose, and the arm
+    // takes it as C14's did, without building the destination's port a second
+    // time a cycle.
     const belt = asBelt(source);
-    if (belt !== null) return takeBeltFront(belt);
+    if (belt !== null) {
+      if (uniform(belt)) return takeBeltItem(belt, belt.items[0]?.itemId ?? NO_ITEM);
+      return takeBeltItem(belt, this.choose(inserter, true));
+    }
 
     const port = outputPortOf(source, this.ports);
     if (port === null) return NO_ITEM;
-    const itemId = port.peek();
+    const itemId = asChest(source) === null ? port.peek() : this.choose(inserter, true);
     return itemId !== NO_ITEM && port.take(itemId, 1) === 1 ? itemId : NO_ITEM;
   }
 
   /* ---------------------------------------------------------------- *
    * Putting down
    * ---------------------------------------------------------------- */
-
-  /** Would the destination take this item right now? C14 task 6. */
-  private hasRoom(inserter: InserterEntity, itemId: ItemId): boolean {
-    const target = this.destination(inserter);
-    if (target === undefined) return false;
-
-    const belt = asBelt(target);
-    if (belt !== null) return laneEntryPosition(belt.items, BELT_MAX_POSITION) >= 0;
-
-    return (inputPortOf(target, this.ports)?.spaceFor(itemId) ?? 0) > 0;
-  }
 
   /** Put the held item into the destination. Returns whether it went. */
   private deliver(inserter: InserterEntity): boolean {
@@ -431,13 +578,25 @@ export class InserterSystem {
 }
 
 /**
- * Take the front item off a belt tile. `NO_ITEM` if there was none.
+ * Take the front-most `itemId` off a belt tile. `NO_ITEM` if there was none.
  *
- * `items[0]` is the item nearest the output end, and removing it keeps the
- * front-first invariant by construction: everything behind it stays in the
- * order it was in.
+ * Front-most because `choose` looked front first, so this is the item it
+ * chose. Removing any one item keeps the front-first invariant by
+ * construction: everything else stays in the order it was in, and the gap
+ * closes as the items behind it advance.
  */
-function takeBeltFront(belt: BeltEntity): ItemId {
-  const item = belt.items.shift();
-  return item === undefined ? NO_ITEM : item.itemId;
+function takeBeltItem(belt: BeltEntity, itemId: ItemId): ItemId {
+  if (itemId === NO_ITEM) return NO_ITEM;
+  const index = belt.items.findIndex((item) => item.itemId === itemId);
+  if (index < 0) return NO_ITEM;
+  belt.items.splice(index, 1);
+  return itemId;
+}
+
+/** Is every item on this belt tile the same item? True for an empty one. */
+function uniform(belt: BeltEntity): boolean {
+  const items = belt.items;
+  const first = items[0]?.itemId;
+  for (let i = 1; i < items.length; i++) if (items[i]?.itemId !== first) return false;
+  return true;
 }
