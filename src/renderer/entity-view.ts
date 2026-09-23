@@ -42,9 +42,13 @@ import { asChest } from '../game/entities/chest-entity.js';
 import { asMachine } from '../game/entities/machine-entity.js';
 import { asMiner } from '../game/entities/miner-entity.js';
 import { resourceItemId } from '../game/world/resource.js';
-import { DIRECTION_OFFSETS, type Rotation } from '../game/world/coordinates.js';
+import { DIRECTION_OFFSETS, type Rotation, type TileBounds } from '../game/world/coordinates.js';
+import { MachineStatus } from '../game/entities/machine-status.js';
 
 import type { PlayerView } from '../game/views/player-view.js';
+
+import type { EntityIndex } from './entity-index.js';
+import type { LevelSpec } from './image-atlas.js';
 
 import {
   RenderLayer,
@@ -53,11 +57,14 @@ import {
   type RenderEntity,
 } from './render-state.js';
 import {
+  ACTIVITY_FRAMES,
   BELT_CHEVRON_PHASES,
   INSERTER_SWING_STEPS,
+  PLAYER_ACTIVITIES,
   beltSprite,
   inserterSprite,
   itemSprite,
+  machineFrameSprite,
   playerSprite,
   spriteLift,
   splitterSprite,
@@ -196,36 +203,91 @@ function partnerOf(mouth: { readonly link: number }, store: EntityStore): Entity
 }
 
 /**
- * Rebuild the drawable list from the store.
+ * Frames a second of a working machine's cycle. Presentation only (§6).
  *
- * Allocates a fresh array and one object per entity, every frame. That is the
- * right shape for a few dozen buildings and the wrong one for §12's twenty
- * thousand; C28 measures it and C29 is where it becomes incremental, keyed on
- * entity id, as `render-state.ts` describes.
+ * Six: slow enough that a drill reads as a stroke rather than a blur, fast
+ * enough that a furnace's glow reads as fire.
+ */
+const MACHINE_FPS = 6;
+
+/**
+ * Which frame a working machine is on, `seconds` into the session: 1 to 3,
+ * looping. Frame 0 is at rest and is never returned here.
+ */
+export function activityFrame(seconds: number, fps = MACHINE_FPS): number {
+  const step = Math.floor(seconds * fps) % (ACTIVITY_FRAMES - 1);
+  return 1 + (step < 0 ? step + ACTIVITY_FRAMES - 1 : step);
+}
+
+/**
+ * Is this building doing its job right now? C29 art task 3.
  *
- * `seconds` is elapsed wall time, and drives nothing but the belt chevrons.
+ * Read off the status every machine already stores (C11) — `Running`, or
+ * `LowPower`, which is running slowly. Anything without a status, and every
+ * stalled reason, is at rest: a machine that is not working should *look*
+ * stopped, which is pillar 3 before the player has opened the inspector.
+ */
+function isWorking(entity: Entity): boolean {
+  const status = (entity as { readonly status?: unknown }).status;
+  return status === MachineStatus.Running || status === MachineStatus.LowPower;
+}
+
+/**
+ * Which slice of the world to describe, and whether to animate it (C29).
+ *
+ * `within` limits the walk to what is near the screen, through the renderer's
+ * spatial index; without it every entity is described, which is what the
+ * tests and anything else that wants the whole world get. `animate` false
+ * draws everything at rest — belts still, machines unlit, the player in frame
+ * 0 — which is what C29 art task 4 asks for below `DETAIL_ZOOM`.
+ */
+export interface DescribeOptions {
+  readonly within?: { readonly index: EntityIndex; readonly bounds: TileBounds };
+  readonly animate?: boolean;
+}
+
+/**
+ * Build the drawable list from the store.
+ *
+ * Allocates a fresh array and one object per entity described, every frame.
+ * Since C29 the composition root passes `within`, so that is one per entity
+ * *near the screen* — the 2 ms this cost on §12's reference factory at any
+ * zoom was the largest single term in a frame that drew one building.
+ *
+ * `seconds` is elapsed wall time, and drives nothing but animation.
  */
 export function describeEntities(
   store: EntityStore,
   buildings: BuildingRegistry,
   seconds = 0,
+  options: DescribeOptions = {},
 ): RenderEntity[] {
   const out: RenderEntity[] = [];
-  store.forEach((entity) => {
+  const animate = options.animate ?? true;
+  const frame = animate ? activityFrame(seconds) : 0;
+  const visit = (entity: Entity): void => {
     const definition = buildings.forEntityType(entity.type);
     const extent = footprintExtent(definition.size, entity.rotation);
     const speed = carrierSpeed(definition);
-    const phase = speed === null ? 0 : beltPhase(speed, seconds);
+    const phase = speed === null || !animate ? 0 : beltPhase(speed, seconds);
+    let sprite = spriteFor(entity, definition, buildings, store, phase);
+    // An inserter shows what it is doing through its arm, which is state,
+    // not animation; everything else with a status gets the activity cycle.
+    if (frame !== 0 && definition.inserter === undefined && isWorking(entity)) {
+      sprite = machineFrameSprite(sprite, frame);
+    }
     out.push({
       id: entity.id,
       x: entity.x,
       y: entity.y,
       width: extent.width,
       height: extent.height,
-      sprite: spriteFor(entity, definition, buildings, store, phase),
+      sprite,
       layer: layerFor(definition),
     });
-  });
+  };
+  if (options.within === undefined) store.forEach(visit);
+  else options.within.index.forEachIn(store, buildings, options.within.bounds, visit);
   return out;
 }
 
@@ -266,8 +328,13 @@ export function describeBeltItems(
   store: EntityStore,
   buildings: BuildingRegistry,
   items: ItemRegistry,
+  options: Pick<DescribeOptions, 'within'> = {},
 ): RenderEntity[] {
   const out: RenderEntity[] = [];
+  if (options.within !== undefined) {
+    describeItemsWithin(out, store, buildings, items, options.within.index, options.within.bounds);
+    return out;
+  }
 
   for (const belt of store.byType<BeltEntity>(EntityType.Belt)) {
     describeLane(out, belt.items, belt.x, belt.y, belt.rotation, items);
@@ -299,6 +366,63 @@ export function describeBeltItems(
   }
 
   return out;
+}
+
+/**
+ * The same items as `describeBeltItems`, for the carriers near the screen only.
+ *
+ * One subtlety, and it is the tunnel's: a run's items are all held by its
+ * entrance, so an exit in view whose entrance is not must still describe the
+ * run — or items would pop out of a mouth that is visibly empty. A run whose
+ * two mouths are both in view is described once, by its entrance.
+ */
+function describeItemsWithin(
+  out: RenderEntity[],
+  store: EntityStore,
+  buildings: BuildingRegistry,
+  items: ItemRegistry,
+  index: EntityIndex,
+  bounds: TileBounds,
+): void {
+  index.forEachIn(store, buildings, bounds, (entity) => {
+    switch (entity.type) {
+      case EntityType.Belt: {
+        const belt = entity as BeltEntity;
+        describeLane(out, belt.items, belt.x, belt.y, belt.rotation, items);
+        return;
+      }
+      case EntityType.UndergroundBelt: {
+        const mouth = entity as UndergroundBeltEntity;
+        const partner = partnerOf(mouth, store);
+        if (isUndergroundEntrance(mouth, partner)) {
+          describeRun(out, mouth, partner, items);
+          return;
+        }
+        if (partner === undefined || inBounds(partner, bounds)) return;
+        const entrance = partner as UndergroundBeltEntity;
+        describeRun(out, entrance, mouth, items);
+        return;
+      }
+      case EntityType.Splitter: {
+        const splitter = entity as SplitterEntity;
+        const size = buildings.forEntityType(splitter.type).size;
+        for (let side = 0; side < SPLITTER_LANES; side++) {
+          const lane = splitter.lanes[side as SplitterSide];
+          if (lane === undefined) continue;
+          const tile = splitterTile(splitter, size, side as SplitterSide);
+          describeLane(out, lane, tile.x, tile.y, splitter.rotation, items);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  });
+}
+
+/** Is a one-tile entity's tile inside `bounds`? Underground mouths are 1x1. */
+function inBounds(entity: Entity, bounds: TileBounds): boolean {
+  return entity.x >= bounds.minX && entity.x <= bounds.maxX && entity.y >= bounds.minY && entity.y <= bounds.maxY;
 }
 
 /**
@@ -384,14 +508,89 @@ function describeLane(
  * activity and facing — which is the grammar an image atlas addresses a cell
  * with, so C29's swap changes nothing above this line.
  */
-export function describePlayer(view: PlayerView): PlayerRenderView {
+export function describePlayer(view: PlayerView, seconds = 0, animate = true): PlayerRenderView {
   return {
     x: view.x,
     y: view.y,
-    sprite: playerSprite(view.activity, view.facing),
+    sprite: playerSprite(view.activity, view.facing, animate ? playerFrame(view.activity, seconds) : 0),
     buildRange: view.buildRange,
     mining: view.mining,
   };
+}
+
+/**
+ * Frames a second per player activity: a slow breath, a walking stride, a
+ * pick swing. Presentation only (§6).
+ */
+const PLAYER_FPS: Readonly<Record<PlayerView['activity'], number>> = Object.freeze({ idle: 2, walk: 8, work: 6 });
+
+/** Which frame of its four the player's activity is on, `seconds` in. */
+export function playerFrame(activity: PlayerView['activity'], seconds: number): number {
+  const step = Math.floor(seconds * PLAYER_FPS[activity]) % ACTIVITY_FRAMES;
+  return step < 0 ? step + ACTIVITY_FRAMES : step;
+}
+
+/** The plain levels' and the detailed levels' scales. See `image-atlas.ts`. */
+const PLAIN_SCALES: readonly number[] = Object.freeze([0.25, 0.5, 1]);
+const DETAILED_SCALES: readonly number[] = Object.freeze([0.5, 1, 2]);
+
+/**
+ * Every sprite the entity layer can ask for, per atlas level (C29 art task 2).
+ *
+ * Here because this is the file that turns content into sprite ids (§4): the
+ * atlas cannot know that a belt is four rotations of eight phases, or that a
+ * building's picture is its content `sprite` plus three working frames. A
+ * detailed level has every animation frame; a plain level only the frames at
+ * rest, because below `DETAIL_ZOOM` nothing animates. Terrain is not listed:
+ * the terrain layer caches it per world chunk and painting it is not a cost.
+ *
+ * An id this misses is not an error — the atlas paints it live — only slower.
+ */
+export function atlasLevels(buildings: BuildingRegistry, items: ItemRegistry): LevelSpec[] {
+  const plain: SpriteId[] = [];
+  const detailed: SpriteId[] = [];
+  const both = (id: SpriteId): void => {
+    plain.push(id);
+    detailed.push(id);
+  };
+  const rotations: readonly Rotation[] = [0, 1, 2, 3];
+
+  for (const definition of buildings.all()) {
+    for (const rotation of rotations) {
+      if (definition.belt !== undefined || definition.splitter !== undefined) {
+        const sprite = definition.belt !== undefined ? beltSprite : splitterSprite;
+        plain.push(sprite(rotation, 0));
+        for (let phase = 0; phase < BELT_CHEVRON_PHASES; phase++) detailed.push(sprite(rotation, phase));
+      } else if (definition.inserter !== undefined) {
+        for (let swing = 0; swing <= INSERTER_SWING_STEPS; swing++) {
+          both(inserterSprite(rotation, swing, false));
+          both(inserterSprite(rotation, swing, true));
+        }
+      } else if (definition.underground !== undefined) {
+        both(undergroundSprite(rotation, true));
+        both(undergroundSprite(rotation, false));
+      }
+    }
+    if (definition.belt === undefined && definition.splitter === undefined && definition.inserter === undefined && definition.underground === undefined) {
+      const base = definition.sprite as SpriteId;
+      plain.push(base);
+      for (let frame = 0; frame < ACTIVITY_FRAMES; frame++) detailed.push(machineFrameSprite(base, frame));
+    }
+  }
+
+  for (const item of items.all()) both(item.sprite as SpriteId);
+
+  for (const activity of PLAYER_ACTIVITIES) {
+    for (const facing of rotations) {
+      plain.push(playerSprite(activity, facing, 0));
+      for (let frame = 0; frame < ACTIVITY_FRAMES; frame++) detailed.push(playerSprite(activity, facing, frame));
+    }
+  }
+
+  return [
+    ...PLAIN_SCALES.map((scale) => ({ scale, detail: false, ids: plain })),
+    ...DETAILED_SCALES.map((scale) => ({ scale, detail: true, ids: detailed })),
+  ];
 }
 
 /**

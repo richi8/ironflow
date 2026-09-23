@@ -58,7 +58,7 @@ export function padBounds(bounds: TileBounds, margin: number): TileBounds {
 }
 
 export interface CanvasRendererOptions {
-  /** Defaults to the procedural placeholders of §11. C29 passes the image atlas. */
+  /** Defaults to painting every sprite live. The game passes the baked `ImageAtlas` (C29). */
   readonly atlas?: SpriteAtlas;
   /** Offscreen surfaces for the terrain cache. Injected so tests can fake them. */
   readonly createSurface?: SurfaceFactory;

@@ -45,6 +45,8 @@ export interface Milestones {
   readonly serialize: number | null;
   readonly saveBytes: number | null;
   readonly load: number | null;
+  /** Baking the sprite atlas at startup (C29). Counted inside cold start. */
+  readonly atlas: number | null;
 }
 
 export interface PerformanceReadout {
@@ -117,6 +119,7 @@ export function writePerformanceRows(rows: DebugRows, readout: PerformanceReadou
   rows.section('once');
   rows.row('cold start', optionalMs(once.coldStart), optionalTone(BUDGETS.coldStart, once.coldStart));
   rows.row('worldgen', once.worldgen === null ? '— (loaded)' : ms(once.worldgen));
+  rows.row('atlas', once.atlas === null ? '— (painted live)' : ms(once.atlas));
   rows.row('serialize', optionalMs(once.serialize), optionalTone(BUDGETS.serialize, once.serialize));
   const saveMB = once.saveBytes === null ? null : once.saveBytes / (1024 * 1024);
   rows.row(

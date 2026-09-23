@@ -122,6 +122,14 @@ export class EntityLayer {
    */
   private readonly visible: RenderEntity[] = [];
 
+  /**
+   * Each visible drawable's depth key, and the draw order as indexes into
+   * `visible`. Grown, never shrunk, so a steady frame allocates nothing.
+   */
+  private keys = new Float64Array(1024);
+  private order = new Uint32Array(1024);
+  private readonly byKey = (a: number, b: number): number => (this.keys[a] ?? 0) - (this.keys[b] ?? 0) || a - b;
+
   constructor(atlas: SpriteAtlas) {
     this.atlas = atlas;
   }
@@ -164,13 +172,25 @@ export class EntityLayer {
       if (overlapsBounds(drawable, bounds)) this.visible.push(drawable);
     }
 
-    // Recomputing the key inside the comparator is O(n log n) key computations
-    // rather than O(n). The alternative is a parallel key array and an index
-    // sort, which is a real optimisation with a real cost in clarity — §16 says
-    // that decision belongs to C28's profiler, not to this line.
-    this.visible.sort((a, b) => depthKey(a) - depthKey(b));
+    // Each key once, then an index sort over the keys (C29). Until C29 the
+    // key was recomputed inside the comparator, O(n log n) times, which is
+    // what this comment used to say belonged to the profiler to decide: at
+    // the far zoom, with nineteen thousand drawables, it did. Ties — items,
+    // which share `NO_ENTITY` — fall back to arrival order, which is what the
+    // stable array sort gave them before.
+    const count = this.visible.length;
+    if (this.keys.length < count) {
+      this.keys = new Float64Array(count * 2);
+      this.order = new Uint32Array(count * 2);
+    }
+    for (let i = 0; i < count; i++) {
+      this.keys[i] = depthKey(this.visible[i] as RenderEntity);
+      this.order[i] = i;
+    }
+    const order = this.order.subarray(0, count).sort(this.byKey);
 
-    for (const entity of this.visible) {
+    for (let i = 0; i < count; i++) {
+      const entity = this.visible[order[i] ?? 0] as RenderEntity;
       const anchor = camera.worldToScreen(entity.x + entity.width * 0.5, entity.y + entity.height * 0.5);
       this.atlas.draw(ctx, entity.sprite, anchor.x, anchor.y, camera.zoom);
     }

@@ -38,7 +38,7 @@ import {
   TILE_HALF_HEIGHT,
   TILE_HALF_WIDTH,
   resourceSprite,
-  terrainSprite,
+  terrainVariantSprite,
   type SpriteAtlas,
   type SpriteId,
 } from '../sprite-atlas.js';
@@ -407,7 +407,7 @@ export class TerrainLayer {
         const centre = tileToScreen(tileX0 + lx + 0.5, tileY0 + ly + 0.5);
         const sx = (centre.x - originX) * scale + SURFACE_PAD;
         const sy = (centre.y - originY) * scale + SURFACE_PAD;
-        this.atlas.draw(surface.ctx, terrainSprite(terrain), sx, sy, scale);
+        this.atlas.draw(surface.ctx, terrainVariantSprite(terrain, tileVariant(tileX0 + lx, tileY0 + ly)), sx, sy, scale);
 
         const ore = oreSprite(chunk, index);
         if (ore !== null) this.atlas.draw(surface.ctx, ore, sx, sy, scale);
@@ -436,16 +436,24 @@ export class TerrainLayer {
     const tileX0 = chunk.cx * CHUNK_SIZE;
     const tileY0 = chunk.cy * CHUNK_SIZE;
     const corner = camera.worldToScreen(tileX0, tileY0);
-    const left = corner.x;
-    const top = corner.y;
+    const far = camera.worldToScreen(tileX0 + CHUNK_SIZE, tileY0 + CHUNK_SIZE);
 
-    const pad = SURFACE_PAD * relativeScale;
-    const x = snapToDevicePixel(left - pad, dpr);
-    const y = snapToDevicePixel(top - pad, dpr);
-    const w = snapToDevicePixel(surface.width * relativeScale, dpr);
-    const h = snapToDevicePixel(surface.height * relativeScale, dpr);
+    // Both corners of the world chunk are snapped, and the scale is whatever
+    // maps the one onto the other. Snapping the position and the size apart —
+    // which is what this did until C29 — lets a scaled bitmap's content end up
+    // to half a pixel short of where its neighbour's snapped content begins,
+    // and the background showed through as a line along every world-chunk edge
+    // at most zooms. Sharing the snapped corner makes the two edges one edge.
+    const left = snapToDevicePixel(corner.x, dpr);
+    const top = snapToDevicePixel(corner.y, dpr);
+    // The world chunk's extent in bitmap pixels. Not the bitmap's width less
+    // its padding: that was rounded up when the bitmap was made.
+    const contentW = (far.x - corner.x) / relativeScale;
+    const contentH = (far.y - corner.y) / relativeScale;
+    const sx = contentW > 0 ? (snapToDevicePixel(far.x, dpr) - left) / contentW : relativeScale;
+    const sy = contentH > 0 ? (snapToDevicePixel(far.y, dpr) - top) / contentH : relativeScale;
 
-    ctx.drawImage(surface.image, x, y, w, h);
+    ctx.drawImage(surface.image, left - SURFACE_PAD * sx, top - SURFACE_PAD * sy, surface.width * sx, surface.height * sy);
   }
 
   /**
@@ -475,7 +483,7 @@ export class TerrainLayer {
         const terrain = chunk.terrain[index];
         if (terrain === undefined) continue;
         const centre = camera.worldToScreen(tx + 0.5, ty + 0.5);
-        this.atlas.draw(ctx, terrainSprite(terrain), centre.x, centre.y, zoom);
+        this.atlas.draw(ctx, terrainVariantSprite(terrain, tileVariant(tx, ty)), centre.x, centre.y, zoom);
 
         const ore = oreSprite(chunk, index);
         if (ore !== null) this.atlas.draw(ctx, ore, centre.x, centre.y, zoom);
@@ -484,6 +492,19 @@ export class TerrainLayer {
 
     this.direct += 1;
   }
+}
+
+/**
+ * Which texture variant a tile is drawn with (C29). A hash of its position,
+ * so a tile is always the same picture — in the cache and out of it, and in
+ * every screenshot — and a field of grass does not repeat on a grid.
+ */
+export function tileVariant(x: number, y: number): number {
+  let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  return h & 3;
 }
 
 /**

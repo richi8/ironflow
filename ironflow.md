@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C28 complete — performance is measured.** The simulation reports the end of every phase to an optional `PhaseTimer` and reads no clock itself; `debug/profiler.ts` turns the reports into rolling mean/p99 per phase, and the F3 overlay shows §12's table live, coloured against its budgets. §12's reference factory is a committed save (`tests/fixtures/reference-factory.ifsave`, 20,000 entities, ~7,900 belt items), and `npm run perf` fails on a hard-fail budget or on one phase regressing against its baseline. **First measurement: a 2.5 ms tick against an 8 ms target** (1.5 ms outside the test runner), belts and inserters three quarters of it; every headless §12 metric is inside its target. Next: C29 — renderer optimisation & art pass, with nothing yet flagged on the simulation side. |
+| **Status** | **C29 complete — the renderer is inside §12, and the game has art.** Measured first. At the far zoom, drawing cost 38 of a 45 ms frame. At every zoom, describing all 20,000 entities cost about 2 ms, even with one on screen. Three of §16's paths fixed it: terrain caching (verified, and a world-chunk seam found and fixed), an image atlas, and a spatial index. The depth sort also computes each key once. The atlas is baked at startup from code-drawn art (`sprite-painter.ts`) into a JSON-described sheet per scale, each painted on first use. Render is now 1.7 ms at zoom 1 over the reference factory (was 4.8), and §12's 5,000 entities on screen at max zoom-out draw in 3.2 ms at 60 fps. Machines, the worker, belts and inserters animate from render-side time and stored status, and nothing animates below zoom 0.5. The simulation is unchanged. Next: C30 — audio, UX & accessibility polish. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | Chunk **C29 — Renderer optimisation & art pass** |
+| **First action** | Chunk **C30 — Audio, UX & accessibility polish** |
 
 ---
 
@@ -261,7 +261,11 @@ src/
     canvas-renderer.ts
     projection.ts              # THE ONLY file that converts tile <-> screen
     camera.ts
-    sprite-atlas.ts
+    sprite-atlas.ts            # the SpriteAtlas interface, ids, ProceduralAtlas
+    sprite-geometry.ts         # §11's asset-spec numbers (C29)
+    sprite-painter.ts          # every drawing, by code (C29)
+    image-atlas.ts             # baked sheets + JSON descriptor (C29)
+    entity-index.ts            # which entities are near the screen (C29)
     palette.ts                 # TS mirror of styles/tokens.css (§11)
     layers/                    # terrain, entities, overlays, ghost
     render-state.ts
@@ -864,8 +868,9 @@ half-removed entity.
 - **Belts** update **downstream-first**: the tile nearest the output end moves
   first, then the one behind it. Updating upstream-first makes items compress
   by one slot per tick and changes effective belt speed.
-- **Belt networks** (once C29 introduces them) are ordered by the entity id of
-  their head segment.
+- **Belt networks** (if a later chunk introduces them) are ordered by the entity
+  id of their head segment. C29 measured belts at 1.1 ms against §16's ~4 ms
+  trigger and did not.
 - **Machines, inserters, miners** iterate the `EntityStore`'s id-ordered dense
   array. Never a `Map`, never `Object.values`.
 - **Events** emitted during a tick are queued and dispatched in `cleanup`,
@@ -1089,6 +1094,12 @@ C29  atlas-backed sprites
        implementation, swapped for an image-backed one here.
      - Renderer code does not change.
 ```
+
+**C29 kept "zero image assets".** The image-backed atlas is real, and it is
+baked at startup from `renderer/sprite-painter.ts`, the one painter both
+atlases use. So the pipeline's second step replaced *placeholders* with *art*
+without adding a file of pixels. A hand-painted sheet can still drop in:
+`ImageAtlas` takes any image with a matching JSON descriptor. See C29.
 
 `SpriteAtlas` is declared in C03 precisely so C29 is a swap. This is the one
 "future-proofing" abstraction the plan permits, because it is one interface with
@@ -6878,6 +6889,170 @@ having written it. Plus updated benchmark baselines.
 
 **Out of scope.** Optimising anything the profiler did not flag.
 
+### What implementing it decided
+
+**The measurement came first, and it flagged the renderer.** The browser
+numbers were taken with headless Chromium through Playwright (the copy in the
+npx cache, driven from a scratch script, not committed) at 1920x1080: the
+production build, `reference-factory.ifsave` dropped on the window, the F3
+overlay read after six seconds at each view. The fixture scatters its 500
+modules over the whole explored map, so at the far zoom it never shows more
+than about 960 entities. The far-zoom question needed a second scene: a
+synthetic dense factory handed straight to `CanvasRenderer`. It holds belts
+with three items each, inserters, 2x2 machines and chests, and is described
+below by what it puts on screen.
+
+```text
+before C29 (procedural atlas, software canvas)
+  reference factory, zoom 1 at spawn, 1 drawn            render 4.81 ms
+  reference factory, far zoom over its densest corner    render 3.88 ms   (962 drawn)
+  dense scene, zoom 1 / 0.5 / 0.25                        5.5 / 17.0 / 45.4 ms
+                                                          (1,509 / 5,567 / 18,970 drawn)
+  the same with a do-nothing atlas, zoom 0.25             6 ms
+```
+
+Two findings came out of that. **Drawing** is the far-zoom cost: 38 of 45 ms
+went to paths, arcs and strokes, and 5,567 drawables already broke §12's
+16 ms hard fail. **Describing** is the everywhere cost: `describeEntities` and
+`describeBeltItems` walked all 20,000 entities and 7,900 items every frame, about
+2.4 ms, at zoom 1 with one building on screen. So paths 1 to 3 were walked, and
+nothing else was.
+
+- **Path 1, terrain caching, is working.** The overlay reads `96 cached / 0
+  direct` at the far zoom. Walking it turned up one defect, a pre-C29 one: a
+  scaled world-chunk bitmap was placed by snapping its position and its size
+  separately, which left a one-pixel line of background along every world-chunk
+  edge at most zooms (plainly visible at 0.6). `TerrainLayer.blit` now snaps
+  both corners of the world chunk and derives the scale from them, so
+  neighbours share one edge. That is §5 hazard 3, finished.
+- **Path 2 is `renderer/image-atlas.ts`,** described below.
+- **Path 3 is `renderer/entity-index.ts`:** a grid of 32-tile cells over the
+  store, rebuilt when `structureRevision` moves. The composition root now
+  describes only the entities (and belt items) inside the renderer's padded cull
+  rectangle, and passes the same rectangle to both. A tunnel whose exit is in
+  view and whose entrance is not still shows its items, because a run's items
+  live on the entrance (C23). Because of this, `describeEntities` runs *after*
+  the camera and the input layer have moved for the frame, so **the picker reads
+  the previous frame's drawables**: the ones on screen when the cursor moved.
+- **The depth sort computes each key once.** `EntityLayer` keeps a key array
+  and sorts an index array over it. It used to recompute the key inside the
+  comparator, which the old comment filed as "the profiler's to decide". At
+  19,000 drawables the profiler decided.
+- **Path 4, belt networks, is not justified.** Belts cost 1.1 ms of a 2.5 ms
+  tick, against §16's ~4 ms trigger. No belt code changed, so every C13, C14
+  and C17 test passed untouched.
+- **Paths 5 to 8 were not needed** (below).
+
+```text
+after C29
+  reference factory, zoom 1 at spawn                      render 1.68 ms  (GPU canvas: 0.09)
+  reference factory, far zoom at spawn                    render 0.37 ms  (GPU: 0.48)
+  reference factory, far zoom over its densest corner     render 0.99 ms  (GPU: 1.12)
+  reference factory, zoom 4                               render 0.67 ms  (GPU: 0.74)
+  cold start 45-62 ms, of which the atlas 6 ms; 60 fps at every view
+  dense scene, GPU canvas, measured over 180 real animation frames:
+    5,100 entities + their items at zoom 0.25 (9,196 drawn)   atlas 3.2 ms, 60 fps   live painting 21.7 ms, 32 fps
+    zoom 0.5 (5,567 drawn)                                     atlas 2.2 ms, 60 fps   live painting 11.1 ms
+    zoom 0.25 at twice §12's density (18,970 drawn)             atlas 12.7 ms, 48 fps
+```
+
+The "software canvas" numbers are headless Chromium's default. The "GPU"
+ones launched it with `--use-angle=metal --enable-accelerated-2d-canvas`, which
+is what a desktop browser does. §12's "≥ 5,000 entities on screen at max
+zoom-out" is the first dense row: 3.2 ms against an 8 ms target. The last row is
+past §12's density and past its target, inside the hard fail. There,
+`drawImage` itself is two thirds of the frame, and the next step would be path 5
+or 7. Neither is justified by a factory §12 describes.
+
+**The atlas is baked from code, not painted by hand.** There is no artist, so
+art task 1's "produce or commission" became *produce*, in code:
+`renderer/sprite-painter.ts` paints every sprite the game can name, and it is
+the only painter. `ProceduralAtlas` calls it on every draw. `ImageAtlas` calls
+it once per sprite per level, into a canvas, and afterwards only copies cells
+out. The "JSON descriptor" is real: `layoutAtlas` produces a plain
+`AtlasDescriptor` (a cell and an anchor per sprite id per level), and a test
+round-trips it through JSON. A sheet painted by hand, loaded as an `<img>`
+with the same descriptor, goes into the same constructor. **Deviation:** there
+is no committed image file. A PNG baked from this code would be a second copy of
+the painter that can drift from it.
+
+- **Levels.** Each level is every sprite at one scale. Three are *detailed*
+  (0.5x, 1x, 2x, with animation frames: 328 sprites) and three *plain* (0.25x,
+  0.5x, 1x, at rest and without small details: 203 sprites). A draw uses the
+  smallest level at least as large as `zoom x devicePixelRatio`, from the plain
+  set below `DETAIL_ZOOM` (0.5). So a sprite is only ever scaled down, by at
+  most half. Above 2x device pixels it paints live, which is sharp and cheap
+  because little fits on screen there.
+- **Levels are painted on first use.** The 2x level is 3286x3155, about 41 MB of
+  canvas and three quarters of the whole atlas, and a 1x display needs it only
+  past zoom 1. The composition root prepares the opening zoom's level at startup
+  so the first frame does not pay for it. If that throws (jsdom, or a browser
+  that will not give a 2D context), the game keeps the procedural atlas. That
+  is how the bootstrap tests still run `main.ts`.
+- **"No renderer code changes" held for the swap itself.** No layer names the
+  atlas it draws with. The layers did change, for the optimisation paths above
+  and for terrain variants below, which is this chunk's other half.
+- **A cell's size is worked out, not measured.** `spriteExtent` gives a
+  conservative box per descriptor, the baker clips each sprite to it, and a
+  test paints every baked sprite into a recording context and fails if any
+  stroke leaves its box. That test found two real overreaches: belt slats
+  sliding off the tile at late phases, and the worker's raised pick. It is also
+  the first test that executes the drawing code, which C17 filed as C29's to
+  settle.
+
+**The grammar grew three optional tails,** each chosen so that every id written
+before C29 still names the same picture:
+
+```text
+terrain:<name>:<variant 0-3>          a texture variant, picked from the tile's position
+building:...:f<frame 1-3>             a working machine's activity frame
+player:<activity>:<facing>:<frame>    the worker's animation frame
+```
+
+**Animation (art task 3) is render-side time and state that already
+existed.** A building whose stored status (C11) is `Running` or `LowPower`
+cycles frames 1 to 3 at 6 fps, and anything else is drawn at rest. The miner's
+drill head strokes, the furnace mouth glows and flickers, the assembler's gear
+turns, the lab's dome lights and the radar's dish sweeps, so **a stalled
+machine looks stopped** before the inspector says why (pillar 3). The worker has
+four frames per activity: breath, stride, pick swing. Belts animate their tread
+(the slats move and a static chevron gives the direction). The inserter
+animates by its real swing, as it has since C14. Items still move by their real
+positions.
+
+**Zoom-dependent detail (art task 4)** is one threshold, `DETAIL_ZOOM`.
+Below it the composition root describes everything at rest and the atlas draws
+from the plain levels, so both the animation and the details are gone.
+
+**The art, against §11's asset spec.** Every building is a stack of boxes and
+cylinders on a dark plinth: steel bodies, the category colour as trim, orange
+where energy is, the same outline on every edge, and one shadow per building as
+the hull of its footprint swept south-east by §11's slant (it used to be the
+footprint moved, which floated tall things off the ground). Tokens only; the
+palette test still guards them. Items became shapes by kind, which is also
+C30's "never colour alone" for anything on a belt: rock, slab, ingot, gear,
+coil, chip, crystal, or a crate for building items. Terrain gained four texture
+variants each (tufts, grain, cracks, ripples), and ore tiles gained lit rocks.
+
+**Deliberately not drawn:** belt curves. The reference sheet has one, but an
+item on a side-loaded belt travels straight along the lane (§9), so a curve
+drawn under it would show an item leaving the track. A curve needs the items
+drawn on the arc too. That is a render-side change, and nothing has asked for
+it yet. The sheet's fast inserter, tank, pipe, chem plant, uranium and oil have
+no v1 building to draw (§2).
+
+**Noticed, not fixed (§19 rule 5).**
+
+- The longest frame interval in every five-second window is 20-26 ms, both
+  before and after this chunk, in headless Chromium. That is under §12's 50 ms
+  hard fail and short of a whole missed vsync (33 ms), so it looks like
+  scheduling jitter rather than a GC pause. It was not chased.
+- C28's two leads, the bench-file tick being 6 ms (polymorphic call sites?) and
+  the stale `idle` baseline, are simulation-side and were not flagged by
+  anything this chunk measured, so they stay open.
+- `tests/unit/ui-panels.dom.test.ts` prints jsdom's "getContext not
+  implemented" from the map panel. It passes, and the message predates C29.
+
 ---
 
 ## C30 — Audio, UX & accessibility polish
@@ -7571,9 +7746,9 @@ because C28 said so.
 
 ```text
 Canvas 2D + cached terrain world chunks     <- C03, should carry to ~20k entities
-        + image sprite atlas                <- C29
-        + spatial-index culling             <- C29 if needed
-        + dirty rectangles                  <- C29 if needed
+        + image sprite atlas                <- C29 (done: baked, levelled)
+        + spatial-index culling             <- C29 (done: entity-index.ts)
+        + dirty rectangles                  <- not needed at §12's density
         v
 WebGL2 + batched sprite rendering           <- only if all of the above fails
 ```
@@ -7775,7 +7950,7 @@ Recommended next chunk
 | After C18 | **Determinism holds.** Do not build worldgen on a nondeterministic simulation. |
 | After C20 | **The game is fun.** Answered honestly, in writing. Failing this means staying in C20. |
 | After C24 | The save round-trip determinism test passes. |
-| After C29 | Every §12 budget is met on the reference factory. |
+| After C29 | Every §12 budget is met on the reference factory. **Passed**, in headless Chromium at 1920x1080. Render 1.7 ms, 60 fps, 5,000 entities on screen at max zoom-out in 3.2 ms, tick 2.5 ms, load 155 ms, serialize 114 ms, 0.19 MB save, worldgen 199 ms, cold start under 70 ms. The longest frame interval is 20-26 ms, which is under the 50 ms hard fail and was not chased (see C29). |
 
 ---
 

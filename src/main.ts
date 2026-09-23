@@ -28,18 +28,21 @@ import { TabLock } from './persistence/tab-lock.js';
 import { BrowserFrameScheduler } from './platform/browser-clock.js';
 import { CanvasSurface } from './platform/canvas-surface.js';
 import { Camera } from './renderer/camera.js';
-import { CanvasRenderer } from './renderer/canvas-renderer.js';
+import { CanvasRenderer, SPRITE_OVERHANG_TILES, padBounds } from './renderer/canvas-renderer.js';
+import { EntityIndex } from './renderer/entity-index.js';
 import {
+  atlasLevels,
   buildingSprite,
   describeAnnotations,
   describeBeltItems,
   describeEntities,
   describePlayer,
 } from './renderer/entity-view.js';
+import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
-import { spriteLift } from './renderer/sprite-atlas.js';
+import { DETAIL_ZOOM, ProceduralAtlas, spriteLift, type SpriteAtlas } from './renderer/sprite-atlas.js';
 import { SAVE_ROWS, type SaveMenuView, type SaveSlotRow } from './ui/save-menu.js';
 import { GameUI } from './ui/ui.js';
 
@@ -281,6 +284,7 @@ async function bootstrap(): Promise<void> {
     serialize: null,
     saveBytes: null,
     load: null,
+    atlas: null,
   };
 
   /**
@@ -377,12 +381,41 @@ async function bootstrap(): Promise<void> {
   const scheduler = new BrowserFrameScheduler();
 
   const camera = new Camera({ x: WORLD_SPAWN.x, y: WORLD_SPAWN.y });
-  const renderer = new CanvasRenderer(surface.ctx);
+
+  /**
+   * The sprite atlas (C29): every sprite the game can name, painted once into
+   * one image per scale, so a frame copies cells instead of painting.
+   *
+   * The content cannot change under it — a loaded save is the same game with a
+   * different factory — so it is baked once, here. If it cannot be (no real 2D
+   * context, as in jsdom, or a canvas the browser refuses), the game draws
+   * with the procedural atlas it drew with before C29: slower at the far zoom
+   * and otherwise identical, which is the point of one painter behind both.
+   */
+  const atlas = ((): SpriteAtlas => {
+    const live = new ProceduralAtlas();
+    const started = performance.now();
+    try {
+      const descriptor = layoutAtlas(atlasLevels(simulation.buildings, simulation.items));
+      const image = new ImageAtlas(descriptor, bakedLevels(createAtlasSurface), live);
+      // The level the game opens at, painted now so the first frame does not
+      // pay for it — and so a browser that cannot paint one is found here,
+      // where falling back is still free. The rest are painted on first use.
+      image.setPixelRatio(surface.getSize().dpr);
+      image.prepare(camera.zoom);
+      milestones.atlas = performance.now() - started;
+      return image;
+    } catch {
+      return live;
+    }
+  })();
+  const renderer = new CanvasRenderer(surface.ctx, { atlas });
 
   const applySize = (): void => {
     const { cssWidth, cssHeight, dpr } = surface.getSize();
     camera.setViewport(cssWidth, cssHeight);
     renderer.resize(cssWidth, cssHeight, dpr);
+    if (atlas instanceof ImageAtlas) atlas.setPixelRatio(dpr);
   };
   applySize();
   surface.onResize(applySize);
@@ -398,11 +431,17 @@ async function bootstrap(): Promise<void> {
   let renderEntities = describeEntities(simulation.entities, simulation.buildings);
 
   /**
-   * Wall time since the first frame, in seconds. Belt chevrons and nothing else.
+   * Which entities are near the screen (C29, §16 path 3). Every frame
+   * describes those and only those; see `entity-index.ts` for why.
+   */
+  const entityIndex = new EntityIndex();
+
+  /**
+   * Wall time since the first frame, in seconds. Animation and nothing else.
    *
    * §6 allows the renderer a clock and allows nothing else one. It is
    * accumulated from the frame delta rather than read from `performance.now()`
-   * directly so that the pause button stops the chevrons with the belts —
+   * directly so that the pause button stops the animation with the factory —
    * a paused factory whose belts are still visibly running would be lying.
    */
   let renderSeconds = 0;
@@ -582,17 +621,25 @@ async function bootstrap(): Promise<void> {
     milestones.coldStart ??= renderStarted;
     if (!game.isPaused()) renderSeconds += elapsedMs / 1000;
 
-    renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds);
-
     // Wall-clock smoothing of a presentation value. §6 permits exactly this and
     // nothing more: the camera is never serialized and no system reads it.
     camera.update(elapsedMs);
     // After the camera, before the draw: held keys move the view and the tile
-    // under a stationary cursor changes when it does.
+    // under a stationary cursor changes when it does. The picker it asks is
+    // still holding last frame's drawables, which is what was on screen when
+    // the cursor moved.
     input.update(elapsedMs);
 
-    const player = describePlayer(controller.getPlayerView());
+    // Below `DETAIL_ZOOM` nothing animates (C29 art task 4): a moving slat a
+    // pixel wide is shimmer, and the atlas's plain levels have no frames.
+    const animate = camera.zoom >= DETAIL_ZOOM;
+    const player = describePlayer(controller.getPlayerView(), renderSeconds, animate);
     followPlayer(player.x, player.y);
+
+    // Described after the camera has settled for the frame, over the same
+    // padded rectangle the renderer culls to, so nothing drawn is missing.
+    const within = { index: entityIndex, bounds: padBounds(camera.visibleTileBounds(), SPRITE_OVERHANG_TILES) };
+    renderEntities = describeEntities(simulation.entities, simulation.buildings, renderSeconds, { within, animate });
 
     // The read-only view the renderer is allowed to see (C03 task 2).
     const state: RenderState = {
@@ -600,7 +647,7 @@ async function bootstrap(): Promise<void> {
       entities: renderEntities,
       // Belt items are described per frame like everything else, and kept out
       // of `entities` so the picker cannot return one (§9: not entities).
-      items: describeBeltItems(simulation.entities, simulation.buildings, simulation.items),
+      items: describeBeltItems(simulation.entities, simulation.buildings, simulation.items, { within }),
       player,
       hover: input.hover,
       ghost: currentGhost(),
@@ -889,6 +936,16 @@ async function bootstrap(): Promise<void> {
   });
 
   game.start();
+}
+
+/** An offscreen canvas for one atlas level. Throws where there is no 2D context. */
+function createAtlasSurface(width: number, height: number): AtlasSurface {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) throw new Error('IronFlow: could not acquire a 2D context for the sprite atlas.');
+  return { ctx, image: canvas };
 }
 
 void bootstrap();
