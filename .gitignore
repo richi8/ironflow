@@ -11,6 +11,8 @@
 
 .idea
 /node_modules/
+# build output
+/dist/
 
 # macOS
 .DS_Store
