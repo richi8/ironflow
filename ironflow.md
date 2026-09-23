@@ -1395,6 +1395,12 @@ to arrange. What each change means:
   the bag has room for is taken. Distances are exact integers, and carriers are
   visited in id order (§6 R3, R4). `pickingUp` is saved: **`SAVE_VERSION` is
   5**, and `v4-to-v5.ts` adds it as `false`.
+- **Alt-mode badges sit on the middle of the machine** *(2026-09-23, on
+  request, as in Factorio)*. They floated above it since C20, and C27B's
+  `lift` kept them clear of the standing sprite. The plate is now centred on
+  the footprint's centre raised by half the lift, the middle of what stands
+  there. It covers the machine's two-letter code while alt mode is on, which
+  is the trade Factorio makes too.
 - **The map is `M` only.** Tab opened it too for a day. It was unbound
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.

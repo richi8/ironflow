@@ -13,7 +13,7 @@ import type { TileCoord } from '../../game/world/coordinates.js';
 import type { Camera } from '../camera.js';
 import { FONT_STACK, color } from '../palette.js';
 import type { GhostView, MachineAnnotation, PlayerRenderView, RenderState } from '../render-state.js';
-import { TILE_HALF_HEIGHT, TILE_HALF_WIDTH, groundFacePath, type SpriteAtlas } from '../sprite-atlas.js';
+import { TILE_HALF_WIDTH, groundFacePath, type SpriteAtlas } from '../sprite-atlas.js';
 
 /** Restores a solid stroke after the dashed range circle. */
 const EMPTY_DASH: number[] = [];
@@ -66,9 +66,6 @@ const BADGE_GAP = 4;
 
 /** Padding inside the badge's plate. */
 const BADGE_PAD = 4;
-
-/** How far above the footprint's north corner the badge sits. */
-const BADGE_OFFSET = 6;
 
 const BADGE_TEXT_SIZE = 11;
 
@@ -137,9 +134,10 @@ export class OverlayLayer {
   /**
    * One machine's "this is what I make" badge (C20 task 5).
    *
-   * Drawn at a **fixed pixel size** above the middle of the footprint's top
-   * edge, for the reason the mining ring and the ghost's ore count are: it is
-   * a readout,
+   * Drawn at a **fixed pixel size** on the middle of the machine, as
+   * Factorio's alt mode does (2026-09-23; it floated above the machine
+   * before), for the reason the mining ring and the ghost's ore count are: it
+   * is a readout,
    * and the whole value of the mode is being able to read forty of them at
    * once at the zoom where forty machines fit on screen. A badge that
    * foreshortened with the tile would be unreadable exactly when it is
@@ -159,10 +157,11 @@ export class OverlayLayer {
       annotation.x + annotation.width * 0.5,
       annotation.y + annotation.height * 0.5,
     );
-    // Above the footprint's top edge *and* above whatever stands on it, so a
-    // badge never lands on the machine it labels (C27B).
-    const top = centre.y - (annotation.height * TILE_HALF_HEIGHT + annotation.lift) * camera.zoom;
-    const y = top - BADGE_OFFSET;
+    // The middle of what stands there, not of its footprint: a machine rises
+    // by `lift` above the ground it covers (C27B), so its middle is half that
+    // higher. `y` is the plate's baseline, set so the plate is centred on it.
+    const middle = centre.y - annotation.lift * 0.5 * camera.zoom;
+    const y = middle + (BADGE_SIZE - BADGE_PAD) * 0.5;
 
     const label = annotation.count === null ? '' : String(annotation.count);
     const textWidth = label === '' ? 0 : this.measureBadge(ctx, label);

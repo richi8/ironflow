@@ -160,8 +160,8 @@ export interface GhostView {
  * What one machine is making, for the alt-mode overlay. See C20 task 5.
  *
  * ```text
- *        [iron plate]          <- the badge this describes
- *      /-------------\
+ *      /--------------\
+ *      | [iron plate] |      <- the badge this describes, on the machine
  *      |   furnace    |
  * ```
  *
@@ -188,8 +188,8 @@ export interface MachineAnnotation {
   /**
    * How far the machine under this badge rises, in world pixels at zoom 1.
    *
-   * The badge floats above the machine, and since C27B "above the machine" is
-   * higher than "above the footprint" by exactly this. It travels on the view
+   * The badge sits on the middle of the machine (2026-09-23), and since C27B
+   * that is higher than the middle of the footprint by half of this. It travels on the view
    * rather than being looked up in the overlay layer because the *machine's*
    * sprite is not in this shape — `sprite` here is the item being made — and
    * the alternative is passing the building's sprite id along just to measure
