@@ -5,7 +5,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C31 complete — the quest guide, and a game that starts empty-handed.** A new game starts with an empty bag: no starting kit. Every crafting recipe can now be made by hand. Smelting still needs a furnace, and the furnace is crafted from 10 stone, which the player can mine by hand. C30's five-line first-run list is now a chain of 37 steps, from the first iron ore mined to a running Assembler Mk2. Together the steps use every building and every technology. The guide shows one step at a time with a hint, and ticks any step the world already satisfies, in any order. It can be skipped a step at a time or hidden. Progress belongs to the world and is saved in its metadata (save schema v6). Measured by the bot in `first-factory.test.ts`, the first automated plate now takes 6.5 minutes and the first self-built building 9.4, against C20's 10- and 25-minute budgets. Open: no first-time player has been watched following the guide. Next: nothing is scheduled. |
+| **Status** | **C31 complete — the quest guide, and a game that starts empty-handed.** A new game starts with an empty bag and an empty hotbar: no starting kit. Every crafting recipe can now be made by hand. Smelting still needs a furnace, and the furnace is crafted from 10 stone, which the player can mine by hand. C30's five-line first-run list is now a chain of 37 steps, from the first iron ore mined to a running Assembler Mk2. Together the steps use every building and every technology. The guide shows one step at a time with a hint, and ticks any step the world already satisfies, in any order. It can be skipped a step at a time or hidden. Progress belongs to the world and is saved in its metadata (save schema v6). Measured by the bot in `first-factory.test.ts`, the first automated plate now takes 6.5 minutes and the first self-built building 9.4, against C20's 10- and 25-minute budgets. Open: no first-time player has been watched following the guide. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | None scheduled. Part II ends at C31. The open item is a first-time playtest of C31's quest guide from an empty bag. |
@@ -7583,6 +7583,14 @@ now on a harder opening.
 - **The chain is long for a panel that shows three lines.** 37 steps is a
   counter reading 0/37 for a long time. If a playtest says it discourages
   players, the fix is chapters (grouped headings), not fewer steps.
+
+**Later on 2026-09-23: a new world's hotbar starts empty.** An empty bag under
+a hotbar of the first nine buildings was nine slots of things the player had
+none of. A new world (first boot or NEW GAME) now passes nine empty slots
+(`EMPTY_HOTBAR` in `main.ts`), and the player fills the hotbar by dragging from
+the bag. `null` keeps meaning the default layout, because that is what a save
+from before v2 carries, and such a save still gets it. `GameController` is
+unchanged, and so are its tests.
 
 ---
 ---

@@ -124,6 +124,14 @@ function describeOre(world: World, x: number, y: number): string {
 /** The alt-mode overlay, off. Shared and frozen: every frame the key is not on. */
 const NO_ANNOTATIONS: readonly MachineAnnotation[] = Object.freeze([]);
 
+/**
+ * A new world's hotbar: nine empty slots. Not `null`, which is the default
+ * layout (the first nine buildings) and stays what a save from before v2 gets.
+ * The bag starts empty (C31), so a hotbar of buildings the player has none of
+ * would only be nine greyed-out promises.
+ */
+const EMPTY_HOTBAR: readonly (string | null)[] = Object.freeze([]);
+
 /** The player, for the debug overlay. See the row it fills in. */
 function describePlayerState(view: PlayerView): string {
   const where = `${view.x.toFixed(2)},${view.y.toFixed(2)} r${view.facing} ${view.activity}`;
@@ -882,11 +890,11 @@ async function bootstrap(): Promise<void> {
   // without importing `input/**` (§4).
   // The hotbar comes back with the save it was arranged in (v2 metadata), and
   // the quest log with the world it was played in (v6); a new world starts
-  // from the default hotbar and an empty log.
+  // with an empty hotbar and an empty log.
   const controller: GameController = new GameController({
     game,
     cursor: input,
-    hotbar: resumed?.hotbar ?? null,
+    hotbar: resumed === null ? EMPTY_HOTBAR : resumed.hotbar,
     quests: resumed?.quests ?? null,
   });
 
@@ -969,7 +977,7 @@ async function bootstrap(): Promise<void> {
   function startNewGame(): void {
     const fresh = timedNewSimulation();
     milestones.load = null;
-    play(fresh, null, null);
+    play(fresh, EMPTY_HOTBAR, null);
     origin = 'new';
     saves.setCurrentId(null);
     autosave.reset();
@@ -982,7 +990,8 @@ async function bootstrap(): Promise<void> {
     syncProfiler();
     game.replaceSimulation(loaded);
     controller.reload();
-    // The save's own hotbar (v2), or the default for one that has none.
+    // The save's own hotbar (v2), or the default for one that has none; a new
+    // world passes `EMPTY_HOTBAR`.
     controller.setHotbarLayout(hotbar);
     // The save's own quest log (v6), or none for a new world or an older save.
     controller.setQuestLog(quests);
