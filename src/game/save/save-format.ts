@@ -52,7 +52,7 @@ import type { ItemIdMapping } from '../registries/item-registry.js';
  * alters what the file says. A save carries both because neither answers the
  * other's question.
  */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /** The magic string that marks a file as one of ours. §14, and C26's header. */
 export const SAVE_FORMAT = 'ironflow-save';
@@ -165,6 +165,8 @@ export interface SerializedPlayerState {
   readonly miningX: number | null;
   readonly miningY: number | null;
   readonly miningTicks: number;
+  /** v5: is F held? v4 and before had no pickup. */
+  readonly pickingUp: boolean;
   /** v3: stacks with positions. v1 and v2 wrote item→count pairs. */
   readonly inventory: SerializedItemGrid;
   /** Head first. The order is the player's decision, so it is never sorted. */

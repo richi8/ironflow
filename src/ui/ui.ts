@@ -154,7 +154,8 @@ export interface GameUIOptions {
   readonly onMenuVisibility?: (open: boolean) => void;
   /**
    * The menu's NEW GAME (2026-09-23): replace the running world with a new
-   * one. Omitted, the menu has no NEW GAME.
+   * one. The UI resets its own progress, the first-steps list, after it.
+   * Omitted, the menu has no NEW GAME.
    */
   readonly onNewGame?: () => void;
 }
@@ -277,6 +278,7 @@ export class GameUI {
                   onNewGame: () => {
                     this.closeOthers(null);
                     onNewGame();
+                    this.resetObjectives();
                   },
                 }),
             onOpenSaves: () => this.toggleSaveMenu(),
@@ -827,6 +829,15 @@ export class GameUI {
     this.reportObjectives();
     this.refreshObjectives();
     this.refreshSettings();
+  }
+
+  /**
+   * A new game's first steps (2026-09-23): nothing ticked, and the list back
+   * on screen, as on a first launch.
+   */
+  private resetObjectives(): void {
+    this.objectivesDone.clear();
+    this.setObjectivesVisible(true);
   }
 
   /**

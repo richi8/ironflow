@@ -171,6 +171,7 @@ function serializePlayer(player: SerializedPlayer, recipes: RecipeRegistry): Ser
     miningX: player.miningX,
     miningY: player.miningY,
     miningTicks: player.miningTicks,
+    pickingUp: player.pickingUp,
     inventory: player.inventory,
     crafts: player.crafts.map((order) => ({
       // An order always names a real recipe — `CraftingSystem` will not queue
@@ -367,6 +368,7 @@ function deserializePlayer(player: SerializedPlayerState, recipes: RecipeRegistr
     miningX: player.miningX,
     miningY: player.miningY,
     miningTicks: player.miningTicks,
+    pickingUp: player.pickingUp,
     inventory: player.inventory,
     crafts: player.crafts.map((order: SerializedCraftOrder): CraftOrder => {
       if (!recipes.has(order.recipe)) {

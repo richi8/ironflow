@@ -95,7 +95,13 @@ export type Command =
    * command is cheaper than that, and it is recorded as a deviation in the
    * plan's §7.
    */
-  | { readonly type: 'stopMining' };
+  | { readonly type: 'stopMining' }
+  /**
+   * Start or stop picking up items from the belts around the player
+   * (2026-09-23, Factorio's F). Held, like mining, so it is one command for
+   * the press and one for the release, never one per frame.
+   */
+  | { readonly type: 'pickUp'; readonly held: boolean };
 
 export type CommandType = Command['type'];
 
@@ -249,6 +255,8 @@ export function validateCommandShape(command: Command): CommandRejectionReason |
     case 'remove':
     case 'mineTile':
       return isTile(command.x, command.y) ? null : 'malformed';
+    case 'pickUp':
+      return typeof command.held === 'boolean' ? null : 'malformed';
     case 'stopMining':
       // No payload, so nothing to be malformed. Stopping something that was
       // not running is a no-op, not an error — see the simulation's arm.

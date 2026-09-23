@@ -432,6 +432,20 @@ describe('the menu', () => {
     expect(ui.isMenuOpen()).toBe(false);
   });
 
+  it('puts the first steps back, unticked, on NEW GAME', () => {
+    const { root, ui, progress } = mountUi({
+      settings: true,
+      objectives: { visible: false, done: ['mine-iron'] },
+      onNewGame: () => {},
+    });
+    ui.toggleMenu();
+    menuButton(root, 'NEW GAME')?.click();
+    menuButton(root, 'NEW GAME? Click again')?.click();
+    expect(ui.isObjectivesOpen()).toBe(true);
+    // Reset, then recounted against the world: this bag already holds ore.
+    expect(progress).toContainEqual({ visible: true, done: [] });
+  });
+
   it('has no NEW GAME when nothing can start one', () => {
     const { root, ui } = mountUi({ settings: true });
     ui.toggleMenu();

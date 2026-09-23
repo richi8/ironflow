@@ -357,6 +357,11 @@ function readInteger(value: unknown, where: string, min: number, max: number): n
   return value;
 }
 
+function readBoolean(value: unknown, where: string): boolean {
+  if (typeof value !== 'boolean') fail(`${where} is ${describe(value)}, not true or false.`);
+  return value;
+}
+
 function readString(value: unknown, where: string, cap: number): string {
   if (typeof value !== 'string') fail(`${where} is ${describe(value)}, not a string.`);
   if (value.length > cap) fail(`${where} is ${value.length} characters long; the limit is ${cap}.`);
@@ -607,6 +612,7 @@ function readPlayer(value: unknown, numbering: ItemNumbering): SerializedPlayerS
     miningX: miningX === null ? null : readInteger(miningX, 'the mining target x', TILE_MIN, TILE_MAX),
     miningY: miningY === null ? null : readInteger(miningY, 'the mining target y', TILE_MIN, TILE_MAX),
     miningTicks: readInteger(player['miningTicks'], 'miningTicks', 0, Number.MAX_SAFE_INTEGER),
+    pickingUp: readBoolean(player['pickingUp'], 'pickingUp'),
     inventory: readItemGrid(player['inventory'], "the player's inventory", numbering, PLAYER_INVENTORY_SLOTS),
     crafts: readCrafts(player['crafts']),
   };

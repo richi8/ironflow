@@ -181,15 +181,22 @@ function describePlayerState(view: PlayerView): string {
 }
 
 /**
- * The world seed (§6 R2, §10, §14).
+ * A fresh world seed (§6 R2, §10, §14).
  *
- * One fixed number until C25's new-game dialog makes it a player decision.
+ * Random since 2026-09-23: every new world — the first launch and the menu's
+ * NEW GAME — is a different map. It was one fixed number, `0x1f0f10`, until
+ * then. Drawn here, in the composition root, because §6 keeps randomness out
+ * of `game/**`; once drawn it is authoritative state like any other, so a
+ * save still replays exactly.
+ *
  * From C19 it is the only thing that decides what the map looks like, and
  * `createStartingWorld` may hand back a *different* seed than this one — the
  * perturb-and-retry of C19 task 5 — which is why the simulation is given the
  * seed that was accepted rather than the one asked for.
  */
-const WORLD_SEED = 0x1f0f10;
+function freshSeed(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+}
 
 /**
  * A brand-new world, with the player standing in it holding the starter kit.
@@ -201,17 +208,15 @@ const WORLD_SEED = 0x1f0f10;
  */
 function newSimulation(): Simulation {
   // C19: a generated world, validated before the player is put in it. The
-  // returned seed is the one that passed, which is not necessarily WORLD_SEED
+  // returned seed is the one that passed, which is not necessarily the one drawn
   // — see `starting-area.ts`. Validation has already generated the world
   // chunks around spawn; everything beyond them is still empty until something
   // asks about a tile (see World.getChunk).
-  const started = createStartingWorld(WORLD_SEED);
+  const started = createStartingWorld(freshSeed());
   // The simulation builds its own registry from `data/buildings.ts` and hands
   // the entity store the footprint lookup that comes with it (C05, C06). The
   // seed is chosen here because §4 makes the composition root the place
-  // decisions are wired; it is authoritative state from C18 (§6 R2, §10) and
-  // becomes a *player* decision at a new-game dialog, at which point this
-  // constant is what that dialog replaces.
+  // decisions are wired; it is authoritative state from C18 (§6 R2, §10).
   const simulation = new Simulation({ world: started.world, seed: started.seed });
   simulation.player.setTilePosition(WORLD_SPAWN.x, WORLD_SPAWN.y);
   for (const [buildingId, count] of Object.entries(STARTING_MATERIALS)) {
@@ -883,7 +888,7 @@ async function bootstrap(): Promise<void> {
       rows.row('tps', speed === 1 ? ticksPerSecond.toFixed(1) : `${ticksPerSecond.toFixed(1)} (x${speed})`);
       rows.row('size', `${cssWidth}x${cssHeight} @${dpr}x (${deviceWidth}x${deviceHeight})`);
       // C19: the seed is the first thing to check when a map looks wrong,
-      // and it is not necessarily the one `WORLD_SEED` asked for.
+      // and it is not necessarily the one `freshSeed` drew.
       rows.row('world', `seed ${simulation.seed} (${origin})`);
       rows.row(
         'build',

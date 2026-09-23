@@ -788,6 +788,9 @@ export class InputManager {
       if (action === 'build.pipette') this.stopMining();
       if (action === 'world.interact') this.interact();
       if (action === 'world.remove') this.removeInFront();
+      if (action === 'player.pickUp') this.commands.enqueue({ type: 'pickUp', held: true });
+    } else if (action === 'player.pickUp') {
+      this.commands.enqueue({ type: 'pickUp', held: false });
     } else if (action === 'world.interact') {
       this.interactHeld = false;
       this.lastActedTile = null;

@@ -34,15 +34,15 @@ npm run dev        # http://localhost:5173
 | `+` / `-`, wheel | Zoom |
 | Middle-drag, or Space + left-drag | Pan by dragging |
 | `1`–`9`, or the toolbar | Pick a building to place |
-| `B` | Open the build menu |
-| Left click / drag | Place the held building, or mine with an empty hand |
+| Left click / drag | Place the held building, or select a machine |
 | `R` | Rotate the held building |
-| Right click | Put the held building down, or demolish with an empty hand |
-| `Esc` | Drop everything: the held building and the selection |
-| `P` | Pause — the simulation stops, the view keeps working |
+| Right click / drag | Put the held building down; with an empty hand, demolish a building or mine the ground |
+| `Q` | Hold another of the building under the cursor |
+| `F` (hold) | Pick up items from the belts around the player |
+| `Esc` | Drop everything, close a panel, or open the menu |
 | `F3` | Toggle the debug overlay |
 
-Keybindings are data (`src/input/keybindings.ts`); a remapping UI is C30.
+Keybindings are data (`src/input/keybindings.ts`) and can be changed under MENU → SETTINGS.
 
 ## Layout
 

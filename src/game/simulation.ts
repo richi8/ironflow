@@ -745,6 +745,11 @@ export class Simulation {
         // toast on screen every time they finished doing something else.
         this.player.stopMining();
         return null;
+      case 'pickUp':
+        // Never refused, for `movePlayer`'s reason: holding F over nothing is
+        // not a mistake, and a toast per press would say it was.
+        this.player.pickingUp = command.held;
+        return null;
       default:
         return 'not_implemented';
     }

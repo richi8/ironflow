@@ -1376,6 +1376,25 @@ to arrange. What each change means:
   touches the ground no more. Enter still mines what is in front of the
   player. C04 task 5's and C10 task 4's "left-click" read "right-click" from
   here.
+- **NEW GAME is a new map, and a fresh start** *(2026-09-23, on request)*.
+  Every new world, the first launch included, draws its seed from
+  `crypto.getRandomValues` in the composition root (`freshSeed`); the fixed
+  `0x1f0f10` is gone. §6 is unaffected: the seed is drawn outside `game/**`
+  and is authoritative state from then on, so a save still replays exactly.
+  Everything a world holds (research, map, bag, factory) is new with it, and
+  the UI resets the one piece of progress it keeps outside a save: the
+  first-steps list comes back with nothing ticked.
+- **`F` picks up items from belts** *(2026-09-23, on request, as in
+  Factorio)*. Held, it sends `pickUp { held: true }` and on release
+  `{ held: false }`, like mining's press and release. While
+  `PlayerState.pickingUp` is set, `PlayerSystem` takes one item a tick, the
+  nearest to the player's centre, from belts, both lanes of a splitter and the
+  two visible ends of an underground run (never the tunnel between). Reach is
+  `PICKUP_RANGE_TILES` = 1 along each axis: Factorio's pickup distance, as a
+  square so the belt beside the player is in reach end to end. Only an item
+  the bag has room for is taken. Distances are exact integers, and carriers are
+  visited in id order (§6 R3, R4). `pickingUp` is saved: **`SAVE_VERSION` is
+  5**, and `v4-to-v5.ts` adds it as `false`.
 - **The map is `M` only.** Tab opened it too for a day. It was unbound
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.

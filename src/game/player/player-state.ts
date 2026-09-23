@@ -92,6 +92,14 @@ export const PLAYER_RADIUS_SUBTILES = Math.round(0.3 * SUBTILES_PER_TILE);
 /** How far the player can reach to mine, in tiles. C10 task 4 says six. */
 export const MINE_RANGE_TILES = 6;
 
+/**
+ * How far from the player's centre F picks items up, in tiles, along each
+ * axis (2026-09-23). Factorio's `item_pickup_distance` for the character is
+ * one; a square rather than its circle, so a belt beside the player is in
+ * reach end to end.
+ */
+export const PICKUP_RANGE_TILES = 1;
+
 /** How far the player can reach to build, in tiles. C10 task 5 says eight. */
 export const BUILD_RANGE_TILES = 8;
 
@@ -195,6 +203,8 @@ export interface SerializedPlayer {
   readonly miningX: number | null;
   readonly miningY: number | null;
   readonly miningTicks: number;
+  /** Is F held? v5. */
+  readonly pickingUp: boolean;
   /** Every occupied slot as `[slot, itemId, count]`, ascending by slot. */
   readonly inventory: SerializedGrid;
   /**
@@ -247,6 +257,13 @@ export class PlayerState {
 
   /** Integer ticks of progress toward the next item (§6 R3). */
   miningTicks = 0;
+
+  /**
+   * Is F held (2026-09-23)? While it is, one item a tick comes off the belts
+   * within `PICKUP_RANGE_TILES`. Authoritative for `moveIntent`'s reason: it
+   * is a held key the simulation acts on every tick.
+   */
+  pickingUp = false;
 
   /**
    * What the player is making by hand, head first. Authoritative (§10), C21A.
@@ -403,6 +420,7 @@ export class PlayerState {
     this.miningX = saved.miningX === null ? null : whole(saved.miningX, 'miningX');
     this.miningY = saved.miningY === null ? null : whole(saved.miningY, 'miningY');
     this.miningTicks = whole(saved.miningTicks, 'miningTicks');
+    this.pickingUp = saved.pickingUp === true;
     if (this.miningTicks < 0) {
       throw new RangeError(`PlayerState.load: miningTicks is ${this.miningTicks}; ticks never run backwards.`);
     }
@@ -433,6 +451,7 @@ export class PlayerState {
       miningX: this.miningX,
       miningY: this.miningY,
       miningTicks: this.miningTicks,
+      pickingUp: this.pickingUp,
       inventory: this.inventory.toCells(),
       // Copied, not handed over: `toJSON` is read by the determinism harness
       // and by C24's save, and neither may hold a live order it could edit.
