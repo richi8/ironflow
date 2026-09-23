@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C30 complete — Part II is finished, and v1 is feature-complete.** The game has sound, synthesised with `AudioContext` under a hard cap of 16 sources: four hum voices follow the nearest working machines, and the rest are culled by distance. It can be played entirely from the keyboard: Enter acts on the tile in front of the player, Delete removes, and every panel has Tab and arrow navigation. Keys can be rebound in a new settings panel. Reduced motion (system or setting) stops belts, machines and the player, and snaps inserter arms to an end. Every status colour now has a shape beside it. UI text is at least 14 px, with a UI scale from 85% to 150%. A skippable first-run list of five objectives ends at C20's first automated plate. A 1x-8x speed control and a close guard for unsaved play complete it. Preferences live in `localStorage`, never in a save. One acceptance line stays open: nobody has yet watched a first-time player follow the objectives. Next: nothing is scheduled. C31 (enemies) stays gated, NO-GO since C23. |
+| **Status** | **C30 complete — Part II is finished, and v1 is feature-complete.** The game has sound, synthesised with `AudioContext` under a hard cap of 16 sources: four hum voices follow the nearest working machines, and the rest are culled by distance. It can be played entirely from the keyboard: Enter acts on the tile in front of the player, Delete removes, and every panel has Tab and arrow navigation. Keys can be rebound in a new settings panel. Reduced motion (system or setting) stops belts, machines and the player, and snaps inserter arms to an end. Every status colour now has a shape beside it. UI text is at least 14 px, with a UI scale from 85% to 150%. A skippable first-run list of five objectives ends at C20's first automated plate. A 1x-8x speed control and a close guard for unsaved play complete it. Preferences live in `localStorage`, never in a save. One acceptance line stays open: nobody has yet watched a first-time player follow the objectives. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | None scheduled. Part II ends at C30, and C31 is gated (NO-GO). The open item is a first-time playtest of C30's objectives. |
+| **First action** | None scheduled. Part II ends at C30. The open item is a first-time playtest of C30's objectives. |
 
 ---
 
@@ -109,7 +109,6 @@ Do not implement without an explicit instruction. Each has a reason, because
 | Robots / logistics bots | Trivialises the belt layout puzzle, which is pillar 4. |
 | Blueprints | Only valuable once layouts are large enough to be worth copying. |
 | Modding API, content marketplace | Requires a frozen public API. Nothing is frozen yet. |
-| Enemies | **Gated, not excluded.** See C31 in the appendix — implement only if the go/no-go test passes. |
 
 **Rule:** an excluded feature must not shape the implementation. Do not add an
 abstraction "so we can add trains later."
@@ -154,8 +153,7 @@ A third-party runtime dependency is acceptable only when all four hold:
 
 Applied to likely candidates: a noise library — **no**, write ~60 lines of
 value/simplex noise seeded by the game PRNG. A PRNG — **no**, write ~20 lines
-(§6). An IndexedDB wrapper — **no**, ~120 lines of promisified requests. A
-pathfinder — only if C31 (enemies) is greenlit.
+(§6). An IndexedDB wrapper — **no**, ~120 lines of promisified requests.
 
 ### Later option
 
@@ -3007,7 +3005,7 @@ described but never scheduled.
 **Tests.** Movement collision against water and multi-tile footprints; mining
 rate in ticks; build-range validation; frame-rate independence of movement.
 
-**Out of scope.** Player health, combat, equipment, inventory sorting.
+**Out of scope.** Player health, equipment, inventory sorting.
 
 **Decisions taken while implementing this chunk.**
 
@@ -7362,63 +7360,6 @@ visible and each step checkable, but whether a stranger follows them is a
 playtest, and none has been run.
 
 ---
-
-## C31 — Enemies  ⚠️ **GATED — do not implement by default**
-
-The previous revision listed enemies as "optional" and then omitted them from
-every milestone. Here is an explicit decision procedure instead.
-
-**Go/no-go test, evaluated after C23:**
-
-> Does the player currently face a meaningful cost for expanding, or is expansion
-> purely free upside?
-
-If expansion already carries real cost — travel time, logistics complexity,
-power infrastructure, defended chokepoints of terrain — then **enemies add
-nuisance, not decisions. Do not build them.**
-
-Implement only if the answer is "expansion is free" *and* the player has
-explicitly asked for combat.
-
-**Evaluated after C23: NO-GO.** Expansion is not free, and C23 is the chunk
-that made it cost. Four things the player now pays:
-
-```text
-  ore runs out          §15's scarcity section: the starting area's iron is a
-                        median 2.6 hours of a reference factory, so the second
-                        outpost is compulsory rather than optional
-  distance costs        a far patch is a belt run or a second smelting column;
-                        §19's generator makes distant deposits richer but
-                        *rarer*, so there is no second one behind the first
-  looking costs         a radar is 300 kW, the poles to reach it, and a minute
-                        of sweeping before it has told the player anything
-  the route costs       terrain, and now the six-tile span that gets a line
-                        past what is in the way — which is a decision rather
-                        than a detour
-```
-
-Enemies on top of that would add nuisance, not decisions, which is exactly
-what the test above exists to prevent. Re-evaluate only if a later chunk makes
-expansion cheap, or if the player asks for combat.
-
-**If greenlit, the minimum viable version:**
-
-```text
-nests spawn at worldgen, far from spawn, deterministic from seed
-pollution-free trigger: expansion into a nest's radius provokes it
-behaviour: spawn -> move toward nearest player structure -> attack -> die
-defence: a wall building and a turret consuming ammunition from a belt
-```
-
-Explicit constraints: no flocking, no pathfinding beyond greedy movement with
-obstacle avoidance, no adaptive difficulty, no attack waves on a timer. Enemies
-must make **placement** decisions interesting (defend a chokepoint, route ammo)
-and must never make the player babysit.
-
-**Out of scope even if greenlit.** Enemy evolution, biter variants, artillery,
-military research trees.
-
----
 ---
 
 # PART III — REFERENCE
@@ -8271,9 +8212,8 @@ For anyone comparing against the original document (git `565f17b`):
 - The plan said "top-down grid"; the art sheet says "isometric". Resolved in §5:
   projection-agnostic simulation, isometric renderer, one transform file.
 - Rule 10 required acceptance criteria for every chunk; only 4 of 28 had them.
-  All 31 chunks now do, and they are concrete.
-- Chunks 21 (power) and 22 (enemies) appeared in no milestone. Power is now C21
-  in Milestone C; enemies are C31, explicitly gated with a decision procedure.
+  Every chunk now does, and they are concrete.
+- Chunk 21 (power) appeared in no milestone. It is now C21 in Milestone C.
 
 **Added contracts**
 - §6 determinism contract with 8 numbered, testable rules — including the two
@@ -8311,7 +8251,7 @@ For anyone comparing against the original document (git `565f17b`):
 **Restructured**
 - Three parts (contracts / chunks / reference) instead of 60 flat sections with a
   confusing dual numbering where "§10" meant "Chunk 00".
-- Build chunks are `C00`–`C31` and world chunks are "world chunks", ending the
+- Build chunks are `C00`–`C30` and world chunks are "world chunks", ending the
   collision between two meanings of the same word.
 - Every chunk has the same seven-field shape, so the agent always knows where to
   look for scope boundaries.
