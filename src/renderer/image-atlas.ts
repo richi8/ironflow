@@ -35,8 +35,8 @@
 import type { Rotation } from '../game/world/coordinates.js';
 
 import { describeSprite, type SpriteAtlas, type SpriteDescriptor, type SpriteId } from './sprite-atlas.js';
-import { BELT_DECK, BELT_RAIL_TOP, DETAIL_ZOOM, EAST_STEP, RISE_UNIT, SHADOW_SLANT, SOUTH_STEP } from './sprite-geometry.js';
-import { paintSprite } from './sprite-painter.js';
+import { BELT_DECK, DETAIL_ZOOM, EAST_STEP, RISE_UNIT, SHADOW_SLANT, SOUTH_STEP } from './sprite-geometry.js';
+import { SPLITTER_HOUSING, TUNNEL_HOOD, paintSprite } from './sprite-painter.js';
 
 /** One sprite's rectangle in a level's image, and where its anchor is in it. */
 export interface AtlasCell {
@@ -114,12 +114,12 @@ export function spriteExtent(sprite: SpriteDescriptor): Extent {
       const hw = across ? 0.5 : 1;
       const hh = across ? 1 : 0.5;
       // Its lanes are belts, with their shadow (see 'belt').
-      const shadow = BELT_RAIL_TOP * LIFT_TILES * SHADOW_SLANT;
-      return { left: hw + m, right: hw + shadow + m, up: hh + 0.32 * LIFT_TILES + m, down: hh + shadow + m };
+      const shadow = BELT_DECK * LIFT_TILES * SHADOW_SLANT;
+      return { left: hw + m, right: hw + shadow + m, up: hh + (BELT_DECK + SPLITTER_HOUSING) * LIFT_TILES + m, down: hh + shadow + m };
     }
     case 'underground': {
-      const shadow = BELT_RAIL_TOP * LIFT_TILES * SHADOW_SLANT;
-      return { left: 0.5 + m, right: 0.5 + shadow + m, up: 0.5 + 0.42 * LIFT_TILES + m, down: 0.5 + shadow + m };
+      const shadow = BELT_DECK * LIFT_TILES * SHADOW_SLANT;
+      return { left: 0.5 + m, right: 0.5 + shadow + m, up: 0.5 + (BELT_DECK + TUNNEL_HOOD) * LIFT_TILES + m, down: 0.5 + shadow + m };
     }
     case 'inserter':
       return inserterExtent(sprite.rotation);
@@ -127,9 +127,9 @@ export function spriteExtent(sprite: SpriteDescriptor): Extent {
       // Lifted onto the belt's tread (`BELT_DECK`).
       return { left: 0.2 + m, right: 0.22 + m, up: 0.28 + BELT_DECK * LIFT_TILES + m, down: 0.22 + m };
     case 'belt': {
-      // The rails stand up to `BELT_RAIL_TOP`, and cast a shadow that far.
-      const shadow = BELT_RAIL_TOP * LIFT_TILES * SHADOW_SLANT;
-      return { left: 0.5 + m, right: 0.5 + shadow + m, up: 0.5 + BELT_RAIL_TOP * LIFT_TILES + m, down: 0.5 + shadow + m };
+      // The body stands `BELT_DECK` tall, and casts a shadow that far.
+      const shadow = BELT_DECK * LIFT_TILES * SHADOW_SLANT;
+      return { left: 0.5 + m, right: 0.5 + shadow + m, up: 0.5 + BELT_DECK * LIFT_TILES + m, down: 0.5 + shadow + m };
     }
     case 'player':
       // The figure at `PLAYER_SCALE`: a pick swung forward reaches 0.56 tiles,

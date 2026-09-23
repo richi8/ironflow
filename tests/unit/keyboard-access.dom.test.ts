@@ -149,6 +149,17 @@ describe('acting on the tile in front of the player', () => {
     expect(input.hover).toEqual<TileCoord>({ x: 5, y: 4 });
   });
 
+  it('leaves the ghost under the mouse when R or a number is pressed with the pointer on the canvas', () => {
+    const { input } = mountInput();
+    input.setBuildTool({ buildingId: 'belt', rotationCount: 4, lineBuild: true });
+    const canvas = document.querySelector('canvas');
+    canvas?.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 1, clientY: 1 }));
+    tap('KeyR');
+    tap('Digit3');
+    expect(input.isKeyboardAiming).toBe(false);
+    expect(input.buildRotation).toBe(1);
+  });
+
   it('hands pointing back to the mouse the moment it moves', () => {
     const { input } = mountInput();
     tap('KeyR');

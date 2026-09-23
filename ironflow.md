@@ -1332,6 +1332,10 @@ to arrange. What each change means:
     `ui.toggleSaveMenu`, `ui.toggleSettings`) no longer exist, and stored
     rebinds of them are dropped as unknown actions. *(For an hour `P` was a
     plain pause, `O` opened the menu and `F2` the save menu.)*
+  - **R and the number row aim from the player only with the pointer off
+    the canvas.** C30 made them move the ghost to the tile in front of the
+    player. With the mouse on the canvas that threw away where it was
+    aiming, so now the ghost stays under the pointer and turns in place.
   - **The hotbar is the nine slots and nothing else.** BAG, TECH, MAP, SAVE,
     the settings icon and the facing marker are gone; the ghost shows the
     facing. The bag and the tech tree open from their HUD tiles and from `I`
@@ -7085,16 +7089,19 @@ C30's "never colour alone" for anything on a belt: rock, slab, ingot, gear,
 coil, chip, crystal, or a crate for building items. Terrain gained four texture
 variants each (tufts, grain, cracks, ripples), and ore tiles gained lit rocks.
 
-**Belts raised (2026-09-23, on request: "it is flat now").** A belt is a steel
-frame up to `BELT_DECK` (0.12 bulk units), a tread on top with a lighter
-middle band, slats drawn as ridges (a lit line and its shadow), and a rail
-along each side up to `BELT_RAIL_TOP` (0.4) with a lit top edge and a shade
-groove on the tread beside it. Nothing is outlined per tile, so a line of belts
-reads as one conveyor. Its shadow is pushed south-east **across the flow
-only**, because the usual hull reaches into the next tile and two translucent
-shadows overlapping there notch the line at every seam. Splitters and tunnel
-mouths use the same lane. Every item sprite is lifted by `BELT_DECK`, since
-items are only ever drawn riding one. The atlas extents grew to match.
+**Belts raised (2026-09-23, on request: "it is flat now").** The whole belt
+is a steel body standing `BELT_DECK` (0.3 bulk units) off the ground, with the
+tread flush on top: a lighter middle band, slats drawn as ridges (a lit line
+and its shadow), and a thin lit lip along each side of the top. *(For an hour
+the height was in side rails on a low deck instead; replaced on request,
+because a rail read as a wall where another belt joined from the side.)*
+Nothing is outlined per tile, so a line of belts reads as one conveyor. Its
+shadow is pushed south-east **across the flow only**, because the usual hull
+reaches into the next tile and two translucent shadows overlapping there
+notch the line at every seam. Splitters and tunnel mouths use the same lane,
+with the housing and hood rising `SPLITTER_HOUSING` and `TUNNEL_HOOD` above
+it. Every item sprite is lifted by `BELT_DECK`, since items are only ever
+drawn riding one. The atlas extents grew to match.
 
 **Deliberately not drawn:** belt curves. The reference sheet has one, but an
 item on a side-loaded belt travels straight along the lane (§9), so a curve

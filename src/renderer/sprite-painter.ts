@@ -41,7 +41,6 @@ import type { ItemShape, PlayerActivity, SpriteDescriptor } from './sprite-atlas
 import {
   BELT_CHEVRON_PHASES,
   BELT_DECK,
-  BELT_RAIL_TOP,
   DETAIL_ZOOM,
   EAST_STEP,
   INSERTER_SWING_STEPS,
@@ -838,8 +837,12 @@ function laneRect(rotation: Rotation, a0: number, a1: number, c0: number, c1: nu
 /** Slats per tile. Their spacing divides the tile, so the pattern tiles. */
 const SLATS = 4;
 
-/** How wide a side rail is, in tiles. */
-const RAIL_WIDTH = 0.1;
+/** How far a splitter's housing and a tunnel mouth's hood rise above the tread, in bulk units. */
+export const SPLITTER_HOUSING = 0.32;
+export const TUNNEL_HOOD = 0.2;
+
+/** How wide the frame's edge is either side of the tread, in tiles. */
+const BELT_EDGE = 0.07;
 
 /** A box's near face and top with no outline, so tiles of one belt join without a seam. */
 function slab(u0: number, v0: number, u1: number, v1: number, h0: number, h1: number, face: string, top: string): void {
@@ -850,28 +853,13 @@ function slab(u0: number, v0: number, u1: number, v1: number, h0: number, h1: nu
 }
 
 /**
- * One lane of belt, `across` tiles to the side of the anchor.
- *
- * Raised since 2026-09-23, when the flat version was said to look flat: a
- * steel frame from the ground to `BELT_DECK`, a dark tread on top of it with
- * slats that move with the phase, and a rail along each side up to
- * `BELT_RAIL_TOP` that throws a groove of shade onto the tread. Nothing is
- * outlined per tile, so a line of belts reads as one conveyor. Only near faces
- * are drawn, as for every box here: a belt running east shows its frame's
- * side, and one running south shows its end only where the line stops.
- *
- * The slats are the animation — the reference sheet's belts are a tread, not
- * an arrow — and the chevron stays because a still belt (below `DETAIL_ZOOM`,
- * or a ghost) has to say which way it runs too (pillar 3).
- */
-/**
  * A belt tile's shadow: its footprint pushed south-east, but only across the
  * flow. `shadowBox`'s hull would reach into the next tile along, and two
  * translucent shadows overlapping there would notch a line of belts at every
  * seam.
  */
 function laneShadow(rotation: Rotation, u0: number, v0: number, u1: number, v1: number): void {
-  const d = BELT_RAIL_TOP * RISE * SHADOW_SLANT;
+  const d = BELT_DECK * RISE * SHADOW_SLANT;
   const alongU = rotation === 1 || rotation === 3;
   const dx = alongU ? 0 : d;
   const dy = alongU ? d : 0;
@@ -888,15 +876,32 @@ function laneShadow(rotation: Rotation, u0: number, v0: number, u1: number, v1: 
   C.globalAlpha = previousAlpha;
 }
 
+/**
+ * One lane of belt, `across` tiles to the side of the anchor.
+ *
+ * Raised since 2026-09-23: the whole belt is a steel body standing
+ * `BELT_DECK` off the ground, with the tread flush on top of it. It had side
+ * rails for an hour, which read as a wall where another belt joined from the
+ * side, so the height is in the body now and the top is open on every side.
+ * The tread has a lighter middle band and slats drawn as ridges (a lit line
+ * and its shadow); a thin lit lip along each side of the top is what makes the
+ * body read as raised. Nothing is outlined per tile, so a line of belts reads
+ * as one conveyor. Only near faces are drawn, as for every box here: the next
+ * tile along covers the end face of the one before it.
+ *
+ * The slats are the animation — the reference sheet's belts are a tread, not
+ * an arrow — and the chevron stays because a still belt (below `DETAIL_ZOOM`,
+ * or a ghost) has to say which way it runs too (pillar 3).
+ */
 function lane(rotation: Rotation, phase: number, across: number): void {
-  const frame = shade(color('blue'), 0.45);
+  const body = shade(color('blue'), 0.55);
   const [f0, g0, f1, g1] = laneRect(rotation, -0.5, 0.5, across - 0.5, across + 0.5);
   laneShadow(rotation, f0, g0, f1, g1);
-  slab(f0, g0, f1, g1, 0, BELT_DECK, shade(frame, FACE_TONE), frame);
+  slab(f0, g0, f1, g1, 0, BELT_DECK, shade(body, 0.6), body);
 
-  // The tread, between the rails: dark at the edges, lighter down the middle,
-  // so it reads as a band curving over rollers rather than a painted strip.
-  const inner = 0.5 - RAIL_WIDTH;
+  // The tread, inside the frame's edge: dark at the sides, lighter down the
+  // middle, so it reads as a band over rollers rather than a painted strip.
+  const inner = 0.5 - BELT_EDGE;
   const tread = shade(color('panel'), 0.8);
   const [t0, s0, t1, s1] = laneRect(rotation, -0.5, 0.5, across - inner, across + inner);
   topQuad(t0, s0, t1, s1, BELT_DECK);
@@ -924,19 +929,14 @@ function lane(rotation: Rotation, phase: number, across: number): void {
       C.stroke();
     }
 
-    // The groove: the rails' shade on the tread beside them.
-    const previousAlpha = C.globalAlpha;
-    C.globalAlpha = previousAlpha * 0.55;
-    C.fillStyle = color('bg-deep');
-    for (const [c0, c1] of [
-      [-inner, -inner + 0.1],
-      [inner - 0.05, inner],
-    ] as const) {
-      const [q0, r0, q1, r1] = laneRect(rotation, -0.5, 0.5, across + c0, across + c1);
-      topQuad(q0, r0, q1, r1, BELT_DECK);
-      C.fill();
+    // The lip: a lit line along each side of the top.
+    C.beginPath();
+    for (const edge of [-0.5 + BELT_EDGE / 2, 0.5 - BELT_EDGE / 2]) {
+      laneLine(rotation, -0.5, across + edge, 0.5, across + edge, BELT_DECK);
     }
-    C.globalAlpha = previousAlpha;
+    C.strokeStyle = color('blue-high');
+    C.lineWidth = Math.max(1, 0.035 * EX);
+    C.stroke();
   }
 
   C.beginPath();
@@ -946,21 +946,6 @@ function lane(rotation: Rotation, phase: number, across: number): void {
   C.strokeStyle = color('accent');
   C.lineWidth = Math.max(1, 0.06 * EX);
   C.stroke();
-
-  // The rails, last, so the near one stands in front of the tread.
-  const rail = shade(color('blue'), 0.85);
-  for (const edge of [-0.5, inner]) {
-    const [u0, v0, u1, v1] = laneRect(rotation, -0.5, 0.5, across + edge, across + edge + RAIL_WIDTH);
-    slab(u0, v0, u1, v1, BELT_DECK, BELT_RAIL_TOP, shade(rail, 0.55), rail);
-    if (DETAIL) {
-      // A lit edge along the top, which is what makes a rail read as a rail.
-      C.beginPath();
-      laneLine(rotation, -0.5, across + edge + RAIL_WIDTH * 0.35, 0.5, across + edge + RAIL_WIDTH * 0.35, BELT_RAIL_TOP);
-      C.strokeStyle = color('blue-high');
-      C.lineWidth = Math.max(1, 0.03 * EX);
-      C.stroke();
-    }
-  }
 }
 
 function paintBelt(rotation: Rotation, phase: number): void {
@@ -975,20 +960,15 @@ function paintBelt(rotation: Rotation, phase: number): void {
  * the flow and one deep.
  */
 function paintSplitter(rotation: Rotation, phase: number): void {
-  const across = rotation === 1 || rotation === 3;
-  const hw = across ? 0.5 : 1;
-  const hh = across ? 1 : 0.5;
-  topQuad(-hw, -hh, hw, hh, 0);
-  C.fillStyle = color('panel');
-  C.fill();
   lane(rotation, phase, -0.5);
   lane(rotation, phase, 0.5);
 
+  const top = BELT_DECK + SPLITTER_HOUSING;
   const [u0, v0, u1, v1] = laneRect(rotation, -0.16, 0.16, -0.98, 0.98);
-  box(u0, v0, u1, v1, 0, 0.32, color('panel-high'), shade(color('blue'), 0.9));
+  box(u0, v0, u1, v1, 0, top, color('panel-high'), shade(color('blue'), 0.9));
   if (DETAIL) {
     const [a0, b0, a1, b1] = laneRect(rotation, -0.05, 0.05, -0.7, 0.7);
-    topPanel(a0, b0, a1, b1, 0.32, color('blue-high'));
+    topPanel(a0, b0, a1, b1, top, color('blue-high'));
   }
 }
 
@@ -1001,9 +981,6 @@ function paintSplitter(rotation: Rotation, phase: number): void {
  * deliberately no moving tread: what is moving is underground.
  */
 function paintUnderground(rotation: Rotation, entrance: boolean): void {
-  topQuad(-0.5, -0.5, 0.5, 0.5, 0);
-  C.fillStyle = color('panel');
-  C.fill();
   lane(rotation, 0, 0);
 
   const sign = entrance ? 1 : -1;
@@ -1012,10 +989,10 @@ function paintUnderground(rotation: Rotation, entrance: boolean): void {
   topQuad(h0, i0, h1, i1, BELT_DECK);
   paint(color('bg-deep'), false);
   const [u0, v0, u1, v1] = laneRect(rotation, sign * 0.2, sign * 0.5, -0.44, 0.44);
-  box(u0, v0, u1, v1, 0, 0.42, color('underground_belt'), shade(color('underground_belt'), 1.3));
+  box(u0, v0, u1, v1, 0, BELT_DECK + TUNNEL_HOOD, color('underground_belt'), shade(color('underground_belt'), 1.3));
   if (DETAIL) {
     const [s0, t0, s1, t1] = laneRect(rotation, sign * 0.3, sign * 0.4, -0.3, 0.3);
-    topPanel(s0, t0, s1, t1, 0.42, color('accent'));
+    topPanel(s0, t0, s1, t1, BELT_DECK + TUNNEL_HOOD, color('accent'));
   }
 }
 

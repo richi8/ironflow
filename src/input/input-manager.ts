@@ -764,8 +764,12 @@ export class InputManager {
       // under a ghost the player is now placing.
       if (action === 'selection.clear') this.stopMining();
       // Picking something up from the number row, or turning it, is the moment
-      // a keyboard player wants to see where it would go (C30).
-      if (action === 'build.rotate' || action.startsWith('build.slot')) this.aimWithKeyboard();
+      // a keyboard player wants to see where it would go (C30). Only with the
+      // pointer off the canvas: a mouse player pressing R over the spot they
+      // are aiming at wants the ghost to stay there and turn (2026-09-23).
+      if ((action === 'build.rotate' || action.startsWith('build.slot')) && this.pointerX === null) {
+        this.aimWithKeyboard();
+      }
       // The pipette reads what is hovered, and the composition root acts on it
       // through `onAction`; this layer does not know what a bag holds (§4).
       if (action === 'build.pipette') this.stopMining();
