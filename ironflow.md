@@ -5,7 +5,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C32 complete — tooltips, and items as pictures.** Resting the pointer on the world describes what is under it: the ore left in a tile, a belt's speed and throughput, an inserter's rate, a miner's mining speed, the ore left under it and how long that lasts, a machine's status, recipe, progress, power and contents. Every item in a panel is now its sprite, baked from the renderer's atlas: the bag, chests, the hotbar, machine slots, the craft queue. The hand-craft grid and a machine's recipe picker are grids of pictures, and each one's tooltip gives its bill against the bag, the time and the rate, with a short ingredient in red. One pooled tooltip box serves every panel and the world. Since then, 2026-09-24: hand-crafting chains missing parts, a pick sound for hand mining, the held item as the cursor, and a player-facing **WHAT'S NEW** changelog beside MENU (§13) — every player-visible change now adds a line to it. Open: the recipe picker has been checked in DOM tests but not yet looked at in a running game, and no first-time player has followed C31's guide. Next: nothing is scheduled. |
+| **Status** | **C32 complete — tooltips, and items as pictures.** Resting the pointer on the world describes what is under it: the ore left in a tile, a belt's speed and throughput, an inserter's rate, a miner's mining speed, the ore left under it and how long that lasts, a machine's status, recipe, progress, power and contents. Every item in a panel is now its sprite, baked from the renderer's atlas: the bag, chests, the hotbar, machine slots, the craft queue. The hand-craft grid and a machine's recipe picker are grids of pictures, and each one's tooltip gives its bill against the bag, the time and the rate, with a short ingredient in red. One pooled tooltip box serves every panel and the world. Since then, 2026-09-24: hand-crafting chains missing parts, a pick sound for hand mining, the held item as the cursor, and a player-facing **WHAT'S NEW** changelog beside MENU (§13) — every player-visible change now adds a line to it; inserters fill a machine only to five crafts' worth of each ingredient (C14's notes). Open: the recipe picker has been checked in DOM tests but not yet looked at in a running game, and no first-time player has followed C31's guide. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | None scheduled. Part II ends at C32. The open items are a look at an assembler's recipe picker in the running game, and C31's first-time playtest. |
@@ -3955,6 +3955,21 @@ kind of item, pickup takes it exactly as C14's did, so a belt-merging arm and
 backpressure). The source is read before the destination's port is built,
 which keeps an idle arm as cheap as it was: the inserter phase measures within
 3% of C28's baseline.
+
+**Changed 2026-09-24, on request: an inserter fills a machine to five crafts'
+worth, no further.** `FEED_CRAFTS = 5` in `inserter-system.ts`. An arm picks up
+an ingredient for a machine only while its buffer holds fewer than
+`5 x recipe count` of it — counting whatever is there, so a machine the player
+filled by hand is left alone until it works below the line. A furnace with no
+recipe yet measures against the recipe its category would pick for the item
+(`forInput`). Fuel, chests, labs and generators are unaffected, and so are belts
+unloading into a machine and the player's own hand: the ceiling is the arm's,
+not the buffer's. It is checked at pickup only, so an item already swinging is
+still delivered — the ceiling is at most one item soft and nothing is stranded
+in a hand. A furnace no longer drinks a belt of ore dry into a fifty-item
+buffer while the furnace beside it starves. The reference fixture's furnaces
+now start with five ore instead of fifty (the steady state under this rule), so
+the fixture and perf baseline were regenerated.
 
 ---
 

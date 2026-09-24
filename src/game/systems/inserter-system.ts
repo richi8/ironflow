@@ -144,6 +144,14 @@ export interface InserterSystemOptions {
   readonly alerts: AlertLog;
 }
 
+/**
+ * How many crafts' worth of each ingredient an inserter keeps in a machine
+ * (2026-09-24). Enough that a machine never waits on an arm mid-run, few
+ * enough that one furnace does not swallow a whole belt the machine beside it
+ * is waiting on.
+ */
+const FEED_CRAFTS = 5;
+
 /** Is this a tile the occupancy index can be asked about without throwing? */
 function inTileRange(x: number, y: number): boolean {
   return x >= TILE_MIN && x <= TILE_MAX && y >= TILE_MIN && y <= TILE_MAX;
@@ -448,7 +456,7 @@ export class InserterSystem {
       return atPickup || laneEntryPosition(targetBelt.items, BELT_MAX_POSITION) >= 0 ? first : NO_ITEM;
     }
 
-    const sink = inputPortOf(target, this.ports);
+    const sink = this.feedPortOf(target);
     if (sink === null) return NO_ITEM;
 
     // A refused item is not asked about twice in a row: a belt of plates in
@@ -485,6 +493,44 @@ export class InserterSystem {
       refused = stack.itemId;
     }
     return NO_ITEM;
+  }
+
+  /**
+   * What the destination accepts **from an arm**, as against by hand or off a
+   * belt: a machine's ingredient buffer only up to `FEED_CRAFTS` crafts' worth
+   * (2026-09-24). Anything that is not a machine, and fuel, is its own port.
+   *
+   * The count includes what is already there however it got there, so a
+   * furnace the player stuffed with fifty ore by hand is left alone until it
+   * has smelted it down below five. Only the pickup asks: an item already in
+   * the hand is delivered whatever the buffer holds, so the ceiling is at most
+   * one item soft and nothing is ever stranded in an arm.
+   */
+  private feedPortOf(target: Entity): ItemSink | null {
+    const sink = inputPortOf(target, this.ports);
+    if (sink === null) return null;
+    const machine = asMachine(target, this.buildings);
+    const config = machine === null ? null : this.buildings.productionFor(machine.type);
+    if (machine === null || config === null) return sink;
+
+    const ports = this.ports;
+    return {
+      spaceFor(itemId: ItemId): number {
+        const room = sink.spaceFor(itemId);
+        if (room === 0) return 0;
+        if (config.fuelCapacity !== undefined && ports.items.fuelTicksOf(itemId) > 0) return room;
+        const current = ports.recipes.isRecipeId(machine.recipe) ? ports.recipes.byId(machine.recipe) : null;
+        const recipe =
+          current !== null && current.category === config.category
+            ? current
+            : ports.recipes.forInput(config.category, itemId, ports.unlocks);
+        const need = recipe?.inputs.find((stack) => stack.itemId === itemId)?.count ?? 0;
+        if (need === 0) return room;
+        return Math.max(0, Math.min(room, FEED_CRAFTS * need - slotsCount(machine.input, itemId)));
+      },
+      give: (itemId, amount) => sink.give(itemId, amount),
+      stacks: () => sink.stacks(),
+    };
   }
 
   /**

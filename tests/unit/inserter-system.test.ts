@@ -444,4 +444,29 @@ describe('what an inserter reaches for', () => {
     expect(assembler.input).toEqual([[plate, 1]]);
     expect(belt.items.map((item) => item.itemId)).toEqual([copper]);
   });
+
+  // A circuit is one plate and three wire; with no wire it never crafts, so
+  // what is in the buffer is exactly what the arm put there.
+  it('stops feeding an ingredient at five crafts worth', () => {
+    const { simulation, assembler } = feeding('make_circuit');
+    const plate = simulation.items.idOf('iron_plate');
+    const chest = simulation.entities.create<ChestEntity>(newChest(1, 4, NORTH));
+    chest.contents = stacked(simulation, [[plate, 20]]);
+
+    run(simulation, CONFIG.ticksPerItem * 10);
+    expect(assembler.input).toEqual([[plate, 5]]);
+    expect(heldIn(chest.contents, plate)).toBe(15);
+  });
+
+  it('leaves alone a machine already holding five crafts worth, however it got there', () => {
+    const { simulation, assembler } = feeding('make_circuit');
+    const plate = simulation.items.idOf('iron_plate');
+    assembler.input = [[plate, 8]];
+    const chest = simulation.entities.create<ChestEntity>(newChest(1, 4, NORTH));
+    chest.contents = stacked(simulation, [[plate, 20]]);
+
+    run(simulation, CONFIG.ticksPerItem * 4);
+    expect(assembler.input).toEqual([[plate, 8]]);
+    expect(heldIn(chest.contents, plate)).toBe(20);
+  });
 });

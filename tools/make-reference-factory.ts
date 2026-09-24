@@ -137,8 +137,12 @@ const MINER_ORE = 1000;
 /** Coal each furnace starts with: a full buffer, 400 s of burning (§15). */
 const FURNACE_COAL = 50;
 
-/** Ore each furnace starts with: a full input buffer (§15). */
-const FURNACE_ORE = 50;
+/**
+ * Ore each furnace starts with: the five smelts' worth an inserter keeps it
+ * at (2026-09-24). A full buffer of fifty would take the furnace minutes to
+ * work down, and its line would back up behind it the whole time.
+ */
+const FURNACE_ORE = 5;
 
 /** Coal each generator starts with. It has nothing to supply, so it keeps it. */
 const GENERATOR_COAL = 20;

@@ -72,6 +72,10 @@ export const CHANGELOG: readonly ChangelogDay[] = Object.freeze([
         kind: 'improved',
         text: 'In the “what machines make” view, a chest shows up to four of the things inside it instead of one, and the numbers are gone so the pictures are easier to read.',
       },
+      {
+        kind: 'improved',
+        text: 'Inserters keep a machine stocked with enough for five items and stop there, so one machine no longer soaks up a whole belt while its neighbours wait. A machine you filled up by hand is left alone until it has used its stock down below five.',
+      },
     ],
   },
 ]);
