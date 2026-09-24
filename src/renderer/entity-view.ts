@@ -560,9 +560,10 @@ export function describePlayer(view: PlayerView, seconds = 0, animate = true): P
 
 /**
  * Frames a second per player activity: a slow breath, a walking stride, a
- * pick swing. Presentation only (§6).
+ * pick swing. Presentation only (§6). The swing is 4.8, a blow every 0.83 s:
+ * at 6 it read as hurried.
  */
-const PLAYER_FPS: Readonly<Record<PlayerView['activity'], number>> = Object.freeze({ idle: 2, walk: 8, work: 6 });
+const PLAYER_FPS: Readonly<Record<PlayerView['activity'], number>> = Object.freeze({ idle: 2, walk: 8, work: 4.8 });
 
 /** Which frame of its four the player's activity is on, `seconds` in. */
 export function playerFrame(activity: PlayerView['activity'], seconds: number): number {

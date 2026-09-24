@@ -94,15 +94,17 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
   place: [{ wave: 'triangle', from: 220, to: 130, delay: 0, attack: 0.006, length: 0.11, level: 0.35 }],
   // Rising and thinner: something lifted away.
   remove: [{ wave: 'triangle', from: 170, to: 300, delay: 0, attack: 0.006, length: 0.12, level: 0.25 }],
-  // A pick on rock, the way other games voice it: a bright crack of noise on
-  // impact, the thump of the blow under it, a faint ring off the pick's steel,
-  // and the chips falling a moment after. Played once a swing, so it is
-  // short, and `PITCH_SPREAD` keeps two swings from sounding the same.
+  // A pick on rock, the way other games voice it: a dull crunch of noise on
+  // impact, the thump of the blow under it, and the grit falling a moment
+  // after. Nothing tonal and nothing bright — a pitched ring or a narrow
+  // high band is what makes a blow sound like steel on a metal plate.
+  // Played once a swing, so it is short, and `PITCH_SPREAD` keeps two swings
+  // from sounding the same.
   mine: [
-    { wave: 'noise', filter: 'bandpass', q: 1.4, from: 3200, to: 1800, delay: 0, attack: 0.002, length: 0.05, level: 0.9 },
-    { wave: 'sine', from: 140, to: 55, delay: 0, attack: 0.003, length: 0.09, level: 0.45 },
-    { wave: 'triangle', from: 2350, to: 2300, delay: 0.004, attack: 0.003, length: 0.14, level: 0.035 },
-    { wave: 'noise', filter: 'bandpass', q: 0.9, from: 1400, to: 700, delay: 0.035, attack: 0.01, length: 0.15, level: 0.3 },
+    { wave: 'noise', filter: 'lowpass', q: 0.6, from: 1600, to: 500, delay: 0, attack: 0.003, length: 0.06, level: 0.55 },
+    { wave: 'sine', from: 110, to: 48, delay: 0, attack: 0.004, length: 0.1, level: 0.35 },
+    { wave: 'noise', filter: 'bandpass', q: 0.5, from: 650, to: 350, delay: 0.01, attack: 0.006, length: 0.08, level: 0.3 },
+    { wave: 'noise', filter: 'lowpass', q: 0.5, from: 900, to: 300, delay: 0.04, attack: 0.012, length: 0.14, level: 0.14 },
   ],
   // Three notes up a major triad: the one sound that is good news.
   research: [

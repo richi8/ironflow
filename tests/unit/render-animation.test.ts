@@ -177,8 +177,8 @@ describe('machines animate while they work (C29 art task 3)', () => {
       previousFrame = frame;
       previousStrikes = count;
     }
-    // Six frames a second, four to a swing: a blow every two thirds of a second.
-    expect(strikes).toBe(6);
+    // 4.8 frames a second, four to a swing: a blow every 0.83 s, the first at 0.625 s.
+    expect(strikes).toBe(5);
   });
 });
 
