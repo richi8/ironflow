@@ -266,13 +266,11 @@ body {
 .if-slot {
   position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
-  width: 84px;
-  height: 44px;
-  padding: 4px 6px;
+  width: 52px;
+  height: 52px;
+  padding: 4px;
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: var(--if-bg);
@@ -292,8 +290,7 @@ body {
   background: var(--if-accent-dim);
 }
 
-.if-slot.is-unaffordable .if-slot__count,
-.if-slot.is-unaffordable .if-slot__name {
+.if-slot.is-unaffordable .if-slot__count {
   color: var(--if-danger);
 }
 
@@ -319,27 +316,33 @@ body {
   border-style: dashed;
 }
 
-/* Bottom right, on the count's row, since C30 raised the text to 14px: at
-   the top it sat on the end of the name. */
+/* Top left, over the picture's corner (C32); the count has the bottom right. */
 .if-slot__key {
   position: absolute;
-  right: 6px;
-  bottom: 4px;
+  left: 3px;
+  top: 1px;
   color: var(--if-text-dim);
   font-size: 14px;
+  line-height: 1;
 }
 
-.if-slot__name {
-  overflow: hidden;
-  max-width: 100%;
-  color: var(--if-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.if-slot__icon {
+  width: 36px;
+  height: 36px;
 }
 
 .if-slot__count {
-  color: var(--if-text-muted);
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  color: var(--if-text);
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 0 3px var(--if-bg-deep), 0 0 2px var(--if-bg-deep);
+}
+
+.if-slot.is-empty .if-slot__count {
+  display: none;
 }
 
 /* --- Inspector (C12) ------------------------------------------------------ */
@@ -495,16 +498,20 @@ body {
 
 .if-recipes {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* C32: pictures, five to a row, and the bill in the tooltip. */
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   margin-top: 4px;
 }
 
 .if-recipe {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 1px 6px;
-  padding: 4px 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 3px;
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: var(--if-bg);
@@ -527,25 +534,9 @@ body {
   color: var(--if-text);
 }
 
-.if-recipe__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.if-recipe__rate {
-  color: var(--if-text-dim);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
-.if-recipe__parts {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: var(--if-text-dim);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.if-recipe__icon {
+  width: 100%;
+  height: 100%;
 }
 
 .if-stack {
@@ -556,6 +547,12 @@ body {
   padding: 4px 6px;
   border-radius: var(--if-radius);
   background: var(--if-bg);
+}
+
+.if-stack__icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
 }
 
 .if-stack__name {
@@ -694,15 +691,16 @@ body {
   min-height: 0;
 }
 
-/* One slot of the bag: a stack, or empty. Drag to move, click to hold. */
+/* One slot of the bag: a stack, or empty. Drag to move, click to hold. Since
+   C32 the stack is its picture, with the count over its corner. */
 .if-bag-cell {
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
   aspect-ratio: 1;
   min-width: 0;
-  padding: 3px 4px;
+  padding: 4px;
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: var(--if-bg);
@@ -729,27 +727,26 @@ body {
   border-style: dashed;
 }
 
-.if-bag-cell__name {
-  display: -webkit-box;
-  overflow: hidden;
-  line-height: 1.2;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  /* Break between words; inside one only when it cannot fit at all. */
-  overflow-wrap: anywhere;
-  word-break: normal;
+.if-bag-cell__icon {
+  width: 72%;
+  height: 72%;
 }
 
 .if-bag-cell__count {
-  align-self: flex-end;
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
   color: var(--if-text);
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 0 3px var(--if-bg-deep), 0 0 2px var(--if-bg-deep);
 }
 
 .if-crafts {
   display: grid;
   flex: 1;
-  grid-template-columns: repeat(2, 1fr);
+  /* C32: pictures, six to a row; the bill is in the tooltip. */
+  grid-template-columns: repeat(6, 1fr);
   gap: 4px;
   align-content: start;
   overflow-y: auto;
@@ -757,10 +754,13 @@ body {
 }
 
 .if-craft {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 1px 6px;
-  padding: 4px 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 3px;
   border: 1px solid var(--if-stroke);
   border-radius: var(--if-radius);
   background: var(--if-bg);
@@ -770,42 +770,36 @@ body {
   cursor: pointer;
 }
 
-.if-craft:hover:not(:disabled) {
+.if-craft:hover:not([aria-disabled='true']) {
   border-color: var(--if-accent);
   color: var(--if-text);
 }
 
-.if-craft:disabled {
+/* Short of an ingredient: dimmed, with a red edge (C32). Not `disabled`, so
+   the tooltip still opens and says which ingredient is short. */
+.if-craft[aria-disabled='true'] {
+  border-color: color-mix(in srgb, var(--if-danger) 55%, var(--if-stroke));
   cursor: default;
-  opacity: 0.55;
 }
 
-/* The bill is what is short, so that is the line that goes red — not the
-   whole button, which would hide which ingredient is missing. */
-.if-craft.is-unaffordable .if-craft__parts {
-  color: var(--if-danger);
+.if-craft[aria-disabled='true'] .if-craft__icon {
+  opacity: 0.45;
 }
 
-.if-craft__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.if-craft__icon {
+  width: 100%;
+  height: 100%;
 }
 
-.if-craft__time {
-  color: var(--if-text-dim);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-
-.if-craft__parts {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: var(--if-text-dim);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* A recipe that makes more than one says how many over its corner. */
+.if-craft__yield,
+.if-recipe__yield {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  color: var(--if-text);
+  line-height: 1;
+  text-shadow: 0 0 3px var(--if-bg-deep), 0 0 2px var(--if-bg-deep);
 }
 
 .if-queue {
@@ -825,6 +819,12 @@ body {
 
 .if-queue-row + .if-queue-row {
   margin-top: 3px;
+}
+
+.if-queue-row__icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
 }
 
 .if-queue-row__name {
@@ -1330,6 +1330,175 @@ body {
 
 .if-saves__status.is-error {
   color: var(--if-danger);
+}
+
+/* --- Item icons and the tooltip (C32) --------------------------------------
+ *
+ * An item is its sprite, baked by the renderer; with no picture it is two
+ * letters on its §11 colour (`--if-item-tint`, set per icon). The tooltip is
+ * one box over everything, never in the pointer's way.
+ * -------------------------------------------------------------------------- */
+
+.if-item-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+}
+
+.if-item-icon[hidden] {
+  display: none;
+}
+
+.if-item-icon__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.if-item-icon__fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80%;
+  height: 80%;
+  border: 1px solid color-mix(in srgb, var(--if-item-tint, var(--if-panel-high)) 60%, var(--if-bg-deep));
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-item-tint, var(--if-panel-high)) 45%, var(--if-bg));
+  color: var(--if-text);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.if-item-icon__image[hidden],
+.if-item-icon__fallback[hidden] {
+  display: none;
+}
+
+/* Read by a screen reader, not drawn: the words a picture replaced. */
+.if-sr-only {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+#ui > .if-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  max-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 97%, transparent);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--if-bg-deep) 70%, transparent);
+  font-size: 14px;
+  /* Never in the way: the pointer is reading, not pressing. */
+  pointer-events: none;
+}
+
+#ui > .if-tooltip[hidden] {
+  display: none;
+}
+
+.if-tooltip__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.if-tooltip__icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.if-tooltip__title {
+  color: var(--if-accent-high);
+  font-weight: 600;
+}
+
+.if-tooltip__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.if-tooltip__status[hidden],
+.if-tooltip__section[hidden],
+.if-tooltip__row[hidden],
+.if-tooltip__heading[hidden],
+.if-tooltip__hint[hidden] {
+  display: none;
+}
+
+.if-tooltip__status[data-tone='ok'] { color: var(--if-ok); }
+.if-tooltip__status[data-tone='warn'] { color: var(--if-warn); }
+.if-tooltip__status[data-tone='danger'] { color: var(--if-danger); }
+.if-tooltip__status[data-tone='idle'],
+.if-tooltip__status[data-tone='info'] { color: var(--if-text-muted); }
+
+.if-tooltip__section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--if-stroke);
+}
+
+.if-tooltip__heading {
+  margin-bottom: 3px;
+  color: var(--if-text-dim);
+  letter-spacing: 0.12em;
+}
+
+.if-tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.if-tooltip__row-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.if-tooltip__label {
+  flex: 1;
+  color: var(--if-text-muted);
+}
+
+.if-tooltip__value {
+  color: var(--if-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.if-tooltip__row[data-tone='danger'] .if-tooltip__value { color: var(--if-danger); }
+.if-tooltip__row[data-tone='warn'] .if-tooltip__value { color: var(--if-warn); }
+.if-tooltip__row[data-tone='ok'] .if-tooltip__value { color: var(--if-ok); }
+
+.if-tooltip__hint {
+  margin-top: 6px;
+  color: var(--if-text-dim);
+  line-height: 1.35;
+}
+
+.if-inspector__making-icon {
+  width: 22px;
+  height: 22px;
 }
 
 /* -------------------------------------------------------------------------- *

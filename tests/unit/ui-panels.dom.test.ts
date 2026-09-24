@@ -154,8 +154,10 @@ describe('mounting', () => {
   it('shows the icons from §11 as inline SVG', () => {
     const { root } = harness;
     // Every icon is inline SVG with a path, never an <img> and never a font.
+    // The one <img> is an item's picture (C32), which is the renderer's
+    // sprite rather than one of §11's HUD icons.
     expect(root.querySelectorAll('.if-icon').length).toBeGreaterThan(0);
-    expect(root.querySelectorAll('img').length).toBe(0);
+    expect(root.querySelectorAll('img:not(.if-item-icon__image)').length).toBe(0);
     for (const icon of root.querySelectorAll('.if-icon')) {
       expect(icon.querySelector('path')?.getAttribute('fill')).toBe('currentColor');
     }
@@ -290,7 +292,11 @@ describe('the toolbar drives the game through commands only', () => {
     controller.pump();
     const splitter = query<HTMLElement>(root, '.if-slot[data-slot="3"]');
     expect(splitter.classList.contains('is-locked')).toBe(true);
-    expect(splitter.title).toContain('Logistics 1');
+    // C32: said by the tooltip, and to a screen reader by the label.
+    expect(splitter.getAttribute('aria-label')).toContain('Logistics 1');
+    splitter.dispatchEvent(new Event('pointerenter'));
+    expect(query<HTMLElement>(root, '.if-tooltip').hidden).toBe(false);
+    expect(query<HTMLElement>(root, '.if-tooltip').textContent).toContain('Locked — research Logistics 1');
 
     simulation.researchSystem.grant('logistics_1');
     controller.pump();

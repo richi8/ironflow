@@ -20,6 +20,10 @@
 import type { BuildMenuEntry, BuildMenuView, HotbarSlotView } from '../game/views/build-menu-view.js';
 import { HOTBAR_SLOTS } from '../game/game-controller.js';
 
+import { createItemIcon, paintItemIcon, type ItemIcon, type ItemIconSource } from './item-icon.js';
+import type { Tooltip, TooltipContent } from './tooltip.js';
+import { buildingSlotContent, stackContent } from './tooltip-content.js';
+
 /**
  * The drag payload for an item on its way to the hotbar: its id. A type of
  * its own, so the slots ignore a drag of anything else — a file, a link, text.
@@ -29,10 +33,17 @@ export const ITEM_DRAG_TYPE = 'application/x-ironflow-item';
 /** The drag payload for a slot's item on its way to another slot: the source slot, 1-based. */
 export const SLOT_DRAG_TYPE = 'application/x-ironflow-slot';
 
+/**
+ * One slot. Since C32 the item is a picture; the name is for screen readers
+ * (`if-sr-only`) and the tooltip.
+ */
 interface Slot {
   readonly button: HTMLButtonElement;
+  readonly icon: ItemIcon;
   readonly name: HTMLElement;
   readonly count: HTMLElement;
+  /** What it was last painted with, for its tooltip. */
+  view: HotbarSlotView | null;
 }
 
 export interface ToolbarOptions {
@@ -44,7 +55,14 @@ export interface ToolbarOptions {
   readonly onClearSlot: (slot: number) => void;
   /** Slot `from`'s item was dropped on slot `to` (both 1-based): swap them. */
   readonly onMoveSlot: (from: number, to: number) => void;
+  /** The shared tooltip (C32). */
+  readonly tooltip?: Tooltip;
+  /** Item pictures (C32). Without them, an icon is two letters. */
+  readonly icons?: ItemIconSource;
 }
+
+/** What every filled slot's tooltip ends with: how to rearrange the bar. */
+const EDIT_HINT = 'Drag to move, right-click to remove (shift+arrows and Delete from the keyboard).';
 
 export class Toolbar {
   private readonly root = document.createElement('div');
@@ -81,6 +99,7 @@ export class Toolbar {
       slot.button.removeEventListener('dragover', this.handleDragOver);
       slot.button.removeEventListener('dragleave', this.handleDragLeave);
       slot.button.removeEventListener('drop', this.handleDrop);
+      this.options.tooltip?.detach(slot.button);
     }
     this.root.remove();
     this.slots.length = 0;
@@ -198,21 +217,27 @@ export class Toolbar {
     key.className = 'if-slot__key';
     key.textContent = String(slot);
 
+    const icon = createItemIcon('if-slot__icon');
+
     const name = document.createElement('span');
-    name.className = 'if-slot__name';
+    name.className = 'if-slot__name if-sr-only';
     name.textContent = '';
 
     const count = document.createElement('span');
     count.className = 'if-slot__count';
     count.textContent = '';
 
-    button.append(key, name, count);
-    this.slots.push({ button, name, count });
+    button.append(key, icon.root, name, count);
+    const entry: Slot = { button, icon, name, count, view: null };
+    this.slots.push(entry);
+    this.options.tooltip?.attach(button, () => slotTooltip(entry.view));
     return button;
   }
 
   private paintSlot(slot: Slot, view: HotbarSlotView | undefined): void {
     const { button, name, count } = slot;
+    slot.view = view ?? null;
+    paintItemIcon(slot.icon, view?.itemId ?? null, view?.name ?? '', this.options.icons ?? null);
 
     if (view === undefined) {
       setText(name, '');
@@ -223,7 +248,7 @@ export class Toolbar {
       delete button.dataset['item'];
       // Not disabled: a disabled button receives no drag events, and an empty
       // slot is exactly where an item gets dropped.
-      button.title = 'Empty — drag an item here from your inventory, or focus one there and press this number';
+      setLabel(button, 'Empty — drag an item here from your inventory, or focus one there and press this number');
       return;
     }
 
@@ -236,11 +261,10 @@ export class Toolbar {
     button.classList.toggle('is-selected', view.selected);
 
     const entry = view.building;
-    const edit = 'Drag to move, right-click to remove (shift+arrows and Delete from the keyboard).';
     if (entry === null) {
       button.classList.remove('is-unaffordable', 'is-locked');
       button.classList.toggle('is-spent', view.count === 0);
-      button.title = `${view.name} — ${view.count} / ${view.stackSize}. Click to hold, then click a machine to feed it. ${edit}`;
+      setLabel(button, `${view.name}, ${view.count} / ${view.stackSize}`);
       return;
     }
 
@@ -250,13 +274,24 @@ export class Toolbar {
     // C22's lock, said where the building is: the build menu that used to say
     // it is gone.
     const lock = entry.unlocked ? '' : ` — locked, research ${entry.unlockedBy ?? 'required'}`;
-    button.title = `${entry.name} — ${describeCost(entry)}${lock}. ${edit}`;
+    setLabel(button, `${entry.name}, ${view.count}${lock}`);
   }
 }
 
-function describeCost(entry: BuildMenuEntry): string {
-  if (entry.cost.length === 0) return 'free';
-  return entry.cost.map((line) => `${line.count}x ${line.itemId} (${line.held})`).join(', ');
+/** A slot's tooltip (C32): a material's stack, or a building's lock and count. */
+function slotTooltip(view: HotbarSlotView | null): TooltipContent | null {
+  if (view === null) return null;
+  const entry: BuildMenuEntry | null = view.building;
+  if (entry === null) {
+    return stackContent(view.itemId, view.name, view.count, view.stackSize, `Click to hold it, then click a machine to feed it. ${EDIT_HINT}`);
+  }
+  const lockedBy = entry.unlocked ? null : (entry.unlockedBy ?? 'required');
+  return buildingSlotContent(view.itemId, entry.name, view.count, view.stackSize, lockedBy, `Click to build it. ${EDIT_HINT}`);
+}
+
+/** An accessible name, written only when it changed. Replaces C07's `title`. */
+function setLabel(element: HTMLElement, label: string): void {
+  if (element.getAttribute('aria-label') !== label) element.setAttribute('aria-label', label);
 }
 
 /** The 1-based slot an event happened on, read off the element it was bound to. */

@@ -70,6 +70,17 @@
  * inventory, and the hotbar is filled by dragging items onto it — buildings
  * and materials alike, one stack per slot. A material in hand feeds the
  * machine it is clicked on.
+ *
+ * ## One tooltip (C32)
+ *
+ * Items everywhere are pictures, and what they are is said by a tooltip:
+ * one box (`tooltip.ts`) that every panel attaches its cells to, and that
+ * this class also points at the world. Resting the pointer on the canvas
+ * describes what is under it — a building's status and numbers, or the ore
+ * left in a tile — refreshed at the live rate and at once when the pointer
+ * moves to something else. It keeps working while paused, for the map
+ * outline's reason: the pointer is a view control, and a player who pauses
+ * to look is the one reading it.
  */
 
 import type { GameController } from '../game/game-controller.js';
@@ -87,6 +98,9 @@ import { ResearchPanel } from './research-panel.js';
 import { SaveMenu, type SaveMenuView } from './save-menu.js';
 import { SettingsPanel, type MotionChoice, type SettingsView } from './settings-panel.js';
 import { Toolbar } from './toolbar.js';
+import type { ItemIconSource } from './item-icon.js';
+import { Tooltip } from './tooltip.js';
+import { hoverContent } from './tooltip-content.js';
 
 /** The panels that open in the middle of the screen, one at a time. */
 type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings' | 'menu';
@@ -159,6 +173,12 @@ export interface GameUIOptions {
    * Omitted, the menu has no NEW GAME.
    */
   readonly onNewGame?: () => void;
+  /**
+   * Item pictures (C32), baked from the renderer's sprites by the composition
+   * root — §4 keeps `ui/**` out of `renderer/**`. Omitted, an item is two
+   * letters on its colour.
+   */
+  readonly itemIcons?: ItemIconSource;
 }
 
 /** What the settings panel reads and asks for (C30). */
@@ -224,7 +244,19 @@ export class GameUI {
   private readonly objectives: ObjectivesPanel;
   private objectivesVisible: boolean;
   private readonly notifications = new Notifications();
+  private readonly tooltip: Tooltip;
   private readonly unsubscribes: (() => void)[] = [];
+
+  /**
+   * Where the pointer is, in window pixels, and whether it is on the world
+   * canvas with no button down. The world readout follows it (C32).
+   */
+  private pointerX = 0;
+  private pointerY = 0;
+  private pointerOnWorld = false;
+  /** The hover target the world readout was last built for. */
+  private hoverKey = '';
+  private hoverAccumulatorMs = 0;
 
   private hudAccumulatorMs = 0;
   private liveAccumulatorMs = 0;
@@ -243,6 +275,9 @@ export class GameUI {
     this.settingsBridge = options.settings ?? null;
     this.objectivesBridge = options.objectives ?? null;
     this.objectivesVisible = this.objectivesBridge?.initial.visible ?? false;
+    this.tooltip = new Tooltip(options.itemIcons ?? null);
+    // Every panel that shows items shares the box and the pictures (C32).
+    const pictures = { tooltip: this.tooltip, ...(options.itemIcons === undefined ? {} : { icons: options.itemIcons }) };
     this.objectives = new ObjectivesPanel({
       onDismiss: () => this.setObjectivesVisible(false),
       onSkipStep: (id) => {
@@ -305,6 +340,7 @@ export class GameUI {
       onAssignSlot: (slot, itemId) => this.controller.assignSlot(slot, itemId),
       onClearSlot: (slot) => this.controller.clearSlot(slot),
       onMoveSlot: (from, to) => this.controller.moveSlot(from, to),
+      ...pictures,
     });
     this.inspector = new Inspector({
       // The panel names an item and a count; which machine that means is the
@@ -332,6 +368,7 @@ export class GameUI {
         if (selected !== null) this.controller.setRecipe(selected, recipeId);
       },
       onClose: () => this.controller.clearSelection(),
+      ...pictures,
     });
     this.inventory = new InventoryPanel({
       // The same arrangement every other panel uses: the panel names a recipe
@@ -357,6 +394,7 @@ export class GameUI {
       // C30: a number pressed on a focused stack, the keyboard's drag.
       onAssignHotbar: (slot, itemId) => this.controller.assignSlot(slot, itemId),
       onClose: () => this.toggleInventory(),
+      ...pictures,
     });
     this.map = new MapPanel({
       // The one panel that asks for something the controller cannot give: a
@@ -407,12 +445,18 @@ export class GameUI {
     this.objectives.mount(this.root);
     this.toolbar.mount(this.root);
     this.notifications.mount(this.root);
+    // Last, so it is drawn over every panel.
+    this.tooltip.mount(this.root);
 
     this.toolbar.update(menuView);
     this.refreshHud();
     this.objectives.setOpen(this.objectivesVisible);
     this.refreshObjectives();
     window.addEventListener('keydown', this.handleEscape, true);
+    window.addEventListener('pointermove', this.handlePointer, { passive: true });
+    window.addEventListener('pointerdown', this.handlePointer, { passive: true });
+    window.addEventListener('pointerup', this.handlePointer, { passive: true });
+    document.documentElement.addEventListener('pointerleave', this.handlePointerOut);
     // C30: every `role="button"` in the UI presses on Enter and Space.
     this.unsubscribes.push(activateRoleButtons(this.root));
     // A panel's root takes focus when it opens (see `focusPanel`) and is not
@@ -468,6 +512,7 @@ export class GameUI {
    */
   update(frameMs: number): void {
     if (!this.mounted || frameMs <= 0) return;
+    this.updateWorldTooltip(frameMs);
     // A paused game updates nothing on a timer. The panels that must still
     // change while paused do it on an event, which is where the acceptance
     // criterion "both stopping when paused" and a HUD that says PAUSED meet.
@@ -520,6 +565,8 @@ export class GameUI {
       this.liveAccumulatorMs %= LIVE_INTERVAL_MS;
       this.notifications.update(elapsed - this.liveAccumulatorMs);
       this.refreshInspector();
+      // A stack or a bill under the pointer counts as it changes (C32).
+      this.tooltip.refresh();
     }
   }
 
@@ -676,6 +723,11 @@ export class GameUI {
 
   destroy(): void {
     window.removeEventListener('keydown', this.handleEscape, true);
+    window.removeEventListener('pointermove', this.handlePointer);
+    window.removeEventListener('pointerdown', this.handlePointer);
+    window.removeEventListener('pointerup', this.handlePointer);
+    document.documentElement.removeEventListener('pointerleave', this.handlePointerOut);
+    this.tooltip.destroy();
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
     this.notifications.destroy();
@@ -690,6 +742,54 @@ export class GameUI {
     this.toolbar.destroy();
     this.hud.destroy();
     this.mounted = false;
+  }
+
+  /**
+   * Remember where the pointer is and whether it is on the world (C32). The
+   * world is the one canvas outside this layer: the map panel's own canvas
+   * is inside it and gets no world readout.
+   */
+  private readonly handlePointer = (event: PointerEvent): void => {
+    this.pointerX = event.clientX;
+    this.pointerY = event.clientY;
+    const target = event.target;
+    this.pointerOnWorld =
+      target instanceof HTMLCanvasElement && !this.root.contains(target) && event.buttons === 0;
+  };
+
+  private readonly handlePointerOut = (): void => {
+    this.pointerOnWorld = false;
+  };
+
+  /**
+   * The world readout (C32): what is under the pointer, beside it.
+   *
+   * Rebuilt when the pointer moves onto a different tile or building, and
+   * otherwise at the live rate, so a miner's ore count ticks down under a
+   * resting pointer. It stays away while a building is held — the ghost is
+   * what the player is reading then — while a button is down, and while the
+   * menu is up.
+   */
+  private updateWorldTooltip(frameMs: number): void {
+    this.tooltip.dropStale();
+    const wanted = this.pointerOnWorld && this.controller.getSelectedBuilding() === null && !this.isMenuOpen();
+    const key = wanted ? this.controller.getHoverKey() : '';
+    if (key === '') {
+      this.hoverKey = '';
+      this.tooltip.hideWorld();
+      return;
+    }
+    this.hoverAccumulatorMs += frameMs;
+    if (key === this.hoverKey && this.hoverAccumulatorMs < LIVE_INTERVAL_MS) {
+      this.tooltip.moveTo(this.pointerX, this.pointerY);
+      return;
+    }
+    this.hoverAccumulatorMs %= LIVE_INTERVAL_MS;
+    this.hoverKey = key;
+    const view = this.controller.getHoverView();
+    const content = view === null ? null : hoverContent(view);
+    if (content === null) this.tooltip.hideWorld();
+    else this.tooltip.showAt(this.pointerX, this.pointerY, content);
   }
 
   /** Escape, before the keyboard layer hears it. See the header and `closeDialog`. */

@@ -57,8 +57,13 @@ import type {
 } from '../game/views/inventory-view.js';
 
 import { createIcon } from './icons.js';
+import { createItemIcon, paintItemIcon, type ItemIcon, type ItemIconSource } from './item-icon.js';
 import { digitOf, gridKeys } from './keyboard.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
+import type { Tooltip } from './tooltip.js';
+import { BATCH_CRAFT, TICKS_PER_SECOND, craftContent, stackContent } from './tooltip-content.js';
+
+export { BATCH_CRAFT };
 
 /**
  * The drag payload for a stack on its way to another slot: which grid and
@@ -93,9 +98,6 @@ export function decodeCell(raw: string): CellRef | null {
  */
 export const QUEUE_ROWS = 16;
 
-/** How many a shift-click queues. The genre's "a handful", written down once. */
-export const BATCH_CRAFT = 5;
-
 /**
  * Cells per row in the bag and in a chest, as `.if-bag` lays them out. The
  * keyboard needs it to know what "down" is (C30); the stylesheet's
@@ -104,21 +106,33 @@ export const BATCH_CRAFT = 5;
  */
 export const BAG_COLUMNS = 5;
 
+/**
+ * One bag slot. Since C32 the item is a picture and the name is for screen
+ * readers only (`if-sr-only`); the tooltip carries it for everyone else.
+ */
 interface Cell {
   readonly root: HTMLElement;
+  readonly icon: ItemIcon;
   readonly name: HTMLElement;
   readonly count: HTMLElement;
+  /** What the cell was last painted with, for its tooltip. */
+  view: InventoryCellView | null;
 }
 
+/** A hand-craft: the product's picture, and its bill in the tooltip (C32). */
 interface CraftButton {
   readonly root: HTMLButtonElement;
+  readonly icon: ItemIcon;
+  readonly yield: HTMLElement;
   readonly name: HTMLElement;
   readonly time: HTMLElement;
   readonly parts: HTMLElement;
+  option: CraftOptionView | null;
 }
 
 interface QueueRow {
   readonly root: HTMLElement;
+  readonly icon: ItemIcon;
   readonly name: HTMLElement;
   readonly remaining: HTMLElement;
   readonly bar: HTMLElement;
@@ -143,6 +157,10 @@ export interface InventoryPanelOptions {
    */
   readonly onAssignHotbar?: (slot: number, itemId: string) => void;
   readonly onClose: () => void;
+  /** The shared tooltip (C32). Without one, cells have none. */
+  readonly tooltip?: Tooltip;
+  /** Item pictures (C32). Without them, an icon is two letters. */
+  readonly icons?: ItemIconSource;
 }
 
 export class InventoryPanel {
@@ -241,8 +259,12 @@ export class InventoryPanel {
     this.closeButton.removeEventListener('click', this.handleClose);
     this.releaseGridKeys?.();
     this.bag.removeEventListener('keydown', this.handleCellKey);
-    for (const button of this.craftButtons.values()) button.root.removeEventListener('click', this.handleCraft);
+    for (const button of this.craftButtons.values()) {
+      button.root.removeEventListener('click', this.handleCraft);
+      this.options.tooltip?.detach(button.root);
+    }
     for (const cell of this.cells) {
+      this.options.tooltip?.detach(cell.root);
       cell.root.removeEventListener('click', this.handlePick);
       cell.root.removeEventListener('dragstart', this.handleDragStart);
       cell.root.removeEventListener('dragover', this.handleDragOver);
@@ -271,7 +293,7 @@ export class InventoryPanel {
     const target = event.currentTarget;
     if (!(target instanceof HTMLElement)) return;
     const recipeId = target.dataset['recipe'];
-    if (recipeId === undefined) return;
+    if (recipeId === undefined || target.getAttribute('aria-disabled') === 'true') return;
     const batch = event instanceof MouseEvent && event.shiftKey ? BATCH_CRAFT : 1;
     this.options.onCraft(recipeId, batch);
   };
@@ -402,14 +424,23 @@ export class InventoryPanel {
     root.addEventListener('dragleave', this.handleDragLeave);
     root.addEventListener('drop', this.handleDrop);
 
+    const icon = createItemIcon('if-bag-cell__icon');
+
     const name = document.createElement('span');
-    name.className = 'if-bag-cell__name';
+    name.className = 'if-bag-cell__name if-sr-only';
 
     const count = document.createElement('span');
     count.className = 'if-bag-cell__count';
 
-    root.append(name, count);
-    this.cells.push({ root, name, count });
+    root.append(icon.root, name, count);
+    const cell: Cell = { root, icon, name, count, view: null };
+    this.cells.push(cell);
+    this.options.tooltip?.attach(root, () => {
+      const view = cell.view;
+      if (view === null || view.itemId === null) return null;
+      const use = view.buildingId === null ? 'Click to hold it and feed a machine.' : 'Click to build it.';
+      return stackContent(view.itemId, view.name, view.count, view.stackSize, `${use} Drag to move it, onto the hotbar, or into a machine.`);
+    });
     return root;
   }
 
@@ -420,17 +451,26 @@ export class InventoryPanel {
     root.dataset['recipe'] = option.id;
     root.addEventListener('click', this.handleCraft);
 
+    const icon = createItemIcon('if-craft__icon');
+
+    // A recipe that makes two says so on the picture, as the genre does.
+    const made = document.createElement('span');
+    made.className = 'if-craft__yield';
+
+    // The words stay, for screen readers; the tooltip says them to everyone.
     const name = document.createElement('span');
-    name.className = 'if-craft__name';
+    name.className = 'if-craft__name if-sr-only';
 
     const time = document.createElement('span');
-    time.className = 'if-craft__time';
+    time.className = 'if-craft__time if-sr-only';
 
     const parts = document.createElement('span');
-    parts.className = 'if-craft__parts';
+    parts.className = 'if-craft__parts if-sr-only';
 
-    root.append(name, time, parts);
-    this.craftButtons.set(option.id, { root, name, time, parts });
+    root.append(icon.root, made, name, time, parts);
+    const button: CraftButton = { root, icon, yield: made, name, time, parts, option: null };
+    this.craftButtons.set(option.id, button);
+    this.options.tooltip?.attach(root, () => (button.option === null ? null : craftContent(button.option)));
     return root;
   }
 
@@ -438,6 +478,8 @@ export class InventoryPanel {
     const root = document.createElement('div');
     root.className = 'if-queue-row';
     root.hidden = true;
+
+    const icon = createItemIcon('if-queue-row__icon');
 
     const name = document.createElement('span');
     name.className = 'if-queue-row__name';
@@ -460,13 +502,15 @@ export class InventoryPanel {
     cancel.textContent = '×';
     cancel.addEventListener('click', this.handleCancel);
 
-    root.append(name, remaining, track, cancel);
-    this.queueRows.push({ root, name, remaining, bar, cancel });
+    root.append(icon.root, name, remaining, track, cancel);
+    this.queueRows.push({ root, icon, name, remaining, bar, cancel });
     return root;
   }
 
   private paintCell(cell: Cell, view: InventoryCellView): void {
     const { root } = cell;
+    cell.view = view;
+    paintItemIcon(cell.icon, view.itemId, view.name, this.options.icons ?? null);
     if (view.itemId === null) {
       setText(cell.name, '');
       setText(cell.count, '');
@@ -474,7 +518,7 @@ export class InventoryPanel {
       root.draggable = false;
       root.classList.add('is-empty');
       root.classList.remove('is-placeable');
-      root.title = 'Empty — drag a stack here';
+      root.setAttribute('aria-label', 'Empty slot');
       return;
     }
     setText(cell.name, view.name);
@@ -483,26 +527,26 @@ export class InventoryPanel {
     root.draggable = true;
     root.classList.remove('is-empty');
     root.classList.toggle('is-placeable', view.buildingId !== null);
-    const use =
-      view.buildingId === null
-        ? 'click to hold and feed a machine'
-        : 'click to build';
-    root.title = `${view.name} — ${view.count} / ${view.stackSize}. ${use}; drag to move, onto the hotbar, or into a machine.`;
+    setLabel(root, `${view.name}, ${view.count}`);
   }
 
   private paintCraft(button: CraftButton, option: CraftOptionView): void {
+    button.option = option;
     // A locked recipe keeps its button, hidden, so research can reveal it (C31).
     if (button.root.hidden === option.unlocked) button.root.hidden = !option.unlocked;
+    paintItemIcon(button.icon, option.productId, option.name, this.options.icons ?? null);
+    setText(button.yield, option.yield === 1 ? '' : String(option.yield));
     setText(button.name, option.yield === 1 ? option.name : `${option.yield} ${option.name}`);
     setText(button.time, `${(option.craftTicks / TICKS_PER_SECOND).toFixed(1)}s`);
     setText(button.parts, option.inputs.map((part) => `${part.held}/${part.count} ${part.name}`).join('  '));
 
     const affordable = option.craftable > 0;
-    button.root.disabled = !affordable;
+    // `aria-disabled` rather than `disabled` (C32): a disabled button gets no
+    // pointer events, and an unaffordable craft is exactly the one whose
+    // tooltip says what is missing.
+    const dead = affordable ? 'false' : 'true';
+    if (button.root.getAttribute('aria-disabled') !== dead) button.root.setAttribute('aria-disabled', dead);
     button.root.classList.toggle('is-unaffordable', !affordable);
-    button.root.title = affordable
-      ? `${option.name} — click for one, shift-click for ${BATCH_CRAFT}. You could make ${option.craftable}.`
-      : `${option.name} — you are missing ingredients.`;
   }
 
   private paintQueue(queue: readonly CraftQueueView[]): void {
@@ -516,6 +560,7 @@ export class InventoryPanel {
       row.root.hidden = order === undefined;
       if (order === undefined) continue;
 
+      paintItemIcon(row.icon, order.productId, order.name, this.options.icons ?? null);
       setText(row.name, order.name);
       // A blocked order says so in words, not only in amber (C30).
       setText(row.remaining, order.blocked ? `×${order.remaining} BAG FULL` : `×${order.remaining}`);
@@ -531,18 +576,6 @@ export class InventoryPanel {
     }
   }
 }
-
-/**
- * Ticks per simulated second.
- *
- * Written here rather than imported: §4 lets the UI reach the controller and
- * the view models, and `simulation-clock.ts` is neither. The view carries a
- * tick count because ticks are what the simulation is exact in (§6 R3); this
- * is the one division that turns it into the seconds a player reads, and it
- * happens on the presentation side where a division is allowed to be a
- * division. `tests/unit/ui-panels.dom.test.ts` asserts the two agree.
- */
-const TICKS_PER_SECOND = 30;
 
 function label(text: string): HTMLElement {
   const element = document.createElement('div');
@@ -564,6 +597,11 @@ function itemOf(event: Event): string | null {
   const target = event.currentTarget;
   if (!(target instanceof HTMLElement)) return null;
   return target.dataset['item'] ?? null;
+}
+
+/** An accessible name, written only when it changed. */
+function setLabel(element: HTMLElement, label: string): void {
+  if (element.getAttribute('aria-label') !== label) element.setAttribute('aria-label', label);
 }
 
 function setText(element: HTMLElement, text: string): void {

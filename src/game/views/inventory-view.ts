@@ -70,6 +70,8 @@ export interface CraftOptionView {
   readonly name: string;
   /** How many come out of one craft. Two, for `make_belt`. */
   readonly yield: number;
+  /** The item it makes, for the icon on its button (C32). */
+  readonly productId: string;
   readonly inputs: readonly CraftPartView[];
   /** Ticks one craft takes **by hand** — the recipe at `HAND_CRAFTING_SPEED`. */
   readonly craftTicks: number;
@@ -105,6 +107,8 @@ export interface CraftQueueView {
   readonly index: number;
   readonly recipeId: string;
   readonly name: string;
+  /** The item it makes, for its icon (C32). */
+  readonly productId: string;
   /** How many are still to be made, including the one in progress. */
   readonly remaining: number;
   /**

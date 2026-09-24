@@ -51,79 +51,26 @@
  * measured rate is the number that says so.
  */
 
-import type {
-  MachinePowerView,
-  MachineSlotView,
-  MachineStack,
-  MachineStatus,
-  MachineView,
-} from '../game/views/building-view.js';
+import type { MachineSlotView, MachineStack, MachineView } from '../game/views/building-view.js';
 import type { RecipeView } from '../game/views/recipe-view.js';
 
 import type { InventoryCellView } from '../game/views/inventory-view.js';
 
-import { TONE_ICONS, createIcon, setIcon, type Tone } from './icons.js';
+import { TONE_ICONS, createIcon, setIcon } from './icons.js';
 import { BAG_COLUMNS, CELL_DRAG_TYPE, decodeCell, encodeCell, type CellRef } from './inventory.js';
+import { createItemIcon, paintItemIcon, type ItemIcon, type ItemIconSource } from './item-icon.js';
 import { gridKeys } from './keyboard.js';
+import { STATUS_TEXT, STATUS_TONE, describePower } from './status-text.js';
 import { ITEM_DRAG_TYPE } from './toolbar.js';
+import type { Tooltip } from './tooltip.js';
+import { recipeContent, stackContent } from './tooltip-content.js';
 
 /** Buffer lines drawn per section. See the file header. */
 export const STACK_ROWS = 4;
 
-/**
- * What each status is called on screen.
- *
- * `Record<MachineStatus, …>` rather than a function with a default, for the
- * reason the rejection table in `notifications.ts` is one: a status added in
- * C15 or C21 must be a type error today, not the word "undefined" in front of
- * a player three chunks from now.
- *
- * `'idle'` reads "Nothing to do", which is C12's "never a bare idle" taken at
- * its word. The criterion is about machines that *could* run and are not; a
- * chest has no work to be stalled on, and saying so is the honest version of
- * the same sentence.
- */
-const STATUS_TEXT: Readonly<Record<MachineStatus, string>> = Object.freeze({
-  idle: 'Nothing to do',
-  running: 'Running',
-  output_full: 'Output full — nothing is taking from it',
-  no_resource: 'No ore left under it',
-  no_power: 'Not connected to a power network',
-  no_input: 'Missing ingredients',
-  no_recipe: 'No recipe set',
-  no_fuel: 'Out of fuel — progress is paused, not lost',
-  no_destination: 'Nowhere to put anything — it is not pointed at a belt, a chest or a machine',
-  low_power: 'Low power — the network cannot keep up',
-});
-
-/**
- * Which of §11's status tokens each one is painted in. Each tone has its own
- * shape as well (`TONE_ICONS`, C30), so the row reads in greyscale.
- */
-type StatusTone = Exclude<Tone, 'info'>;
-
-const STATUS_TONE: Readonly<Record<MachineStatus, StatusTone>> = Object.freeze({
-  idle: 'idle',
-  running: 'ok',
-  // Stalled, and the player can fix it: take the ore out, feed it, choose a
-  // recipe. Amber is "this needs you".
-  output_full: 'warn',
-  no_input: 'warn',
-  no_recipe: 'warn',
-  // Stopped for a reason that will not fix itself without moving something.
-  no_fuel: 'warn',
-  // C21: the factory works, it is just stretched. Amber for the same reason
-  // `output_full` is — it is a number to grow, not a thing that is broken.
-  low_power: 'warn',
-  no_resource: 'danger',
-  no_power: 'danger',
-  // Misconfigured rather than stalled: nothing will ever come of it, and it
-  // will not announce itself again (C20).
-  no_destination: 'danger',
-});
-
 interface StackRow {
   readonly root: HTMLElement;
+  readonly icon: ItemIcon;
   readonly name: HTMLElement;
   readonly count: HTMLElement;
   readonly take: HTMLButtonElement;
@@ -132,10 +79,20 @@ interface StackRow {
 /** One input slot of a machine: what goes in, how full, and PUT / TAKE. */
 interface SlotRow {
   readonly root: HTMLElement;
+  readonly icon: ItemIcon;
   readonly name: HTMLElement;
   readonly count: HTMLElement;
   readonly put: HTMLButtonElement;
   readonly take: HTMLButtonElement;
+}
+
+/** One cell of a chest's grid, drawn as the bag draws its own (C32: an icon). */
+interface StorageCell {
+  readonly root: HTMLElement;
+  readonly icon: ItemIcon;
+  readonly name: HTMLElement;
+  readonly count: HTMLElement;
+  view: InventoryCellView | null;
 }
 
 interface Section {
@@ -158,6 +115,10 @@ export interface InspectorOptions {
   readonly onSetRecipe: (recipeId: string | null) => void;
   /** Stop inspecting. */
   readonly onClose: () => void;
+  /** The shared tooltip (C32): recipes and chest stacks describe themselves. */
+  readonly tooltip?: Tooltip;
+  /** Item pictures (C32). Without them, an icon is two letters. */
+  readonly icons?: ItemIconSource;
 }
 
 export class Inspector {
@@ -194,10 +155,11 @@ export class Inspector {
    */
   private readonly storageSection = document.createElement('div');
   private readonly storageGrid = document.createElement('div');
-  private storageCells: HTMLElement[] = [];
+  private storageCells: StorageCell[] = [];
 
   /** The MAKING line, for a machine that chooses its own recipe. */
   private readonly makingRow = document.createElement('div');
+  private readonly makingIcon = createItemIcon('if-inspector__making-icon');
   private readonly makingValue = document.createElement('span');
 
   /**
@@ -226,6 +188,8 @@ export class Inspector {
   private readonly recipeSection = document.createElement('div');
   private readonly recipeGrid = document.createElement('div');
   private recipeButtons: HTMLButtonElement[] = [];
+  /** What each picker button was last painted with, for its tooltip. */
+  private recipeViews: RecipeView[] = [];
   /**
    * The recipe ids the grid is currently built from.
    *
@@ -286,7 +250,7 @@ export class Inspector {
     makingLabel.className = 'if-inspector__label';
     makingLabel.textContent = 'MAKING';
     this.makingValue.className = 'if-inspector__value';
-    this.makingRow.append(makingLabel, this.makingValue);
+    this.makingRow.append(makingLabel, this.makingIcon.root, this.makingValue);
 
     this.nextRow.className = 'if-inspector__rate if-inspector__next';
     this.nextRow.hidden = true;
@@ -330,7 +294,7 @@ export class Inspector {
     slotLabel.textContent = 'INPUT';
     this.slotSection.append(slotLabel);
     for (let i = 0; i < STACK_ROWS; i++) {
-      const row = this.createSlotRow();
+      const row = this.createSlotRow(i);
       this.slotRows.push(row);
       this.slotSection.append(row.root);
     }
@@ -443,6 +407,7 @@ export class Inspector {
       for (const row of section.rows) row.take.removeEventListener('click', this.handleTake);
     }
     for (const row of this.slotRows) {
+      this.options.tooltip?.detach(row.root);
       row.put.removeEventListener('click', this.handlePut);
       row.take.removeEventListener('click', this.handleTake);
       row.root.removeEventListener('dragover', this.handleSlotDragOver);
@@ -540,7 +505,10 @@ export class Inspector {
     // The line is for machines that choose for themselves; a machine with a
     // picker already says what it is making by which button is lit.
     this.makingRow.hidden = choices !== null || view.recipe === null;
-    if (view.recipe !== null && choices === null) setText(this.makingValue, view.recipe.name);
+    if (view.recipe !== null && choices === null) {
+      setText(this.makingValue, view.recipe.name);
+      paintItemIcon(this.makingIcon, view.recipe.outputs[0]?.itemId ?? null, view.recipe.name, this.icons);
+    }
     if (choices === null) {
       this.rebuildRecipes(NO_RECIPES);
       return;
@@ -551,6 +519,7 @@ export class Inspector {
       const button = this.recipeButtons[i];
       const choice = choices[i];
       if (button === undefined || choice === undefined) continue;
+      this.recipeViews[i] = choice;
       // An attribute rather than a class, for the reason the status tone is
       // one: there is then no stale state to remember to remove, and a button
       // that says what it is out loud is one a screen reader can read.
@@ -573,30 +542,48 @@ export class Inspector {
       button.dataset['recipe'] = choice.id;
       button.setAttribute('aria-pressed', 'false');
 
+      // C32: the product's picture, as the genre's picker shows it. The words
+      // stay for screen readers; the tooltip reads the bill out to everyone.
+      const icon = createItemIcon('if-recipe__icon');
+      paintItemIcon(icon, choice.outputs[0]?.itemId ?? null, choice.name, this.icons);
+
+      const made = document.createElement('span');
+      made.className = 'if-recipe__yield';
+      const yieldCount = choice.outputs[0]?.count ?? 1;
+      made.textContent = yieldCount === 1 ? '' : String(yieldCount);
+
       const name = document.createElement('span');
-      name.className = 'if-recipe__name';
-      name.textContent = amountOf(choice.outputs[0]?.count ?? 1, choice.name);
+      name.className = 'if-recipe__name if-sr-only';
+      name.textContent = amountOf(yieldCount, choice.name);
 
       const rate = document.createElement('span');
-      rate.className = 'if-recipe__rate';
+      rate.className = 'if-recipe__rate if-sr-only';
       rate.textContent = `${choice.ratePerMinute.toFixed(0)} /min`;
 
       const parts = document.createElement('span');
-      parts.className = 'if-recipe__parts';
-      // C29 puts a real icon beside each of these; until then the count and
-      // the name are the icon, which is what the player reads anyway.
+      parts.className = 'if-recipe__parts if-sr-only';
       parts.textContent = choice.inputs.map((part) => amountOf(part.count, part.name)).join(' + ');
 
-      button.append(name, rate, parts);
+      button.append(icon.root, made, name, rate, parts);
       button.addEventListener('click', this.handleRecipe);
+      const index = this.recipeButtons.length;
+      this.recipeViews.push(choice);
+      this.options.tooltip?.attach(button, () => {
+        const view = this.recipeViews[index];
+        return view === undefined ? null : recipeContent(view);
+      });
       this.recipeButtons.push(button);
       this.recipeGrid.append(button);
     }
   }
 
   private clearRecipes(): void {
-    for (const button of this.recipeButtons) button.removeEventListener('click', this.handleRecipe);
+    for (const button of this.recipeButtons) {
+      button.removeEventListener('click', this.handleRecipe);
+      this.options.tooltip?.detach(button);
+    }
     this.recipeButtons = [];
+    this.recipeViews = [];
     this.recipeGrid.replaceChildren();
   }
 
@@ -629,6 +616,8 @@ export class Inspector {
     root.className = 'if-stack';
     root.hidden = true;
 
+    const icon = createItemIcon('if-stack__icon');
+
     const name = document.createElement('span');
     name.className = 'if-stack__name';
 
@@ -642,17 +631,24 @@ export class Inspector {
     take.hidden = !takeable;
     if (takeable) take.addEventListener('click', this.handleTake);
 
-    root.append(name, count, take);
-    return { root, name, count, take };
+    root.append(icon.root, name, count, take);
+    return { root, icon, name, count, take };
   }
 
-  private createSlotRow(): SlotRow {
+  private createSlotRow(index: number): SlotRow {
     const root = document.createElement('div');
     root.className = 'if-stack if-machine-slot';
     root.hidden = true;
+    this.options.tooltip?.attach(root, () => {
+      const slot = this.view?.slots?.[index];
+      if (slot === undefined || slot.itemId === null) return null;
+      return stackContent(slot.itemId, slot.name, slot.count, slot.capacity, 'PUT fills it from your bag; TAKE empties it. Or drag a stack here.');
+    });
     root.addEventListener('dragover', this.handleSlotDragOver);
     root.addEventListener('dragleave', this.handleSlotDragLeave);
     root.addEventListener('drop', this.handleSlotDrop);
+
+    const icon = createItemIcon('if-stack__icon');
 
     const name = document.createElement('span');
     name.className = 'if-stack__name';
@@ -672,8 +668,8 @@ export class Inspector {
     take.textContent = 'TAKE';
     take.addEventListener('click', this.handleTake);
 
-    root.append(name, count, put, take);
-    return { root, name, count, put, take };
+    root.append(icon.root, name, count, put, take);
+    return { root, icon, name, count, put, take };
   }
 
   /** Point the slot rows at `slots`; hide the section for a building with none. */
@@ -689,7 +685,12 @@ export class Inspector {
       row.root.dataset['role'] = slot.role;
       row.root.dataset['capacity'] = String(slot.capacity);
       row.root.classList.toggle('is-empty', slot.count === 0);
+      paintItemIcon(row.icon, slot.itemId, slot.name, this.icons);
       setText(row.name, slot.name);
+      // C32: a slot holding an item is its picture, and the tooltip names it —
+      // beside PUT and TAKE there is no room for both. An empty slot keeps its
+      // word ("Fuel"), since it has no picture yet.
+      row.name.classList.toggle('if-sr-only', slot.itemId !== null);
       setText(row.count, `${slot.count}/${slot.capacity}`);
 
       if (slot.depositItemId === null) delete row.put.dataset['item'];
@@ -720,7 +721,7 @@ export class Inspector {
     }
     cells.forEach((cell, index) => {
       const element = this.storageCells[index];
-      if (element !== undefined) paintStorageCell(element, cell, view.inReach);
+      if (element !== undefined) this.paintStorageCell(element, cell, view.inReach);
     });
   }
 
@@ -730,27 +731,35 @@ export class Inspector {
     root.dataset['index'] = String(index);
     root.tabIndex = 0;
     root.setAttribute('role', 'button');
+    const icon = createItemIcon('if-bag-cell__icon');
     const name = document.createElement('span');
-    name.className = 'if-bag-cell__name';
+    name.className = 'if-bag-cell__name if-sr-only';
     const count = document.createElement('span');
     count.className = 'if-bag-cell__count';
-    root.append(name, count);
+    root.append(icon.root, name, count);
     root.addEventListener('click', this.handleStorageClick);
     root.addEventListener('dragstart', this.handleStorageDragStart);
     root.addEventListener('dragover', this.handleStorageDragOver);
     root.addEventListener('dragleave', this.handleSlotDragLeave);
     root.addEventListener('drop', this.handleStorageDrop);
-    this.storageCells.push(root);
+    const cell: StorageCell = { root, icon, name, count, view: null };
+    this.options.tooltip?.attach(root, () => {
+      const view = cell.view;
+      if (view === null || view.itemId === null) return null;
+      return stackContent(view.itemId, view.name, view.count, view.stackSize, 'Click to take it, or drag it to a slot.');
+    });
+    this.storageCells.push(cell);
     return root;
   }
 
   private clearStorage(): void {
-    for (const cell of this.storageCells) {
+    for (const { root: cell } of this.storageCells) {
       cell.removeEventListener('click', this.handleStorageClick);
       cell.removeEventListener('dragstart', this.handleStorageDragStart);
       cell.removeEventListener('dragover', this.handleStorageDragOver);
       cell.removeEventListener('dragleave', this.handleSlotDragLeave);
       cell.removeEventListener('drop', this.handleStorageDrop);
+      this.options.tooltip?.detach(cell);
     }
     this.storageCells = [];
     this.storageGrid.replaceChildren();
@@ -814,6 +823,34 @@ export class Inspector {
     this.options.onDeposit(itemId, Number.MAX_SAFE_INTEGER);
   };
 
+  /** One chest slot, painted the way the bag paints its own. */
+  private paintStorageCell(cell: StorageCell, view: InventoryCellView, inReach: boolean): void {
+    const element = cell.root;
+    cell.view = view;
+    paintItemIcon(cell.icon, view.itemId, view.name, this.icons);
+    if (view.itemId === null) {
+      setText(cell.name, '');
+      setText(cell.count, '');
+      delete element.dataset['item'];
+      element.draggable = false;
+      element.classList.add('is-empty');
+      element.setAttribute('aria-label', 'Empty slot — drag a stack here from your bag');
+      return;
+    }
+    setText(cell.name, view.name);
+    setText(cell.count, String(view.count));
+    if (element.dataset['item'] !== view.itemId) element.dataset['item'] = view.itemId;
+    element.draggable = inReach;
+    element.classList.remove('is-empty');
+    const label = `${view.name}, ${view.count}`;
+    if (element.getAttribute('aria-label') !== label) element.setAttribute('aria-label', label);
+  }
+
+  /** The item pictures, or none. */
+  private get icons(): ItemIconSource | null {
+    return this.options.icons ?? null;
+  }
+
   /** Point a section's rows at `stacks`, hiding the ones it does not need. */
   private fill(section: Section, stacks: readonly MachineStack[], inReach: boolean): void {
     section.root.hidden = stacks.length === 0;
@@ -826,6 +863,7 @@ export class Inspector {
       row.root.hidden = stack === undefined;
       if (stack === undefined) continue;
 
+      paintItemIcon(row.icon, stack.itemId, stack.name, this.icons);
       setText(row.name, stack.name);
       setText(row.count, stack.capacity === null ? String(stack.count) : `${stack.count}/${stack.capacity}`);
       row.take.dataset['item'] = stack.itemId;
@@ -834,28 +872,6 @@ export class Inspector {
       row.take.disabled = !inReach || stack.count === 0;
     }
   }
-}
-
-/** One chest slot, painted the way the bag paints its own. */
-function paintStorageCell(element: HTMLElement, cell: InventoryCellView, inReach: boolean): void {
-  const name = element.querySelector<HTMLElement>('.if-bag-cell__name');
-  const count = element.querySelector<HTMLElement>('.if-bag-cell__count');
-  if (name === null || count === null) return;
-  if (cell.itemId === null) {
-    setText(name, '');
-    setText(count, '');
-    delete element.dataset['item'];
-    element.draggable = false;
-    element.classList.add('is-empty');
-    element.title = 'Empty — drag a stack here from your bag';
-    return;
-  }
-  setText(name, cell.name);
-  setText(count, String(cell.count));
-  if (element.dataset['item'] !== cell.itemId) element.dataset['item'] = cell.itemId;
-  element.draggable = inReach;
-  element.classList.remove('is-empty');
-  element.title = `${cell.name} — ${cell.count} / ${cell.stackSize}. Click to take it, or drag it to a slot.`;
 }
 
 /** No list: a building whose inputs are drawn as slots instead. */
@@ -867,21 +883,6 @@ const NO_RECIPES: readonly RecipeView[] = Object.freeze([]);
 /** "2 Iron Plate", and "Gear" for a single one — the count is the news. */
 function amountOf(count: number, name: string): string {
   return count === 1 ? name : `${count} ${name}`;
-}
-
-/**
- * The POWER line: what this building does to the grid, then how the grid is
- * doing (C21).
- *
- * A generator reads "900 kW supplied", a machine "150 kW drawn", and both then
- * carry the network's own state — because the useful sentence is not "this
- * machine wants 150 kW", it is "it wants 150 kW and its network is at 62%".
- */
-function describePower(power: MachinePowerView): string {
-  const role =
-    power.productionKw > 0 ? `${power.productionKw} kW supplied` : `${power.consumptionKw} kW drawn`;
-  if (!power.connected) return `${role} — no network`;
-  return `${role}, network at ${power.satisfactionPercent}%`;
 }
 
 function setText(element: HTMLElement, text: string): void {

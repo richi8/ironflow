@@ -54,6 +54,7 @@ import {
   isWorking,
 } from './renderer/entity-view.js';
 import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
+import { createItemIconSource } from './renderer/item-icons.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
@@ -1103,6 +1104,15 @@ async function bootstrap(): Promise<void> {
     // (2026-09-23): Escape opens it, and the game waits. Remembered rather
     // than toggled, so closing it does not start a game paused some other way.
     onNewGame: () => startNewGame(),
+    // C32: every item in a panel is its sprite. Baked from the live atlas on
+    // first request, at twice the size it is shown (§11: author at 2x). The
+    // content table is the same for every world, so NEW GAME keeps these.
+    itemIcons: createItemIconSource({
+      atlas: new ProceduralAtlas(),
+      buildings: simulation.buildings,
+      createCanvas: createIconCanvas,
+      size: ITEM_ICON_PX,
+    }),
     onMenuVisibility: (open) => {
       if (open) {
         pausedByMenu = !game.isPaused();
@@ -1200,6 +1210,17 @@ async function bootstrap(): Promise<void> {
   });
 
   game.start();
+}
+
+/** An item icon's side in device pixels: twice the 32 px it is shown at. */
+const ITEM_ICON_PX = 64;
+
+/** A canvas for an item picture (C32). `item-icons.ts` asks it for a context. */
+function createIconCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
 }
 
 /** An offscreen canvas for one atlas level. Throws where there is no 2D context. */

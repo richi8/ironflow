@@ -40,7 +40,8 @@
 
 import type { Command } from './commands/command.js';
 import type { Entity, EntityId } from './entities/entity.js';
-import { footprintExtent } from './entities/entity.js';
+import { footprintExtent, forEachFootprintTile } from './entities/entity.js';
+import { BELT_SLOTS_PER_TILE } from './entities/belt-entity.js';
 import { asInserter, inserterCycleProgress } from './entities/inserter-entity.js';
 import { machineStatusName, statusOf } from './entities/machine-status.js';
 import { asMachine } from './entities/machine-entity.js';
@@ -75,6 +76,7 @@ import type {
   InventoryView,
 } from './views/inventory-view.js';
 import { MAP_CELL_TILES, type MapChunkView, type MapEntityView, type MapView } from './views/map-view.js';
+import type { BuildingDetailsView, HoverView, OreUnderView, ResourceHoverView } from './views/hover-view.js';
 import type { PlacementView } from './views/placement-view.js';
 import type {
   ResearchCostView,
@@ -95,10 +97,10 @@ import {
 import { DIRECTION_OFFSETS, EAST, NORTH, SOUTH, type Rotation, type TileCoord } from './world/coordinates.js';
 import type { ObjectiveGoal } from './views/objective-view.js';
 import { GAME_SPEEDS } from './game.js';
-import { CHUNK_SIZE } from './world/chunk.js';
+import { CHUNK_SIZE, localIndex, toChunkCoord, toLocalCoord } from './world/chunk.js';
 import { unpackChunkKey } from './world/explored.js';
 import { TILE_TYPE_COUNT, tileProperties, type TileType } from './world/tile.js';
-import { RESOURCE_TYPE_COUNT, resourceName, type ResourceType } from './world/resource.js';
+import { RESOURCE_TYPE_COUNT, ResourceType, resourceItemId, resourceName } from './world/resource.js';
 
 /** Hotbar slots the number row reaches. §13's toolbar, C07 task 3. */
 export const HOTBAR_SLOTS = 9;
@@ -159,6 +161,12 @@ export interface Cursor {
   readonly buildTool: HeldBuilding | null;
   readonly buildRotation: Rotation;
   readonly hover: TileCoord | null;
+  /**
+   * The building under the pointer, when it is on one (C32's tooltip).
+   * Optional so a cursor written before C32 still satisfies this; without it
+   * the tooltip describes ground only.
+   */
+  readonly hoverEntity?: EntityId | null;
   readonly selectedEntityId: EntityId | null;
   /** A material in the hand, or null. Never set at the same time as `buildTool`. */
   readonly heldItem: HeldItem | null;
@@ -217,6 +225,7 @@ export class DetachedCursor implements Cursor {
   buildTool: HeldBuilding | null = null;
   buildRotation: Rotation = NORTH;
   hover: TileCoord | null = null;
+  hoverEntity: EntityId | null = null;
   selectedEntityId: EntityId | null = null;
   heldItem: HeldItem | null = null;
 
@@ -662,10 +671,12 @@ export class GameController {
     });
 
     const first = recipe.outputs[0];
+    const product = first === undefined ? null : this.partView(first.itemId, first.count);
     return freeze({
       id: recipe.id,
-      name: first === undefined ? recipe.id : this.partView(first.itemId, first.count).name,
+      name: product?.name ?? recipe.id,
       yield: first?.count ?? 1,
+      productId: product?.itemId ?? recipe.id,
       inputs: freeze(inputs),
       craftTicks: this.simulation.crafts.handTicksFor(recipe.recipeId),
       craftable,
@@ -681,10 +692,12 @@ export class GameController {
     // Guarded for the reason `recipeView` guards its rate (§6 R7): a recipe
     // that has stopped being hand-craftable must not divide by zero here.
     const progress = index === 0 && duration > CANNOT_CRAFT ? order.progressTicks / duration : null;
+    const product = first === undefined ? null : this.partView(first.itemId, first.count);
     return freeze({
       index,
       recipeId: recipe.id,
-      name: first === undefined ? recipe.id : this.partView(first.itemId, first.count).name,
+      name: product?.name ?? recipe.id,
+      productId: product?.itemId ?? recipe.id,
       remaining: order.remaining,
       progress,
       // Full progress and still at the head is exactly the state the system
@@ -1246,6 +1259,107 @@ export class GameController {
       // everything that does not mine — see `PlacementView`.
       resourceTiles: this.simulation.resourceTilesUnder(definition.id, tile.x, tile.y, rotation),
     });
+  }
+
+  /**
+   * What the pointer rests on, for the world tooltip (C32), or null over
+   * nothing worth describing: bare ground, or no pointer on the world.
+   *
+   * The building part is `getBuildingView`, so the tooltip and the inspector
+   * cannot disagree about a status. The rest is content numbers and the ore
+   * under the pointer. Nothing is generated to answer: a tile whose world
+   * chunk does not exist has no ore to report.
+   */
+  getHoverView(): HoverView | null {
+    const tile = this.cursor.hover;
+    if (tile === null) return null;
+    const entityId = this.cursor.hoverEntity ?? null;
+    const entity = entityId === null ? undefined : this.simulation.entities.get(entityId);
+    const building = entity === undefined ? null : this.getBuildingView(entity.id);
+    const resource = this.resourceAt(tile.x, tile.y);
+    if (building === null && resource === null) return null;
+    return freeze({
+      x: tile.x,
+      y: tile.y,
+      building,
+      details: entity === undefined || building === null ? null : this.buildingDetailsOf(entity),
+      resource,
+    });
+  }
+
+  /**
+   * Which tile and building the pointer is on, as one string. Cheap, for the
+   * UI to notice a change of target between its 10 Hz repaints (C32).
+   */
+  getHoverKey(): string {
+    const tile = this.cursor.hover;
+    if (tile === null) return '';
+    return `${tile.x},${tile.y},${this.cursor.hoverEntity ?? ''}`;
+  }
+
+  /** The ore in one tile, without generating its world chunk. */
+  private resourceAt(x: number, y: number): ResourceHoverView | null {
+    const chunk = this.simulation.world.peekChunk(toChunkCoord(x), toChunkCoord(y));
+    if (chunk === undefined) return null;
+    const index = localIndex(toLocalCoord(x), toLocalCoord(y));
+    const type = chunk.resource[index] ?? ResourceType.None;
+    const amount = chunk.resourceAmount[index] ?? 0;
+    if (type === ResourceType.None || amount <= 0) return null;
+    const itemId = resourceItemId(type as ResourceType);
+    if (itemId === null) return null;
+    return freeze({ itemId, name: this.itemName(itemId), amount });
+  }
+
+  /** A building's content numbers. See `views/hover-view.ts`. */
+  private buildingDetailsOf(entity: Entity): BuildingDetailsView {
+    const buildings = this.simulation.buildings;
+    const carry = buildings.carrySpeedFor(entity.type);
+    const inserter = buildings.inserterFor(entity.type);
+    const mining = buildings.miningFor(entity.type);
+    const production = buildings.productionFor(entity.type);
+    return freeze({
+      beltTilesPerSecond: carry,
+      beltItemsPerSecond: carry === null ? null : carry * BELT_SLOTS_PER_TILE,
+      // `ticksPerItem` is at least 1 (§6 R7: the registry guarantees the
+      // denominator), so neither division can make Infinity.
+      inserterItemsPerSecond: inserter === null ? null : TPS / inserter.ticksPerItem,
+      miningItemsPerSecond: mining === null ? null : TPS / mining.ticksPerItem,
+      craftingSpeed: production?.craftingSpeed ?? null,
+      oreUnder: mining === null ? null : this.oreUnder(entity),
+    });
+  }
+
+  /**
+   * The ore a miner still covers: the kind it is mining, or before its first
+   * tick the first kind under it, in footprint order.
+   */
+  private oreUnder(entity: Entity): OreUnderView | null {
+    const miner = asMiner(entity);
+    const definition = this.simulation.buildings.forEntityType(entity.type);
+    const world = this.simulation.world;
+    let type = miner?.resourceType ?? ResourceType.None;
+    if (type === ResourceType.None) {
+      forEachFootprintTile(entity.x, entity.y, definition.size, entity.rotation, (x, y) => {
+        if (type === ResourceType.None && world.getResourceAmount(x, y) > 0) type = world.getResource(x, y);
+      });
+    }
+    if (type === ResourceType.None) return null;
+    let remaining = 0;
+    let tiles = 0;
+    forEachFootprintTile(entity.x, entity.y, definition.size, entity.rotation, (x, y) => {
+      if (world.getResource(x, y) !== type) return;
+      const amount = world.getResourceAmount(x, y);
+      remaining += amount;
+      if (amount > 0) tiles += 1;
+    });
+    const itemId = resourceItemId(type);
+    if (itemId === null) return null;
+    return freeze({ itemId, name: this.itemName(itemId), remaining, tiles });
+  }
+
+  /** An item's name by its string id, or the id for one the table lacks. */
+  private itemName(itemId: string): string {
+    return this.simulation.items.has(itemId) ? this.simulation.items.get(itemId).name : itemId;
   }
 
   /* ---------------------------------------------------------------- *

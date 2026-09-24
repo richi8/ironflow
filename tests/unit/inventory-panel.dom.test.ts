@@ -290,13 +290,14 @@ describe('crafting by hand', () => {
   it('greys out what the bag cannot pay for, and names the short line', () => {
     harness.ui.toggleInventory();
     const button = craftButton(harness.root, 'make_gear');
-    expect(button.disabled).toBe(true);
+    // `aria-disabled`, not `disabled`, so the tooltip still opens (C32).
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.querySelector('.if-craft__parts')?.textContent).toBe('0/2 Iron Plate');
 
     give(harness.simulation, 'iron_plate', 5);
     settle(harness);
 
-    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('false');
     expect(button.querySelector('.if-craft__parts')?.textContent).toBe('5/2 Iron Plate');
   });
 

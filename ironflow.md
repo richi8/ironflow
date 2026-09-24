@@ -5,10 +5,10 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C31 complete — the quest guide, and a game that starts empty-handed.** A new game starts with an empty bag and an empty hotbar: no starting kit. Every crafting recipe can now be made by hand. Smelting still needs a furnace, and the furnace is crafted from 10 stone, which the player can mine by hand. C30's five-line first-run list is now a chain of 37 steps, from the first iron ore mined to a running Assembler Mk2. Together the steps use every building and every technology. The guide shows one step at a time with a hint, and ticks any step the world already satisfies, in any order. It can be skipped a step at a time or hidden. Progress belongs to the world and is saved in its metadata (save schema v6). Measured by the bot in `first-factory.test.ts`, the first automated plate now takes 6.5 minutes and the first self-built building 9.4, against C20's 10- and 25-minute budgets. Open: no first-time player has been watched following the guide. Next: nothing is scheduled. |
+| **Status** | **C32 complete — tooltips, and items as pictures.** Resting the pointer on the world describes what is under it: the ore left in a tile, a belt's speed and throughput, an inserter's rate, a miner's mining speed, the ore left under it and how long that lasts, a machine's status, recipe, progress, power and contents. Every item in a panel is now its sprite, baked from the renderer's atlas: the bag, chests, the hotbar, machine slots, the craft queue. The hand-craft grid and a machine's recipe picker are grids of pictures, and each one's tooltip gives its bill against the bag, the time and the rate, with a short ingredient in red. One pooled tooltip box serves every panel and the world. Open: the recipe picker has been checked in DOM tests but not yet looked at in a running game, and no first-time player has followed C31's guide. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
-| **First action** | None scheduled. Part II ends at C31. The open item is a first-time playtest of C31's quest guide from an empty bag. |
+| **First action** | None scheduled. Part II ends at C32. The open items are a look at an assembler's recipe picker in the running game, and C31's first-time playtest. |
 
 ---
 
@@ -22,7 +22,7 @@ Part I   — Contracts        Read once, fully, before writing any code.
                             not a style choice.
 
 Part II  — Build chunks     Read one chunk at a time, immediately before
-                            implementing it. C00 -> C31, in order.
+                            implementing it. C00 -> C32, in order.
 
 Part III — Reference        Consult on demand: balance numbers, performance
                             budgets, determinism hazards, risks, done-criteria.
@@ -264,6 +264,7 @@ src/
     sprite-painter.ts          # every drawing, by code (C29)
     image-atlas.ts             # baked sheets + JSON descriptor (C29)
     entity-index.ts            # which entities are near the screen (C29)
+    item-icons.ts              # item pictures for the UI, baked from sprites (C32)
     palette.ts                 # TS mirror of styles/tokens.css (§11)
     layers/                    # terrain, entities, overlays, ghost
     render-state.ts
@@ -280,6 +281,8 @@ src/
     research-panel.ts  save-menu.ts  notifications.ts  toolbar.ts
     settings-panel.ts  objectives.ts   # C30
     keyboard.ts                        # C30: Enter/Space on role=button, grid arrows
+    tooltip.ts  tooltip-content.ts     # C32: the one tooltip box, and what it says
+    item-icon.ts  status-text.ts       # C32: an item as a picture; shared status words
 
   audio/
     audio-engine.ts            # C30: synthesised sounds, a hard source cap
@@ -1157,6 +1160,15 @@ The reference sheet defines eight: **resource, building, power, research,
 inventory, alert, map, pause**. Draw them as inline SVG in `ui/`, one file, with
 `currentColor`. No icon font, no sprite sheet for UI.
 
+**Item pictures are not HUD icons (C32).** An item in a panel is drawn as its
+sprite: `renderer/item-icons.ts` paints it from the atlas onto a canvas and the
+UI shows the result as an `<img>` (a data URL). This is the one `<img>` in the
+UI, and it is not a sprite sheet: each item is baked on first request, from
+the same painter the belts use, so a bag's iron plate is the belt's. §4 still
+holds: the composition root hands the UI a function from item id to URL
+(`ItemIconSource`). Without a 2D context the icon is two letters on the
+item's colour token. The eight above stay inline SVG.
+
 ---
 
 ## §12 Performance budgets
@@ -1218,6 +1230,7 @@ GameUI
  +-- SettingsPanel sound, UI scale, motion, key bindings        (C30)
  +-- Objectives    the quest guide, top right, non-modal   (C30, C31)
  +-- Notifications  transient toasts, including command rejections
+ +-- Tooltip       one box for every panel's items and for the world  (C32)
 ```
 
 **C30 changed three things every panel shares** (see C30's decisions):
@@ -1406,6 +1419,14 @@ to arrange. What each change means:
   again on request (2026-09-23): a bound key's default is prevented, and Tab
   is how a keyboard user moves focus between the panels' buttons.
 
+- **Tooltips replace `title`, and items are pictures** *(C32, on request, as
+  in Factorio)*. See C32. Every item cell, hotbar slot, craft button and
+  recipe button attaches a provider to one shared `Tooltip`; the words the
+  picture replaced stay in the DOM as `if-sr-only` text and `aria-label`, so a
+  screen reader loses nothing. An unaffordable craft is `aria-disabled`, not
+  `disabled`, because a disabled button gets no pointer events and that craft
+  is exactly the one whose tooltip says what is short.
+
 ### Rules
 
 - **Build the DOM once.** Create elements in a `mount()`, keep references, and
@@ -1531,7 +1552,10 @@ Two things about it are its own:
   lost the context — or a headless test — gets a blank panel that still turns a
   click into the right tile. Drawing nothing is a blank map; forgetting the
   placement would be a map the player cannot use.
-- **It is the one panel that keeps a lane while paused.** Everything it draws
+- **It is the one panel that keeps a lane while paused.** *(C32 adds a
+  second: the world tooltip, for the same reason — the pointer is a view
+  control. It rebuilds when the hover target changes and otherwise at 10 Hz,
+  paused or not.)* Everything it draws
   is simulation state and cannot move while nothing ticks — except the outline
   showing where the camera is looking, and the camera is a *view* control that
   keeps working while paused (C07: "a paused game is one the player can still
@@ -7603,6 +7627,151 @@ show a strip of unexplored ground at the screen's rim, which is the reveal
 radius's balance question rather than this bug.
 
 ---
+
+## C32 — Tooltips, and items as pictures
+
+**Goal.** Resting the pointer on something tells the player what it is and
+how it is doing, as in Factorio. Every item in a panel is a picture, and
+what it is and what it costs is said by a tooltip.
+
+**Depends on.** C12 (the inspector's view), C16 (the recipe picker), C21A
+(hand-crafting), C29 (the sprite painter), C30 (keyboard and screen reader
+access).
+
+**Deliverables.**
+
+```text
+src/game/views/hover-view.ts       HoverView: the building (a MachineView),
+                                   its content numbers, the ore in the tile
+src/game/game-controller.ts        getHoverView, getHoverKey; Cursor.hoverEntity;
+                                   CraftOptionView/CraftQueueView.productId
+src/renderer/item-icons.ts         an item's picture, baked from its sprite
+src/ui/tooltip.ts                  the one tooltip box, pooled
+src/ui/tooltip-content.ts          what each tooltip says
+src/ui/item-icon.ts                an item as a picture, or two letters
+src/ui/status-text.ts              status words, moved out of the inspector
+src/ui/inventory.ts, inspector.ts, toolbar.ts, ui.ts, styles/main.css
+src/main.ts                        itemIcons for GameUI
+tests/unit/hover-view.test.ts      new
+tests/unit/tooltip.dom.test.ts     new
+tests/unit/item-icons.test.ts      new
+```
+
+**Tasks.**
+
+1. A hover readout over the world: ore left in a tile; a belt's speed; a
+   miner's ore left under it; a machine's recipe; "and so on".
+2. The recipe choices (hand-craft grid, machine picker) are icons. Hovering
+   one shows what it needs.
+3. Items in the bag, chests and so on are icons.
+
+**Decisions.**
+
+- **The readout reads the inspector's view.** `HoverView.building` is the
+  same `MachineView` the inspector gets, so the two cannot disagree about a
+  status. Beside it are the content numbers the inspector never showed:
+  belt tiles/s and items/s (§9's four per tile), inserter and miner items/s,
+  crafting speed, and a miner's ore. The ore is summed over the footprint for
+  the kind the miner is on, with the tile count and "lasts at full speed".
+  Everything is derived (§10) and nothing is generated to answer: the tile
+  is read with `peekChunk`. A `hoverEntity` joined `Cursor`, optional, so
+  cursors written before C32 still fit. `InputManager` already had it.
+- **What the readout shows, by kind.** A status line only for a building
+  that can stall. A belt, a pole or a chest is idle by nature, and "Nothing
+  to do" under each would be noise. Progress only once it is above zero.
+  Contents are summed per item across buffers and a chest's grid. Ore under
+  a building that does not mine it (a belt across a patch) gets one line.
+  Tooltip text is UI (§6 lists it as non-deterministic), so the view carries
+  numbers and names, and `tooltip-content.ts` writes the sentences.
+- **One box, built once.** `Tooltip` pools five sections of eight rows in
+  `mount()` and repaints by assignment (§13); a test with a
+  `MutationObserver` holds it to that. Panels *attach* a provider to an
+  element, and the box asks it on `pointerenter` and `focus` (so the keyboard
+  gets tooltips too) and again on the 10 Hz lane, so a count moves under a
+  resting pointer. An element's tooltip wins over the world's. One whose
+  panel closes is dropped on the next frame, paused or not.
+- **The world readout follows the pointer.** `GameUI` tracks the pointer on
+  `window` and shows the readout only over the world canvas (not the map's),
+  with no button down, no building held (the ghost is what the player reads
+  then), and no menu open. It rebuilds at once when the hover target changes
+  (`getHoverKey` is one string, cheap per frame) and otherwise at 10 Hz. It
+  runs while paused, for the map outline's reason (§13).
+- **Pictures come from the atlas.** `renderer/item-icons.ts` paints a
+  building's item as the building (§15: same id) and anything else as it
+  rides a belt. It measures the painted pixels on a scratch canvas and scales
+  that box into a 64 px icon (§11: author at 2x; shown at 32). Measuring
+  rather than computing the frame means the geometry is not repeated here.
+  Each is baked on first request and kept. The UI gets a function from item
+  id to URL, since §4 keeps it out of `renderer/`. With no 2D context (the
+  DOM tests) an icon is two letters on the item's §11 token.
+- **Words stay for screen readers.** A cell's name, a craft's bill and a
+  recipe's rate are kept in the DOM as `if-sr-only` text, and cells and slots
+  carry an `aria-label`. C30's access work is not undone by removing words
+  from the screen. `title` attributes on these elements are gone, since the
+  browser's own tooltip would stack under ours.
+- **An unaffordable craft is `aria-disabled`.** A `disabled` button gets no
+  pointer events, and the craft you cannot afford is the one whose tooltip
+  has to say which ingredient is short (in red). The click handler ignores it.
+- **A machine slot with an item is its picture.** Beside PUT and TAKE there
+  was no room for both an icon and a name: "Iron Ore" was cut to "I". A
+  filled slot shows the icon and a tooltip; an empty slot keeps its word
+  ("Fuel"), since it has no picture yet.
+- **Layout.** Bag and chest cells: the icon with the count over its corner.
+  Hotbar: 52 px square slots, key top left, count bottom right. Hand-craft
+  grid: six squares a row, with the yield ("2") on the corner. Recipe picker:
+  five squares a row, the selected one lit. The tooltip goes right of an
+  element, left if there is no room, and above one on the bottom edge (the
+  hotbar), so it does not cover the neighbouring slots. It corrects for C30's
+  UI scale, which is `zoom` on the layer.
+
+**Deviations.**
+
+- **§11's "no sprite sheet for UI" gets an exception**, recorded there: item
+  pictures are `<img>` data URLs baked from the sprite painter. The eight HUD
+  icons stay inline SVG, and the §11 test now allows an `<img>` only inside
+  `.if-item-icon`.
+- **§13's hotbar and bag `title` text moved into tooltips**, recorded there.
+  The locked-building line ("research Logistics 1") is now the tooltip's
+  status and the slot's `aria-label`.
+- **The inspector's status words moved to `ui/status-text.ts`**, unchanged,
+  so the tooltip shares them rather than copying them.
+
+**Acceptance, as verified.**
+
+```text
+ore left in a tile; a belt's speed;        hover-view.test.ts (sim);
+a miner's ore left under it, going down;   tooltip.dom.test.ts (world readout);
+an inserter's rate; a machine's recipe     headless Chrome on the v6 fixture:
+                                           Miner (288 left, 4 tiles, 10 min),
+                                           Transport Belt (2 tiles/s, 8 items/s),
+                                           Iron Ore (95 left), Furnace (recipe,
+                                           contents), Inserter (1 items/s)
+nothing generated to answer                hover-view.test.ts
+readout while paused; not over the UI,     tooltip.dom.test.ts
+not with a building held; live refresh
+items are pictures in bag, chest,          tooltip.dom.test.ts; headless Chrome
+hotbar, slots, queue
+hand-craft and recipe picker are icons,    tooltip.dom.test.ts (both);
+tooltip lists the bill, short line red     headless Chrome (hand-craft)
+the box creates nothing when shown         tooltip.dom.test.ts (MutationObserver)
+icon framing, a real sprite per building   item-icons.test.ts
+no console errors                          headless Chrome: none from C32 (one
+                                           willReadFrequently warning found
+                                           and fixed; the AudioContext autoplay
+                                           warnings are C30's, headless only)
+```
+
+**Noticed, not fixed.**
+
+- **At 1280 px wide a chest's panel and the bag overlap.** The chest panel is
+  392 px wide at `left: 12px` and the bag opens 390 px left of centre, which
+  only clears at about 1600 px. This was already true before C32.
+- **The recipe picker has not been looked at in a running game.** The v6
+  fixture has no assembler. The DOM tests cover its buttons and tooltip.
+- **"RATE 0.0 /min" on a freshly selected machine** is C12's rolling window
+  starting empty, not something C32 changed.
+
+---
 ---
 
 # PART III — REFERENCE
@@ -8422,6 +8591,7 @@ Recommended next chunk
 | After C29 | Every §12 budget is met on the reference factory. **Passed**, in headless Chromium at 1920x1080. Render 1.7 ms, 60 fps, 5,000 entities on screen at max zoom-out in 3.2 ms, tick 2.5 ms, load 155 ms, serialize 114 ms, 0.19 MB save, worldgen 199 ms, cold start under 70 ms. The longest frame interval is 20-26 ms, which is under the 50 ms hard fail and was not chased (see C29). |
 | After C30 | v1 is feature-complete: every C30 acceptance line verified. **Passed, with one open line** — the first-run objectives lead to the first automated plate, but no first-time player has yet been watched following them (see C30). |
 | After C31 | A new game starts empty-handed and the quest guide reaches every building and technology. **Passed, with the same open line** — a bot opens from an empty bag to the first automated plate in 6.5 minutes on four seeds, but no first-time player has yet followed the guide (see C31). |
+| After C32 | Hovering the world or an item explains it, and every item in a panel is its picture. **Passed** in DOM tests and headless Chrome, with the recipe picker checked only in DOM tests (see C32). |
 
 ---
 
