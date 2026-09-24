@@ -76,6 +76,12 @@ export interface CraftOptionView {
   /** Ticks one craft takes **by hand** — the recipe at `HAND_CRAFTING_SPEED`. */
   readonly craftTicks: number;
   /**
+   * Ticks one craft takes by hand from raw materials: this craft and every
+   * part under it, with none of the parts in the bag (2026-09-24, Factorio's
+   * "total raw"). Equal to `craftTicks` for a recipe made of raw material only.
+   */
+  readonly rawCraftTicks: number;
+  /**
    * How many the bag could pay for right now, capped at what one command may
    * ask for — counting what the bag could make of its missing parts first
    * (2026-09-24). Zero means the button is dead, and `inputs` says which line

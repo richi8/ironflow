@@ -98,6 +98,51 @@ export function maxCraftable(ctx: CraftPlanContext, recipe: Recipe, limit: numbe
   return low;
 }
 
+/**
+ * Ticks one craft of `recipe` takes by hand **from raw materials**: the craft
+ * itself and every part under it, as if the bag held none of the parts and
+ * all of the raw material (2026-09-24, Factorio's "total raw"). The chain is
+ * the one `planCraft` would queue, whole crafts and spares included, so it is
+ * how long the player would actually wait. `CANNOT_CRAFT` when there is none.
+ */
+export function rawCraftTicks(ctx: Omit<CraftPlanContext, 'held'>, recipe: Recipe): number {
+  const plan = planCraft(
+    // A part is something a recipe here makes; anything else is raw, and plenty.
+    { ...ctx, held: (itemId) => (firstProducer(ctx, itemId, []) === null ? Number.MAX_SAFE_INTEGER : 0) },
+    recipe,
+    1,
+  );
+  if (plan === null) return CANNOT_CRAFT;
+  let total = 0;
+  for (const step of plan.steps) {
+    const ticks = ctx.durations.handTicksFor(step.recipe);
+    if (ticks === CANNOT_CRAFT) return CANNOT_CRAFT;
+    total += ticks * step.count;
+  }
+  return total;
+}
+
+/**
+ * The first hand-craftable, unlocked recipe, in content order, whose one
+ * product is this item and which is not in `skip` — or null. Only
+ * single-product recipes qualify: every crafting recipe has one, and `feeds`
+ * counts a single product.
+ */
+function firstProducer(
+  ctx: Omit<CraftPlanContext, 'held'>,
+  itemId: ItemId,
+  skip: readonly RecipeId[],
+): Recipe | null {
+  for (const recipe of ctx.recipes.handCraftable()) {
+    if (recipe.outputs.length !== 1 || recipe.outputs[0]?.itemId !== itemId) continue;
+    if (skip.includes(recipe.recipeId)) continue;
+    if (!ctx.unlocks.isRecipeUnlocked(recipe.recipeId)) continue;
+    if (ctx.durations.handTicksFor(recipe.recipeId) === CANNOT_CRAFT) continue;
+    return recipe;
+  }
+  return null;
+}
+
 /** Products a step made beyond what it owes, which a later step may draw on. */
 interface Spare {
   readonly itemId: ItemId;
@@ -185,19 +230,8 @@ class Planner {
     return true;
   }
 
-  /**
-   * The first hand-craftable, unlocked recipe, in content order, whose one
-   * product is this item — or null. Only single-product recipes qualify: every
-   * crafting recipe has one, and `feeds` counts a single product.
-   */
+  /** What makes an item, skipping recipes already being expanded (see `firstProducer`). */
   private producerOf(itemId: ItemId): Recipe | null {
-    for (const recipe of this.ctx.recipes.handCraftable()) {
-      if (recipe.outputs.length !== 1 || recipe.outputs[0]?.itemId !== itemId) continue;
-      if (this.expanding.includes(recipe.recipeId)) continue;
-      if (!this.ctx.unlocks.isRecipeUnlocked(recipe.recipeId)) continue;
-      if (this.ctx.durations.handTicksFor(recipe.recipeId) === CANNOT_CRAFT) continue;
-      return recipe;
-    }
-    return null;
+    return firstProducer(this.ctx, itemId, this.expanding);
   }
 }

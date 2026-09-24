@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ITEMS } from '../../src/game/data/items.js';
 import { RECIPES } from '../../src/game/data/recipes.js';
+import { rawCraftTicks } from '../../src/game/systems/craft-planner.js';
 import { HAND_CRAFTING_SPEED } from '../../src/game/registries/craft-durations.js';
 import { ItemRegistry } from '../../src/game/registries/item-registry.js';
 import { RecipeRegistry } from '../../src/game/registries/recipe-registry.js';
@@ -404,6 +405,20 @@ describe('a craft whose parts are missing is queued as a chain', () => {
     // 8 plates for gears, 2 for circuits, 4 for the miner; 3 copper.
     expect(held(simulation, 'iron_plate')).toBe(26);
     expect(held(simulation, 'copper_plate')).toBe(7);
+  });
+
+  it('times the whole chain from raw material, as the queue will run it', () => {
+    const simulation = newGame();
+    const content = { recipes: simulation.recipes, durations: simulation.crafts, unlocks: simulation.unlocks };
+    const recipe = (id: string) => simulation.recipes.get(id);
+
+    give(simulation, 'iron_plate', 40);
+    give(simulation, 'copper_plate', 10);
+    craft(simulation, 'make_miner');
+    expect(rawCraftTicks(content, recipe('make_miner'))).toBe(queueTicks(simulation));
+
+    // Made of raw material only, it is the craft's own time.
+    expect(rawCraftTicks(content, recipe('make_gear'))).toBe(simulation.crafts.handTicksFor(recipe('make_gear').recipeId));
   });
 
   it('delivers only what was asked for, the parts going straight into it', () => {

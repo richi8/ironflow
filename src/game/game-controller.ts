@@ -51,7 +51,7 @@ import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { CANNOT_CRAFT } from './registries/craft-durations.js';
-import { maxCraftable } from './systems/craft-planner.js';
+import { maxCraftable, rawCraftTicks } from './systems/craft-planner.js';
 import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-registry.js';
 import type { Simulation } from './simulation.js';
 import { NO_TECHNOLOGY, type Technology, type Unlock } from './registries/technology-registry.js';
@@ -679,19 +679,12 @@ export class GameController {
     // button and the command cannot disagree. Only asked when the bag alone
     // falls short of a full batch, which keeps the common case one division.
     const { simulation } = this;
+    const content = { recipes: simulation.recipes, durations: simulation.crafts, unlocks: simulation.unlocks };
     const craftable =
       direct >= MAX_CRAFT_BATCH
         ? direct
-        : maxCraftable(
-            {
-              recipes: simulation.recipes,
-              durations: simulation.crafts,
-              unlocks: simulation.unlocks,
-              held: (itemId) => bag.count(itemId),
-            },
-            recipe,
-            MAX_CRAFT_BATCH,
-          );
+        : maxCraftable({ ...content, held: (itemId) => bag.count(itemId) }, recipe, MAX_CRAFT_BATCH);
+    const craftTicks = simulation.crafts.handTicksFor(recipe.recipeId);
 
     const first = recipe.outputs[0];
     const product = first === undefined ? null : this.partView(first.itemId, first.count);
@@ -701,7 +694,8 @@ export class GameController {
       yield: first?.count ?? 1,
       productId: product?.itemId ?? recipe.id,
       inputs: freeze(inputs),
-      craftTicks: this.simulation.crafts.handTicksFor(recipe.recipeId),
+      craftTicks,
+      rawCraftTicks: craftTicks === CANNOT_CRAFT ? CANNOT_CRAFT : rawCraftTicks(content, recipe),
       craftable,
       chained: craftable > direct,
       unlocked: this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId),

@@ -83,8 +83,12 @@ export function craftContent(option: CraftOptionView): TooltipContent {
   }));
   const facts: TooltipRow[] = [
     { label: 'Time by hand', value: formatSeconds(option.craftTicks) },
-    { label: 'You could make', value: formatCount(option.craftable) },
   ];
+  // Only when parts are made under it: otherwise it is the line above again.
+  if (option.rawCraftTicks > option.craftTicks) {
+    facts.push({ label: 'Total from raw', value: formatSeconds(option.rawCraftTicks) });
+  }
+  facts.push({ label: 'You could make', value: formatCount(option.craftable) });
   return {
     title: option.yield === 1 ? option.name : `${option.yield} × ${option.name}`,
     itemId: option.productId,

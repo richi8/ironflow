@@ -5449,6 +5449,13 @@ make every existing cross-reference in this document wrong.
   `craftable` counts through the same planner (`maxCraftable`), a short
   ingredient is no longer red when a chain covers it, and a queued part's row
   says what it is for.
+- **A hand-craft's tooltip gives its total time from raw material**
+  *(2026-09-24, on request, as Factorio's "total raw")*. `rawCraftTicks` runs
+  the same planner against a bag that holds none of the parts and plenty of
+  everything no recipe here makes, and sums the chain's hand times, whole
+  crafts and spares included. So it is how long the chain queued from plates
+  alone takes. The row, "Total from raw", appears only when it is longer than
+  "Time by hand", i.e. when parts are made under the craft.
 - **The panel takes the middle of the screen and closes the build menu.** It
   is the one panel the player stops to read, the two want the same space, and
   they answer the same question from opposite ends — "what can I build" and
