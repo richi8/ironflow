@@ -791,7 +791,7 @@ body {
   height: 100%;
 }
 
-/* A recipe that makes more than one says how many over its corner. */
+/* A craft's corner says how many the bag could make; a machine recipe's, how many it yields. */
 .if-craft__yield,
 .if-recipe__yield {
   position: absolute;

@@ -650,7 +650,13 @@ export class GameController {
     // would be answering a different question than the panel asks. The
     // research panel is where a lock is explained. Hidden by the panel, not
     // left out here: see `CraftOptionView.unlocked`.
-    const crafts = this.simulation.recipes.handCraftable().map((recipe) => this.craftOptionView(recipe, bag));
+    // Every craft uses up at least one carried item, so no recipe can be made
+    // more times than the bag holds items: the bound `makeable` searches under.
+    let carried = 0;
+    for (const [, count] of bag.toJSON()) carried += count;
+    const crafts = this.simulation.recipes
+      .handCraftable()
+      .map((recipe) => this.craftOptionView(recipe, bag, carried));
 
     const queue = this.simulation.player.crafts.map((order, index) => this.craftQueueView(order, index));
 
@@ -667,7 +673,7 @@ export class GameController {
   }
 
   /** One row of the craft grid: a recipe, its bill, and how many are payable. */
-  private craftOptionView(recipe: Recipe, bag: Inventory): CraftOptionView {
+  private craftOptionView(recipe: Recipe, bag: Inventory, carried: number): CraftOptionView {
     let direct = MAX_CRAFT_BATCH;
     const inputs: CraftPartView[] = recipe.inputs.map((stack) => {
       const held = bag.count(stack.itemId);
@@ -680,10 +686,11 @@ export class GameController {
     // falls short of a full batch, which keeps the common case one division.
     const { simulation } = this;
     const content = { recipes: simulation.recipes, durations: simulation.crafts, unlocks: simulation.unlocks };
-    const craftable =
-      direct >= MAX_CRAFT_BATCH
-        ? direct
-        : maxCraftable({ ...content, held: (itemId) => bag.count(itemId) }, recipe, MAX_CRAFT_BATCH);
+    const planning = { ...content, held: (itemId: ItemId) => bag.count(itemId) };
+    const craftable = direct >= MAX_CRAFT_BATCH ? direct : maxCraftable(planning, recipe, MAX_CRAFT_BATCH);
+    // Uncapped, for the button's corner: the batch cap is how much one click
+    // may ask for, not how much the bag could make.
+    const crafts = craftable < MAX_CRAFT_BATCH ? craftable : maxCraftable(planning, recipe, carried);
     const craftTicks = simulation.crafts.handTicksFor(recipe.recipeId);
 
     const first = recipe.outputs[0];
@@ -697,6 +704,7 @@ export class GameController {
       craftTicks,
       rawCraftTicks: craftTicks === CANNOT_CRAFT ? CANNOT_CRAFT : rawCraftTicks(content, recipe),
       craftable,
+      makeable: crafts * (first?.count ?? 1),
       chained: craftable > direct,
       unlocked: this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId),
     });

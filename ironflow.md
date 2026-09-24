@@ -5456,6 +5456,14 @@ make every existing cross-reference in this document wrong.
   crafts and spares included. So it is how long the chain queued from plates
   alone takes. The row, "Total from raw", appears only when it is longer than
   "Time by hand", i.e. when parts are made under the craft.
+- **A hand-craft button's corner says how many the bag could make**
+  *(2026-09-24, on request)*, in place of the recipe's yield. It is
+  `CraftOptionView.makeable`: the most crafts the chain planner can pay for,
+  parts made from the raw material carried, times the yield, so two belts a
+  craft count as two. It is not capped at `MAX_CRAFT_BATCH`, which bounds one
+  click rather than the bag; the search is bounded by the number of items
+  carried, since every craft uses at least one. Blank at zero, where the
+  button is already greyed. The tooltip's "You could make" is the same number.
 - **The panel takes the middle of the screen and closes the build menu.** It
   is the one panel the player stops to read, the two want the same space, and
   they answer the same question from opposite ends — "what can I build" and

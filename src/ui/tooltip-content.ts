@@ -88,7 +88,7 @@ export function craftContent(option: CraftOptionView): TooltipContent {
   if (option.rawCraftTicks > option.craftTicks) {
     facts.push({ label: 'Total from raw', value: formatSeconds(option.rawCraftTicks) });
   }
-  facts.push({ label: 'You could make', value: formatCount(option.craftable) });
+  facts.push({ label: 'You could make', value: formatCount(option.makeable) });
   return {
     title: option.yield === 1 ? option.name : `${option.yield} × ${option.name}`,
     itemId: option.productId,

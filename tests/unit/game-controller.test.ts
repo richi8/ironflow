@@ -367,14 +367,26 @@ describe('GameController build tool', () => {
     const controller = new GameController({ game });
 
     const option = (id: string) => controller.getInventoryView().crafts.find((craft) => craft.id === id);
-    expect(option('make_miner')).toMatchObject({ craftable: 2, chained: true });
+    expect(option('make_miner')).toMatchObject({ craftable: 2, makeable: 2, chained: true });
     // Directly affordable is not a chain.
-    expect(option('make_gear')).toMatchObject({ craftable: 15, chained: false });
+    expect(option('make_gear')).toMatchObject({ craftable: 15, makeable: 15, chained: false });
 
     controller.craftItem('make_miner');
     simulation.tick();
     const queue = controller.getInventoryView().queue;
     expect(queue.map((order) => order.forChain)).toEqual([true, true, true, false]);
+  });
+
+  it('counts what the bag could make past one batch, in items rather than crafts', () => {
+    const { game, simulation } = makeGame();
+    simulation.player.inventory.add(simulation.items.idOf('iron_plate'), 1000);
+    const controller = new GameController({ game });
+
+    const option = (id: string) => controller.getInventoryView().crafts.find((craft) => craft.id === id);
+    // One click may ask for 100; the bag could make 500.
+    expect(option('make_gear')).toMatchObject({ craftable: 100, makeable: 500 });
+    // A belt is a gear and a plate, three plates a craft, and one craft makes two.
+    expect(option('make_belt')?.makeable).toBe(333 * 2);
   });
 
   it('reads the cursor live, so a rotation pressed elsewhere shows up at once', () => {

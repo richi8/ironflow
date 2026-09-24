@@ -89,6 +89,12 @@ export interface CraftOptionView {
    */
   readonly craftable: number;
   /**
+   * How many of the product the bag could make, parts and all, with no cap:
+   * the most crafts a chain could pay for, times `yield` (2026-09-24). What
+   * the button's corner and the tooltip show.
+   */
+  readonly makeable: number;
+  /**
    * Some of `craftable` needs its missing parts crafted first: a click queues
    * them ahead of it. An ingredient held short is then not a problem.
    */

@@ -453,7 +453,7 @@ export class InventoryPanel {
 
     const icon = createItemIcon('if-craft__icon');
 
-    // A recipe that makes two says so on the picture, as the genre does.
+    // How many the bag could make, on the picture's corner (2026-09-24).
     const made = document.createElement('span');
     made.className = 'if-craft__yield';
 
@@ -535,7 +535,7 @@ export class InventoryPanel {
     // A locked recipe keeps its button, hidden, so research can reveal it (C31).
     if (button.root.hidden === option.unlocked) button.root.hidden = !option.unlocked;
     paintItemIcon(button.icon, option.productId, option.name, this.options.icons ?? null);
-    setText(button.yield, option.yield === 1 ? '' : String(option.yield));
+    setText(button.yield, option.makeable === 0 ? '' : String(option.makeable));
     setText(button.name, option.yield === 1 ? option.name : `${option.yield} ${option.name}`);
     setText(button.time, `${(option.craftTicks / TICKS_PER_SECOND).toFixed(1)}s`);
     setText(button.parts, option.inputs.map((part) => `${part.held}/${part.count} ${part.name}`).join('  '));
