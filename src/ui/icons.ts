@@ -33,7 +33,8 @@ export type IconName =
   | 'info'
   | 'settings'
   | 'sound'
-  | 'muted';
+  | 'muted'
+  | 'news';
 
 /**
  * One path per icon, on a 16×16 grid, `evenodd` so a hole is a hole.
@@ -86,6 +87,8 @@ const PATHS: Readonly<Record<IconName, string>> = Object.freeze({
   sound: 'M2 6h3l4-3.5v11L5 10H2Zm9 .2a2.5 2.5 0 0 1 0 3.6l1 1a4 4 0 0 0 0-5.6Z',
   /** A speaker with a cross. */
   muted: 'M2 6h3l4-3.5v11L5 10H2Zm9.2-.2 1.3 1.3 1.3-1.3.9.9L13.4 8l1.3 1.3-.9.9-1.3-1.3-1.3 1.3-.9-.9L11.6 8l-1.3-1.3Z',
+  /** A page of lines with a folded corner: WHAT'S NEW (2026-09-24). */
+  news: 'M3 1h7l3 3v11H3Zm2 5v1.5h6V6Zm0 3v1.5h6V9Zm0 3v1.5h4V12Z',
 });
 
 /** The tones §11's status colours paint. See `TONE_ICONS`. */

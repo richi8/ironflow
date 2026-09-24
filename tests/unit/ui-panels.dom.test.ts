@@ -7,6 +7,7 @@ import { Simulation } from '../../src/game/simulation.js';
 import { NORTH } from '../../src/game/world/coordinates.js';
 import { createPlaygroundGenerator } from '../fixtures/world-fixtures.js';
 import { World } from '../../src/game/world/world.js';
+import { CHANGELOG, formatChangelogDate } from '../../src/ui/changelog.js';
 import { MAX_TOASTS, Notifications, TOAST_LIFETIME_MS } from '../../src/ui/notifications.js';
 import { GameUI, HUD_HZ, LIVE_HZ } from '../../src/ui/ui.js';
 import { FakeScheduler } from '../fixtures/fake-scheduler.js';
@@ -369,6 +370,41 @@ describe('pause and Escape', () => {
     // And Escape again closes the menu.
     press();
     expect(ui.isSaveMenuOpen()).toBe(false);
+  });
+});
+
+describe("WHAT'S NEW", () => {
+  it('opens beside MENU without pausing, lists every change, and closes on Escape', () => {
+    const { root, ui, controller } = harness;
+    const button = query<HTMLButtonElement>(root, '.if-hud__news');
+    // Next to MENU, just before it.
+    expect(button.nextElementSibling?.classList.contains('if-hud__menu')).toBe(true);
+
+    ui.toggleInventory();
+    button.click();
+    expect(ui.isChangelogOpen()).toBe(true);
+    expect(ui.isInventoryOpen()).toBe(false);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(controller.isPaused()).toBe(false);
+
+    const changes = root.querySelectorAll('.if-changelog__change');
+    expect(changes.length).toBe(CHANGELOG.reduce((sum, day) => sum + day.changes.length, 0));
+    expect(query<HTMLElement>(root, '.if-changelog__date').textContent).toBe('24 September 2026');
+
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    window.dispatchEvent(escape);
+    expect(ui.isChangelogOpen()).toBe(false);
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps its days newest first, with dates a player can read', () => {
+    const dates = CHANGELOG.map((day) => day.date);
+    expect([...dates].sort().reverse()).toEqual(dates);
+    for (const day of CHANGELOG) {
+      expect(day.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(formatChangelogDate(day.date)).not.toBe(day.date);
+      expect(day.changes.length).toBeGreaterThan(0);
+    }
   });
 });
 

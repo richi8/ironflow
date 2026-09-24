@@ -2,7 +2,8 @@
  * The status bar. See ironflow.md C07 task 4, §11 and §13.
  *
  * A row of tiles across the top of the screen, each one icon plus a tabular
- * number, and the MENU button at the end. §13 asks for "resources, power,
+ * number, and the MENU button at the end, with WHAT'S NEW (the changelog,
+ * 2026-09-24) just before it. §13 asks for "resources, power,
  * research progress, tick rate, alerts"; §11 supplies the icon set and §13's
  * budget table says this panel updates at 5 Hz.
  *
@@ -48,6 +49,8 @@ interface Tile {
 export interface HudOptions {
   /** Called when the MENU button is pressed. */
   readonly onToggleMenu: () => void;
+  /** Called when the WHAT'S NEW button, beside MENU, is pressed (2026-09-24). */
+  readonly onToggleChangelog: () => void;
   /**
    * Called when the ITEMS tile is pressed (C21A).
    *
@@ -71,12 +74,15 @@ export class Hud {
   private readonly root = document.createElement('div');
   private readonly tiles = new Map<string, Tile>();
   private readonly menuButton = document.createElement('button');
+  private readonly changelogButton = document.createElement('button');
   private readonly onToggleMenu: () => void;
+  private readonly onToggleChangelog: () => void;
   private readonly onOpenInventory: () => void;
   private readonly onOpenResearch: () => void;
 
   constructor(options: HudOptions) {
     this.onToggleMenu = options.onToggleMenu;
+    this.onToggleChangelog = options.onToggleChangelog;
     this.onOpenInventory = options.onOpenInventory;
     this.onOpenResearch = options.onOpenResearch;
   }
@@ -91,6 +97,15 @@ export class Hud {
     this.addTile('power', 'power', 'POWER');
     this.addTile('alerts', 'alert', 'ALERTS');
     this.addTile('time', null, 'TIME');
+
+    this.changelogButton.type = 'button';
+    this.changelogButton.className = 'if-hud__news';
+    this.changelogButton.title = "What's new: what has been added and changed in the game";
+    const newsLabel = document.createElement('span');
+    newsLabel.textContent = "WHAT'S NEW";
+    this.changelogButton.append(createIcon('news'), newsLabel);
+    this.changelogButton.addEventListener('click', this.onToggleChangelog);
+    this.root.append(this.changelogButton);
 
     this.menuButton.type = 'button';
     this.menuButton.className = 'if-hud__menu';
@@ -135,8 +150,15 @@ export class Hud {
     this.menuButton.setAttribute('aria-pressed', String(open));
   }
 
+  /** Light the WHAT'S NEW button while its panel is up. */
+  setChangelogOpen(open: boolean): void {
+    this.changelogButton.classList.toggle('is-active', open);
+    this.changelogButton.setAttribute('aria-pressed', String(open));
+  }
+
   destroy(): void {
     this.menuButton.removeEventListener('click', this.onToggleMenu);
+    this.changelogButton.removeEventListener('click', this.onToggleChangelog);
     const items = this.tiles.get('items');
     if (items !== undefined) items.root.removeEventListener('click', this.onOpenInventory);
     const research = this.tiles.get('research');

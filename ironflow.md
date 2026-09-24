@@ -5,7 +5,7 @@ Vite + pure TypeScript + Canvas 2D + IndexedDB. No engine, no UI framework.
 
 | | |
 |---|---|
-| **Status** | **C32 complete — tooltips, and items as pictures.** Resting the pointer on the world describes what is under it: the ore left in a tile, a belt's speed and throughput, an inserter's rate, a miner's mining speed, the ore left under it and how long that lasts, a machine's status, recipe, progress, power and contents. Every item in a panel is now its sprite, baked from the renderer's atlas: the bag, chests, the hotbar, machine slots, the craft queue. The hand-craft grid and a machine's recipe picker are grids of pictures, and each one's tooltip gives its bill against the bag, the time and the rate, with a short ingredient in red. One pooled tooltip box serves every panel and the world. Open: the recipe picker has been checked in DOM tests but not yet looked at in a running game, and no first-time player has followed C31's guide. Next: nothing is scheduled. |
+| **Status** | **C32 complete — tooltips, and items as pictures.** Resting the pointer on the world describes what is under it: the ore left in a tile, a belt's speed and throughput, an inserter's rate, a miner's mining speed, the ore left under it and how long that lasts, a machine's status, recipe, progress, power and contents. Every item in a panel is now its sprite, baked from the renderer's atlas: the bag, chests, the hotbar, machine slots, the craft queue. The hand-craft grid and a machine's recipe picker are grids of pictures, and each one's tooltip gives its bill against the bag, the time and the rate, with a short ingredient in red. One pooled tooltip box serves every panel and the world. Since then, 2026-09-24: hand-crafting chains missing parts, a pick sound for hand mining, the held item as the cursor, and a player-facing **WHAT'S NEW** changelog beside MENU (§13) — every player-visible change now adds a line to it. Open: the recipe picker has been checked in DOM tests but not yet looked at in a running game, and no first-time player has followed C31's guide. Next: nothing is scheduled. |
 | **Revision** | 2 |
 | **Canonical art** | `ironflow.png` (key art / logo), `ironflow_visual_reference.png` (asset & UI reference sheet) |
 | **First action** | None scheduled. Part II ends at C32. The open items are a look at an assembler's recipe picker in the running game, and C31's first-time playtest. |
@@ -1652,6 +1652,24 @@ capacity, because §4 lets only the controller ask the item registry and because
 
 Never write to the DOM inside a simulation phase. Systems emit events; the
 controller batches them in `cleanup`; the UI consumes them at its own rate.
+
+### WHAT'S NEW — the player changelog (2026-09-24)
+
+A **WHAT'S NEW** button sits in the HUD just before MENU and opens a panel
+(`ui/changelog.ts`) listing what has been added and changed, newest day first,
+each line tagged NEW, IMPROVED or FIXED. It is written for players: what they
+can now do or will notice, in plain words, with no chunk numbers, schema
+versions or file names. The commit log stays the technical record.
+
+- **Every player-visible change adds a line to `CHANGELOG` in the same
+  commit**, under today's date (a new day goes at the top). Internal work —
+  tests, refactors, performance with no visible effect — gets none.
+- The list starts on 2026-09-24; nothing earlier is back-filled.
+- It is one of the exclusive centre panels (`closeOthers`, Escape closes it),
+  and like the map it does **not** pause the game. Its DOM is built once in
+  `mount()` from constant data and never repainted.
+- No "unread" marker yet: that would need a remembered last-seen date in the
+  preferences, which is a small follow-up if wanted.
 
 ---
 

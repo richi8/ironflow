@@ -214,7 +214,8 @@ body {
   text-align: right;
 }
 
-.if-hud__menu {
+.if-hud__menu,
+.if-hud__news {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -230,12 +231,18 @@ body {
   cursor: pointer;
 }
 
-.if-hud__menu:hover {
+.if-hud__news + .if-hud__menu {
+  margin-left: 8px;
+}
+
+.if-hud__menu:hover,
+.if-hud__news:hover {
   border-color: var(--if-accent);
   color: var(--if-text);
 }
 
-.if-hud__menu[aria-pressed='true'] {
+.if-hud__menu[aria-pressed='true'],
+.if-hud__news[aria-pressed='true'] {
   border-color: var(--if-accent);
   background: var(--if-accent-dim);
   color: var(--if-text);
@@ -1759,6 +1766,84 @@ body {
 .if-menu__action {
   padding: 10px;
   text-align: center;
+}
+
+/* -------------------------------------------------------------------------- *
+ * WHAT'S NEW (2026-09-24): the changelog, a scrolling list of days
+ * -------------------------------------------------------------------------- */
+
+.if-changelog {
+  position: fixed;
+  top: 56px;
+  bottom: 76px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid var(--if-stroke);
+  border-radius: var(--if-radius);
+  background: color-mix(in srgb, var(--if-panel) 96%, transparent);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+
+.if-changelog .if-inspector__close {
+  margin-left: auto;
+}
+
+.if-changelog__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.if-changelog__date {
+  margin: 4px 0 8px;
+  color: var(--if-text-muted);
+  font-size: 14px;
+  font-weight: normal;
+  letter-spacing: 0.08em;
+}
+
+.if-changelog__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.if-changelog__change {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  color: var(--if-text);
+  line-height: 1.45;
+}
+
+.if-changelog__tag {
+  padding: 1px 0;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.if-changelog__tag.is-new {
+  color: var(--if-ok);
+}
+
+.if-changelog__tag.is-improved {
+  color: var(--if-blue-high);
+}
+
+.if-changelog__tag.is-fixed {
+  color: var(--if-warn);
 }
 
 /* -------------------------------------------------------------------------- *

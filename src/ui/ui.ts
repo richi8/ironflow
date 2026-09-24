@@ -86,6 +86,7 @@
 import type { GameController } from '../game/game-controller.js';
 import type { MapPoint } from '../game/views/map-view.js';
 
+import { ChangelogPanel } from './changelog.js';
 import { GameMenu } from './game-menu.js';
 import { Hud } from './hud.js';
 import { Inspector } from './inspector.js';
@@ -103,10 +104,10 @@ import { Tooltip } from './tooltip.js';
 import { hoverContent } from './tooltip-content.js';
 
 /** The panels that open in the middle of the screen, one at a time. */
-type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings' | 'menu';
+type PanelName = 'inventory' | 'research' | 'map' | 'saves' | 'settings' | 'menu' | 'changelog';
 
 /** Their roots, for focus (C30). */
-const PANEL_SELECTOR = '.if-inventory, .if-research, .if-map, .if-saves, .if-settings, .if-menu';
+const PANEL_SELECTOR = '.if-inventory, .if-research, .if-map, .if-saves, .if-settings, .if-menu, .if-changelog';
 
 /** §13's HUD rate: counters, power, research. */
 export const HUD_HZ = 5;
@@ -240,6 +241,8 @@ export class GameUI {
   private readonly settings: SettingsPanel | null;
   /** The menu. Only with settings: without them, the save menu is the menu. */
   private readonly menu: GameMenu | null;
+  /** WHAT'S NEW (2026-09-24). Does not pause: see `changelog.ts`. */
+  private readonly changelog: ChangelogPanel;
   private readonly objectivesBridge: ObjectivesBridge | null;
   private readonly objectives: ObjectivesPanel;
   private objectivesVisible: boolean;
@@ -324,8 +327,11 @@ export class GameUI {
             onClose: () => this.toggleMenu(),
           });
 
+    this.changelog = new ChangelogPanel({ onClose: () => this.toggleChangelog() });
+
     this.hud = new Hud({
       onToggleMenu: () => this.toggleMenu(),
+      onToggleChangelog: () => this.toggleChangelog(),
       // C22. The RESEARCH tile has shown a dash since C07 with nothing behind
       // it; making it the way in is why the panel is findable without reading
       // a keybinding list — the same argument the ITEMS tile makes.
@@ -439,6 +445,7 @@ export class GameUI {
     this.map.mount(this.root);
     this.saveMenu.mount(this.root);
     this.menu?.mount(this.root);
+    this.changelog.mount(this.root);
     if (this.settings !== null && this.settingsBridge !== null) {
       this.settings.mount(this.root, this.settingsBridge.view());
     }
@@ -611,7 +618,8 @@ export class GameUI {
       this.research.isOpen() ||
       this.map.isOpen() ||
       this.settings?.isOpen() === true ||
-      this.menu?.isOpen() === true;
+      this.menu?.isOpen() === true ||
+      this.changelog.isOpen();
     this.closeOthers(null);
     return open;
   }
@@ -636,6 +644,18 @@ export class GameUI {
     const open = this.setSettingsOpen(!this.settings.isOpen());
     if (open) this.closeOthers('settings');
     return open;
+  }
+
+  /** Open or close WHAT'S NEW. Returns the new state (2026-09-24). */
+  toggleChangelog(): boolean {
+    const open = this.setChangelogOpen(!this.changelog.isOpen());
+    if (open) this.closeOthers('changelog');
+    return open;
+  }
+
+  /** Is WHAT'S NEW on screen? For the tests. */
+  isChangelogOpen(): boolean {
+    return this.changelog.isOpen();
   }
 
   /** Is the settings panel on screen? For the composition root and the tests. */
@@ -704,6 +724,7 @@ export class GameUI {
     if (keep !== 'saves' && this.saveMenu.isOpen()) this.setSaveMenuOpen(false);
     if (keep !== 'settings' && this.settings?.isOpen() === true) this.setSettingsOpen(false);
     if (keep !== 'menu' && this.menu?.isOpen() === true) this.setGameMenuOpen(false);
+    if (keep !== 'changelog' && this.changelog.isOpen()) this.setChangelogOpen(false);
   }
 
   /** Is the map on screen? For the composition root and the tests. */
@@ -734,6 +755,7 @@ export class GameUI {
     this.objectives.destroy();
     this.settings?.destroy();
     this.menu?.destroy();
+    this.changelog.destroy();
     this.saveMenu.destroy();
     this.map.destroy();
     this.research.destroy();
@@ -903,6 +925,13 @@ export class GameUI {
     this.menu.setOpen(open);
     this.syncMenu();
     this.focusPanel('.if-menu', open);
+    return open;
+  }
+
+  private setChangelogOpen(open: boolean): boolean {
+    this.changelog.setOpen(open);
+    this.hud.setChangelogOpen(open);
+    this.focusPanel('.if-changelog', open);
     return open;
   }
 
