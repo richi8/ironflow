@@ -570,6 +570,33 @@ async function bootstrap(): Promise<void> {
   });
   input.attach();
 
+  // C32's item pictures, from one atlas: the panels' at 2x, and the cursor's.
+  const iconAtlas = new ProceduralAtlas();
+  const cursorIcons = createItemIconSource({
+    atlas: iconAtlas,
+    buildings: simulation.buildings,
+    createCanvas: createIconCanvas,
+    size: CURSOR_ICON_PX,
+  });
+  let cursorItem: string | null = null;
+
+  /**
+   * A material in the hand is the pointer (2026-09-24, on request, as in
+   * Factorio): the canvas cursor becomes the item's picture, hotspot at its
+   * centre, which is where it lands. A camera drag keeps its grab hand. Set
+   * inline only when the item changes, so the stylesheet's cursors stand the
+   * rest of the time.
+   */
+  function syncHeldCursor(): void {
+    const itemId = input.isDraggingCamera ? null : (input.heldItem?.itemId ?? null);
+    if (itemId === cursorItem) return;
+    cursorItem = itemId;
+    const url = itemId === null ? null : cursorIcons(itemId);
+    const hotspot = CURSOR_ICON_PX / 2;
+    if (url === null) canvas.style.removeProperty('cursor');
+    else canvas.style.cursor = `url("${url}") ${hotspot} ${hotspot}, crosshair`;
+  }
+
   /**
    * Keyboard actions no layer below owns. See `input/keybindings.ts`.
    *
@@ -783,6 +810,7 @@ async function bootstrap(): Promise<void> {
     // still holding last frame's drawables, which is what was on screen when
     // the cursor moved.
     input.update(elapsedMs);
+    syncHeldCursor();
 
     // Below `DETAIL_ZOOM` nothing animates (C29 art task 4): a moving slat a
     // pixel wide is shimmer, and the atlas's plain levels have no frames.
@@ -1128,7 +1156,7 @@ async function bootstrap(): Promise<void> {
     // first request, at twice the size it is shown (§11: author at 2x). The
     // content table is the same for every world, so NEW GAME keeps these.
     itemIcons: createItemIconSource({
-      atlas: new ProceduralAtlas(),
+      atlas: iconAtlas,
       buildings: simulation.buildings,
       createCanvas: createIconCanvas,
       size: ITEM_ICON_PX,
@@ -1234,6 +1262,12 @@ async function bootstrap(): Promise<void> {
 
 /** An item icon's side in device pixels: twice the 32 px it is shown at. */
 const ITEM_ICON_PX = 64;
+
+/**
+ * A held item's cursor side in CSS pixels. A cursor image is shown at its own
+ * pixel size, not at 2x, and browsers refuse ones much past 32.
+ */
+const CURSOR_ICON_PX = 32;
 
 /** A canvas for an item picture (C32). `item-icons.ts` asks it for a context. */
 function createIconCanvas(width: number, height: number): HTMLCanvasElement {

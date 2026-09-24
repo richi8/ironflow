@@ -1426,6 +1426,15 @@ to arrange. What each change means:
   screen reader loses nothing. An unaffordable craft is `aria-disabled`, not
   `disabled`, because a disabled button gets no pointer events and that craft
   is exactly the one whose tooltip says what is short.
+- **A held material is the cursor** *(2026-09-24, on request, as in
+  Factorio)*. While `InputManager.heldItem` is set, the composition root sets
+  the canvas's `cursor` to the item's picture: a second `ItemIconSource` baked
+  at 32 px (`CURSOR_ICON_PX`), because a cursor image is shown at its own
+  pixel size and browsers refuse ones much larger. The hotspot is the
+  picture's centre, where the item lands. It is written only when the held
+  item changes, and cleared during a camera drag so `.is-dragging`'s grab hand
+  still shows. A held *building* keeps the crosshair; its ghost on the ground
+  already says what it is.
 
 ### Rules
 
