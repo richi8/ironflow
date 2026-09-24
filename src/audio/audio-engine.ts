@@ -59,6 +59,12 @@ const GLIDE_S = 0.08;
 /** The same sound twice inside this is one sound: a belt drag lays thirty in a frame. */
 const REPEAT_GUARD_S = 0.06;
 
+/** The length of the noise and crackle buffers, in seconds. */
+const BUFFER_S = 1;
+
+/** Clicks a second in the crackle buffer: dense enough to be a rattle, sparse enough to be grains. */
+const CRACKLE_GRAINS = 220;
+
 /** Per-voice levels, before the master volume. */
 const HUM_LEVEL = 0.05;
 const BELT_LEVEL = 0.035;
@@ -66,13 +72,14 @@ const BELT_LEVEL = 0.035;
 /**
  * The shape of one tone in a one-shot. Times in seconds, from the sound's start.
  *
- * A tone is an oscillator, or — `wave: 'noise'` — the shared second of noise
- * through a filter of `filter`'s type, whose frequency `from` and `to` then
- * sweep. Noise is what rock sounds like: a pick on stone is a crack and a
- * crumble, not a pitch.
+ * A tone is an oscillator, or a buffer through a filter of `filter`'s type,
+ * whose frequency `from` and `to` then sweep: `'noise'` is the shared second
+ * of white noise, and `'crackle'` a second of sparse clicks — grit, pebbles
+ * rattling. Noise is what rock sounds like: a pick on stone is a crack and a
+ * scatter of chips, not a pitch.
  */
 interface Tone {
-  readonly wave: OscillatorType | 'noise';
+  readonly wave: OscillatorType | 'noise' | 'crackle';
   readonly filter?: BiquadFilterType;
   readonly q?: number;
   readonly from: number;
@@ -94,17 +101,18 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
   place: [{ wave: 'triangle', from: 220, to: 130, delay: 0, attack: 0.006, length: 0.11, level: 0.35 }],
   // Rising and thinner: something lifted away.
   remove: [{ wave: 'triangle', from: 170, to: 300, delay: 0, attack: 0.006, length: 0.12, level: 0.25 }],
-  // A pick on rock, the way other games voice it: a dull crunch of noise on
-  // impact, the thump of the blow under it, and the grit falling a moment
-  // after. Nothing tonal and nothing bright — a pitched ring or a narrow
-  // high band is what makes a blow sound like steel on a metal plate.
-  // Played once a swing, so it is short, and `PITCH_SPREAD` keeps two swings
-  // from sounding the same.
+  // A pick on rock, after Factorio's: a bright, dry crack as the point bites,
+  // a gritty crunch under it, and a rattle of chips scattering after. Two
+  // things were tried and heard wrong: a pitched ring or a narrow high band
+  // is steel on a metal plate, and a low thump under a resonant mid band is
+  // an axe in wood. Rock is broadband, short and grainy, with little body.
+  // Played once a swing, and `PITCH_SPREAD` plus a fresh stretch of the
+  // buffers each time keep two swings from sounding the same.
   mine: [
-    { wave: 'noise', filter: 'lowpass', q: 0.6, from: 1600, to: 500, delay: 0, attack: 0.003, length: 0.06, level: 0.55 },
-    { wave: 'sine', from: 110, to: 48, delay: 0, attack: 0.004, length: 0.1, level: 0.35 },
-    { wave: 'noise', filter: 'bandpass', q: 0.5, from: 650, to: 350, delay: 0.01, attack: 0.006, length: 0.08, level: 0.3 },
-    { wave: 'noise', filter: 'lowpass', q: 0.5, from: 900, to: 300, delay: 0.04, attack: 0.012, length: 0.14, level: 0.14 },
+    { wave: 'noise', filter: 'highpass', q: 0.7, from: 2400, to: 1600, delay: 0, attack: 0.002, length: 0.03, level: 0.4 },
+    { wave: 'noise', filter: 'bandpass', q: 0.7, from: 2000, to: 1100, delay: 0.004, attack: 0.004, length: 0.09, level: 0.3 },
+    { wave: 'sine', from: 95, to: 55, delay: 0, attack: 0.004, length: 0.05, level: 0.1 },
+    { wave: 'crackle', filter: 'highpass', q: 0.6, from: 2600, to: 1800, delay: 0.025, attack: 0.01, length: 0.24, level: 0.45 },
   ],
   // Three notes up a major triad: the one sound that is good news.
   research: [
@@ -167,6 +175,7 @@ export class AudioEngine {
   private hum: HumVoice[] | null = null;
   private beltGain: GainNode | null = null;
   private noise: AudioBuffer | null = null;
+  private crackle: AudioBuffer | null = null;
 
   constructor(options: AudioEngineOptions) {
     this.createContext = options.createContext;
@@ -285,6 +294,7 @@ export class AudioEngine {
     this.hum = null;
     this.beltGain = null;
     this.noise = null;
+    this.crackle = null;
     this.active = 0;
     void context.close().catch(() => undefined);
   }
@@ -311,12 +321,16 @@ export class AudioEngine {
     const from = tone.from * pitch;
     const to = tone.to * pitch;
 
-    // An oscillator sweeps its own frequency; noise sweeps its filter's.
+    // An oscillator sweeps its own frequency; a buffer sweeps its filter's.
     let source: AudioScheduledSourceNode;
     let output: AudioNode;
-    if (tone.wave === 'noise') {
+    let offset = 0;
+    if (tone.wave === 'noise' || tone.wave === 'crackle') {
       const noise = context.createBufferSource();
-      noise.buffer = this.noiseBuffer(context);
+      noise.buffer = tone.wave === 'noise' ? this.noiseBuffer(context) : this.crackleBuffer(context);
+      // A different stretch each time, so the grains never repeat. Math.random
+      // is fine here: this is sound, not simulation (§6's list).
+      offset = Math.random() * Math.max(0, BUFFER_S - (end - start) - MIN_RAMP_S * 2);
       const filter = context.createBiquadFilter();
       filter.type = tone.filter ?? 'bandpass';
       filter.Q.setValueAtTime(tone.q ?? 1, start);
@@ -343,19 +357,45 @@ export class AudioEngine {
     output.connect(envelope);
     envelope.connect(master);
     this.track(source);
-    source.start(start);
+    if (offset > 0) (source as AudioBufferSourceNode).start(start, offset);
+    else source.start(start);
     source.stop(end + MIN_RAMP_S);
   }
 
   /** A second of white noise, made once and shared by the belts and every noise tone. */
   private noiseBuffer(context: AudioContext): AudioBuffer {
     if (this.noise !== null) return this.noise;
-    const length = Math.max(1, Math.floor(context.sampleRate));
+    const length = Math.max(1, Math.floor(context.sampleRate * BUFFER_S));
     const buffer = context.createBuffer(1, length, context.sampleRate);
     const data = buffer.getChannelData(0);
     // Math.random is fine here: this is sound, not simulation (§6's list).
     for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
     this.noise = buffer;
+    return buffer;
+  }
+
+  /**
+   * A second of crackle: `CRACKLE_GRAINS` clicks at random moments, each a
+   * burst of noise dying away over a millisecond or two, at a random level.
+   * Filtered high, it is small stones knocking together — the grain white
+   * noise lacks, and the part of a pick on rock that says *rock*.
+   */
+  private crackleBuffer(context: AudioContext): AudioBuffer {
+    if (this.crackle !== null) return this.crackle;
+    const rate = context.sampleRate;
+    const length = Math.max(1, Math.floor(rate * BUFFER_S));
+    const buffer = context.createBuffer(1, length, rate);
+    const data = buffer.getChannelData(0);
+    const decay = Math.max(1, Math.floor(rate * 0.0015));
+    for (let grain = 0; grain < CRACKLE_GRAINS * BUFFER_S; grain++) {
+      const at = Math.floor(Math.random() * length);
+      const level = 0.3 + Math.random() * 0.7;
+      for (let i = 0; i < decay * 4 && at + i < length; i++) {
+        data[at + i] = (data[at + i] ?? 0) + (Math.random() * 2 - 1) * level * Math.exp(-i / decay);
+      }
+    }
+    for (let i = 0; i < length; i++) data[i] = Math.max(-1, Math.min(1, data[i] ?? 0));
+    this.crackle = buffer;
     return buffer;
   }
 

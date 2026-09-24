@@ -7272,11 +7272,14 @@ are no asset files.
   is one sound. `research_complete` gets a rising triad, and every other alert
   a two-note fall. Command rejections get no sound; the toast is enough, and a
   drag across occupied tiles would be a drum roll.
-  *(Added 2026-09-24: mining by hand plays `mine`, a pick on rock: a dull
-  crunch of low-passed noise, a low thump, and grit falling after. A first
-  version with a bright band of noise and a ring off the steel sounded like a
-  metal plate, so nothing in it is tonal or high. Its pitch wanders ±10% a swing so the repeats do not sound
-  identical. Noise tones share the belts' one second of noise. It keeps time with the
+  *(Added 2026-09-24: mining by hand plays `mine`, a pick on rock after
+  Factorio's: a bright, dry crack of high-passed noise, a gritty crunch, a
+  whisper of low body, and a rattle of chips from a second buffer of sparse
+  clicks ("crackle"). Two earlier versions were heard wrong: a ring and a
+  narrow high band sounded like a metal plate, and a low thump under a
+  resonant mid band like wood. Its pitch wanders ±10% a swing, and each play
+  starts at a random point in its buffers, so the repeats are not identical.
+  Noise tones share the belts' one second of noise. It keeps time with the
   drawn swing, not with mining progress: `pickStrikes` counts the swing's
   impact frame (`PICK_IMPACT_FRAME`, the pick below the horizontal in
   `SWING`), so a blow sounds every 0.83 s, on the frame it lands. The swing
