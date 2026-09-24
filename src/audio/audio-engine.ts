@@ -109,10 +109,10 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
   // Played once a swing, and `PITCH_SPREAD` plus a fresh stretch of the
   // buffers each time keep two swings from sounding the same.
   mine: [
-    { wave: 'noise', filter: 'highpass', q: 0.7, from: 2400, to: 1600, delay: 0, attack: 0.002, length: 0.03, level: 0.4 },
-    { wave: 'noise', filter: 'bandpass', q: 0.7, from: 2000, to: 1100, delay: 0.004, attack: 0.004, length: 0.09, level: 0.3 },
-    { wave: 'sine', from: 95, to: 55, delay: 0, attack: 0.004, length: 0.05, level: 0.1 },
-    { wave: 'crackle', filter: 'highpass', q: 0.6, from: 2600, to: 1800, delay: 0.025, attack: 0.01, length: 0.24, level: 0.45 },
+    { wave: 'noise', filter: 'highpass', q: 0.7, from: 2400, to: 1600, delay: 0, attack: 0.002, length: 0.03, level: 0.2 },
+    { wave: 'noise', filter: 'bandpass', q: 0.7, from: 2000, to: 1100, delay: 0.004, attack: 0.004, length: 0.09, level: 0.15 },
+    { wave: 'sine', from: 95, to: 55, delay: 0, attack: 0.004, length: 0.05, level: 0.05 },
+    { wave: 'crackle', filter: 'highpass', q: 0.6, from: 2600, to: 1800, delay: 0.025, attack: 0.01, length: 0.24, level: 0.225 },
   ],
   // Three notes up a major triad: the one sound that is good news.
   research: [
