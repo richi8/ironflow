@@ -1435,6 +1435,14 @@ to arrange. What each change means:
   item changes, and cleared during a camera drag so `.is-dragging`'s grab hand
   still shows. A held *building* keeps the crosshair; its ghost on the ground
   already says what it is.
+- **The hand follows the bag down** *(2026-09-24, on request, as in
+  Factorio)*. `GameController.followHand`, run in `pump`, notes what the hand
+  held and how many the bag had. When the count falls, from feeding a machine
+  or placing a building, and the lit hotbar slot's stack is gone, the light
+  moves to the next slot of the same item that still shows some, wrapping at
+  the end. When the bag has none left, the hand empties and the cursor is the
+  pointer again. It acts only on a fall: pressing a slot of something the bag
+  has none of still holds it.
 
 ### Rules
 

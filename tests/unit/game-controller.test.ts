@@ -286,6 +286,39 @@ describe('GameController build tool', () => {
     expect(controller.getHeldItem()).toBeNull();
   });
 
+  it('moves the hand to the next stack when one runs out, and empties it with the bag', () => {
+    const { game, simulation } = makeGame();
+    const cursor = new DetachedCursor();
+    const controller = new GameController({ game, cursor });
+    controller.assignSlot(8, 'coal');
+    controller.assignSlot(9, 'coal');
+    simulation.inventory.add('coal', 70);
+    controller.pump();
+
+    // Slot 8 shows the stack of 50, slot 9 the 20. Emptying the 20 moves the light.
+    controller.selectSlot(9);
+    controller.pump();
+    simulation.inventory.remove('coal', 20);
+    controller.pump();
+    expect(controller.getHeldItem()).toBe('coal');
+    const selected = controller.getBuildMenuView().hotbar.map((slot) => slot?.selected ?? false);
+    expect(selected.slice(7)).toEqual([true, false]);
+
+    simulation.inventory.remove('coal', 30);
+    controller.pump();
+    expect(controller.getHeldItem()).toBe('coal');
+
+    simulation.inventory.remove('coal', 20);
+    controller.pump();
+    expect(controller.getHeldItem()).toBeNull();
+    expect(cursor.heldItem).toBeNull();
+
+    // A slot of something the bag has none of is still held, as before.
+    controller.selectSlot(9);
+    controller.pump();
+    expect(controller.getHeldItem()).toBe('coal');
+  });
+
   it('starts from a remembered hotbar, forgetting buildings that no longer exist', () => {
     const { game } = makeGame();
     const controller = new GameController({ game, hotbar: ['chest', 'gone', null] });

@@ -311,6 +311,9 @@ export class GameController {
    */
   private heldSlot: number | null = null;
 
+  /** What the hand held at the last `pump`, and how many the bag had then. See `followHand`. */
+  private handSeen: { readonly itemId: string; readonly count: number } | null = null;
+
   /** Quest steps met in this world (C31). See `getQuestLog`. */
   private readonly questLog: string[] = [];
 
@@ -423,6 +426,8 @@ export class GameController {
     if (selection !== null) {
       this.rate.sample(selection, this.simulation.getTick(), this.simulation.production.totalFor(selection));
     }
+
+    this.followHand();
 
     const signature = this.buildMenuSignature();
     if (signature !== this.menuSignature) {
@@ -1472,6 +1477,45 @@ export class GameController {
     }
     if (this.cursor.heldItem?.itemId === itemId) return;
     this.cursor.setHeldItem({ itemId, amount: this.simulation.items.get(itemId).stackSize });
+  }
+
+  /**
+   * The hand follows the bag down (2026-09-24, on request, as in Factorio).
+   * When feeding machines or placing buildings empties the stack the hand was
+   * lit on, the light moves to the next hotbar slot of the same item that
+   * still has some; when the bag has none left at all, the hand empties and
+   * the cursor is the plain pointer again.
+   *
+   * Only on the way down, and only for what the hand held last frame: pressing
+   * a slot of something the bag has none of still holds it, as it always has.
+   */
+  private followHand(): void {
+    const itemId = this.cursor.heldItem?.itemId ?? this.cursor.buildTool?.buildingId ?? null;
+    const count = itemId === null ? 0 : this.simulation.inventory.count(itemId);
+    const before = this.handSeen;
+    this.handSeen = itemId === null ? null : { itemId, count };
+    if (itemId === null || before?.itemId !== itemId || count >= before.count) return;
+
+    if (count <= 0) {
+      this.fillHand(null);
+      this.heldSlot = null;
+      this.handSeen = null;
+      return;
+    }
+    const lit = this.heldSlot;
+    if (lit === null) return;
+
+    // Slot by slot, the stack each one shows — the same dealing `hotbarView` does.
+    const stacks = this.stacksOf(itemId);
+    const shown: number[] = [];
+    let dealt = 0;
+    for (const slotItem of this.hotbar) {
+      shown.push(slotItem === itemId ? (stacks[dealt++] ?? 0) : 0);
+    }
+    if ((shown[lit] ?? 0) > 0) return;
+    const next = shown.findIndex((stack, index) => index > lit && stack > 0);
+    const index = next >= 0 ? next : shown.findIndex((stack) => stack > 0);
+    this.heldSlot = index >= 0 ? index : null;
   }
 
   /** Is `itemId` what the hand holds, as a building or as a material? */
