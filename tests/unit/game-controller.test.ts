@@ -325,6 +325,25 @@ describe('GameController build tool', () => {
     expect(view.items.find((item) => item.itemId === 'miner')?.buildingId).toBe('miner');
   });
 
+  it('counts a craft whose missing parts the bag can make, and says it is a chain', () => {
+    const { game, simulation } = makeGame();
+    const bag = simulation.player.inventory;
+    // 14 plates and 3 copper make one miner from nothing; 28 and 6, two.
+    bag.add(simulation.items.idOf('iron_plate'), 30);
+    bag.add(simulation.items.idOf('copper_plate'), 6);
+    const controller = new GameController({ game });
+
+    const option = (id: string) => controller.getInventoryView().crafts.find((craft) => craft.id === id);
+    expect(option('make_miner')).toMatchObject({ craftable: 2, chained: true });
+    // Directly affordable is not a chain.
+    expect(option('make_gear')).toMatchObject({ craftable: 15, chained: false });
+
+    controller.craftItem('make_miner');
+    simulation.tick();
+    const queue = controller.getInventoryView().queue;
+    expect(queue.map((order) => order.forChain)).toEqual([true, true, true, false]);
+  });
+
   it('reads the cursor live, so a rotation pressed elsewhere shows up at once', () => {
     const { game } = makeGame();
     const cursor = new DetachedCursor();

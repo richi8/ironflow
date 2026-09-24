@@ -191,6 +191,13 @@ export interface CraftOrder {
   remaining: number;
   /** Integer ticks into the one being made now (§6 R3). */
   progressTicks: number;
+  /**
+   * How many of its products are still owed to the orders after it, and go to
+   * them instead of the bag (2026-09-24). Zero for an order the player asked
+   * for; above zero for a part a chain queued ahead of it. See
+   * `systems/craft-planner.ts`.
+   */
+  feeds: number;
 }
 
 /** The player, as a save file sees it. Plain data, sorted where it can be. */
@@ -435,9 +442,17 @@ export class PlayerState {
       if (!Number.isInteger(order.progressTicks) || order.progressTicks < 0) {
         throw new RangeError(`PlayerState.load: a craft order is ${order.progressTicks} ticks in, which is not a count.`);
       }
+      if (!Number.isInteger(order.feeds) || order.feeds < 0) {
+        throw new RangeError(`PlayerState.load: a craft order owes ${order.feeds} to the next, which is not a count.`);
+      }
       // Copied, for `toJSON`'s reason in reverse: the array a save was read
       // from must not become the queue a system then edits.
-      this.crafts.push({ recipe: order.recipe, remaining: order.remaining, progressTicks: order.progressTicks });
+      this.crafts.push({
+        recipe: order.recipe,
+        remaining: order.remaining,
+        progressTicks: order.progressTicks,
+        feeds: order.feeds,
+      });
     }
   }
 
@@ -459,6 +474,7 @@ export class PlayerState {
         recipe: order.recipe,
         remaining: order.remaining,
         progressTicks: order.progressTicks,
+        feeds: order.feeds,
       })),
     };
   }

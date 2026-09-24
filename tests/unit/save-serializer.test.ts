@@ -262,8 +262,9 @@ describe('the player and the world around them', () => {
   it('comes back with the hand-craft queue in the order it was left in', () => {
     const simulation = sandbox();
     simulation.player.crafts.push(
-      { recipe: simulation.recipes.get('make_gear').recipeId, remaining: 4, progressTicks: 7 },
-      { recipe: simulation.recipes.get('make_belt').recipeId, remaining: 2, progressTicks: 0 },
+      // A chain: the gears are owed to the belts after them.
+      { recipe: simulation.recipes.get('make_gear').recipeId, remaining: 4, progressTicks: 7, feeds: 2 },
+      { recipe: simulation.recipes.get('make_belt').recipeId, remaining: 2, progressTicks: 0, feeds: 0 },
     );
 
     const state = serialize(simulation);
@@ -271,8 +272,8 @@ describe('the player and the world around them', () => {
 
     const loaded = reload(simulation);
     expect(loaded.player.crafts).toEqual([
-      { recipe: loaded.recipes.get('make_gear').recipeId, remaining: 4, progressTicks: 7 },
-      { recipe: loaded.recipes.get('make_belt').recipeId, remaining: 2, progressTicks: 0 },
+      { recipe: loaded.recipes.get('make_gear').recipeId, remaining: 4, progressTicks: 7, feeds: 2 },
+      { recipe: loaded.recipes.get('make_belt').recipeId, remaining: 2, progressTicks: 0, feeds: 0 },
     ]);
   });
 

@@ -1813,6 +1813,13 @@ latches the first time the world satisfies it, so the first repaint after
 loading ticks everything an old factory has already done. The validator
 caps the log at 256 short strings. The v6 fixture carries two ids.
 
+**Schema v7 (2026-09-24).** A hand-craft order gained `feeds`: how many of
+its products it still owes the orders after it, when it is a part a crafting
+chain queued (C21A). `migrations/v6-to-v7.ts` gives every v6 order `0`, which
+is exact: a v6 queue predates chains, so every order in it was asked for. The
+validator refuses a queue whose **last** order owes anything, since it would
+be feeding an order that is not there. The v7 fixture joins the others.
+
 **Implementation note (C27).** The sentence above about migrations — "pure
 functions `vN -> vN+1`, chained, each independently unit-tested against a
 stored fixture save" — is real, in `game/save/save-migrator.ts`, and it runs
@@ -5412,6 +5419,24 @@ make every existing cross-reference in this document wrong.
 - **Repeated clicks merge into the tail order.** Ten presses make one order of
   ten, not ten of one — so `MAX_CRAFT_ORDERS` counts *kinds* of work rather
   than clicks, and the cap is unreachable by leaning on a button.
+- **A craft the bag cannot pay for directly makes its missing parts first**
+  *(2026-09-24, on request, as in Factorio)*. `systems/craft-planner.ts`
+  walks the bill depth first: each ingredient comes from what an earlier step
+  of the plan makes spare, then from the bag, then from the first
+  hand-craftable, unlocked recipe that makes it, recursively. When the bag
+  covers the whole tree, the parts are queued ahead of the item and the chain
+  is **paid in full on the click**, so the rule above still holds: an order in
+  the queue will complete. A part's products are owed to the order waiting on
+  them (`CraftOrder.feeds`, schema v7) and skip the bag; only its surplus
+  lands there, like the odd wire when a circuit wants three. A chain is never
+  merged into, and it has to fit under `MAX_CRAFT_ORDERS` whole. **Cancelling
+  any order of a chain cancels the chain**, because the rest was paid for with
+  products that will now not be made; the refund is every order's
+  ingredients less what the chain's parts still owed, so a part already made
+  comes back as itself and the rest as raw material. The craft grid's
+  `craftable` counts through the same planner (`maxCraftable`), a short
+  ingredient is no longer red when a chain covers it, and a queued part's row
+  says what it is for.
 - **The panel takes the middle of the screen and closes the build menu.** It
   is the one panel the player stops to read, the two want the same space, and
   they answer the same question from opposite ends — "what can I build" and

@@ -179,6 +179,7 @@ function serializePlayer(player: SerializedPlayer, recipes: RecipeRegistry): Ser
       recipe: recipes.byId(order.recipe).id,
       remaining: order.remaining,
       progressTicks: order.progressTicks,
+      feeds: order.feeds,
     })),
   };
 }
@@ -378,6 +379,7 @@ function deserializePlayer(player: SerializedPlayerState, recipes: RecipeRegistr
         recipe: recipes.get(order.recipe).recipeId,
         remaining: order.remaining,
         progressTicks: order.progressTicks,
+        feeds: order.feeds,
       };
     }),
   };

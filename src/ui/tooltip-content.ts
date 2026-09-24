@@ -78,7 +78,8 @@ export function craftContent(option: CraftOptionView): TooltipContent {
     itemId: part.itemId,
     label: part.name,
     value: `${formatCount(part.held)} / ${formatCount(part.count)}`,
-    tone: part.held < part.count ? 'danger' : null,
+    // Short but coverable is not a problem: a click makes it first.
+    tone: part.held < part.count && !option.chained ? 'danger' : null,
   }));
   const facts: TooltipRow[] = [
     { label: 'Time by hand', value: formatSeconds(option.craftTicks) },
@@ -92,9 +93,11 @@ export function craftContent(option: CraftOptionView): TooltipContent {
       { heading: null, rows: facts },
     ],
     hint:
-      option.craftable > 0
-        ? `Click to craft one, shift-click for ${BATCH_CRAFT}.`
-        : 'Missing ingredients — the red lines are short.',
+      option.craftable === 0
+        ? 'Missing ingredients — the red lines are short.'
+        : option.chained
+          ? `Click to craft one, shift-click for ${BATCH_CRAFT}. The missing parts are crafted first.`
+          : `Click to craft one, shift-click for ${BATCH_CRAFT}.`,
   };
 }
 

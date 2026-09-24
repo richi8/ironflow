@@ -635,7 +635,7 @@ function readPlayer(value: unknown, numbering: ItemNumbering): SerializedPlayerS
 function readCrafts(value: unknown): SerializedPlayerState['crafts'] {
   const orders = readArray(value, 'the craft queue', MAX_CRAFT_ORDERS);
   const { recipes } = contentOf();
-  return mapArray(orders, (entry) => {
+  const read = mapArray(orders, (entry) => {
     const order = readObject(entry, 'a craft order');
     const recipe = readString(order['recipe'], "a craft order's recipe", MAX_STRING_LENGTH);
     if (!recipes.has(recipe)) fail(`the craft queue makes "${recipe}", which this build has no recipe for.`);
@@ -643,8 +643,14 @@ function readCrafts(value: unknown): SerializedPlayerState['crafts'] {
       recipe,
       remaining: readInteger(order['remaining'], 'a craft order count', 1, MAX_CRAFT_BATCH),
       progressTicks: readInteger(order['progressTicks'], 'a craft order progress', 0, Number.MAX_SAFE_INTEGER),
+      feeds: readInteger(order['feeds'], 'what a craft order owes', 0, Number.MAX_SAFE_INTEGER),
     };
   });
+  // A chain ends in the order it was made for, which owes nothing. One that
+  // owes past the end of the queue is feeding an order that is not there.
+  const last = read[read.length - 1];
+  if (last !== undefined && last.feeds > 0) fail('the last craft order owes its products to an order after it.');
+  return read;
 }
 
 /* -------------------------------------------------------------------------- *

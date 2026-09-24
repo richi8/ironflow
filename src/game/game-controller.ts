@@ -51,6 +51,7 @@ import type { Game } from './game.js';
 import { ProductionRate } from './production.js';
 import { BuildingRegistry } from './registries/building-registry.js';
 import { CANNOT_CRAFT } from './registries/craft-durations.js';
+import { maxCraftable } from './systems/craft-planner.js';
 import { NO_RECIPE, type Recipe, type RecipeId } from './registries/recipe-registry.js';
 import type { Simulation } from './simulation.js';
 import { NO_TECHNOLOGY, type Technology, type Unlock } from './registries/technology-registry.js';
@@ -662,13 +663,30 @@ export class GameController {
 
   /** One row of the craft grid: a recipe, its bill, and how many are payable. */
   private craftOptionView(recipe: Recipe, bag: Inventory): CraftOptionView {
-    let craftable = MAX_CRAFT_BATCH;
+    let direct = MAX_CRAFT_BATCH;
     const inputs: CraftPartView[] = recipe.inputs.map((stack) => {
       const held = bag.count(stack.itemId);
-      craftable = Math.min(craftable, Math.floor(held / stack.count));
+      direct = Math.min(direct, Math.floor(held / stack.count));
       const part = this.partView(stack.itemId, stack.count);
       return freeze({ itemId: part.itemId, name: part.name, count: part.count, held });
     });
+    // Counting what a chain could make too — the system's own planner, so the
+    // button and the command cannot disagree. Only asked when the bag alone
+    // falls short of a full batch, which keeps the common case one division.
+    const { simulation } = this;
+    const craftable =
+      direct >= MAX_CRAFT_BATCH
+        ? direct
+        : maxCraftable(
+            {
+              recipes: simulation.recipes,
+              durations: simulation.crafts,
+              unlocks: simulation.unlocks,
+              held: (itemId) => bag.count(itemId),
+            },
+            recipe,
+            MAX_CRAFT_BATCH,
+          );
 
     const first = recipe.outputs[0];
     const product = first === undefined ? null : this.partView(first.itemId, first.count);
@@ -680,6 +698,7 @@ export class GameController {
       inputs: freeze(inputs),
       craftTicks: this.simulation.crafts.handTicksFor(recipe.recipeId),
       craftable,
+      chained: craftable > direct,
       unlocked: this.simulation.unlocks.isRecipeUnlocked(recipe.recipeId),
     });
   }
@@ -699,6 +718,7 @@ export class GameController {
       name: product?.name ?? recipe.id,
       productId: product?.itemId ?? recipe.id,
       remaining: order.remaining,
+      forChain: order.feeds > 0,
       progress,
       // Full progress and still at the head is exactly the state the system
       // parks a craft in when the bag has no room for it. The panel says so;

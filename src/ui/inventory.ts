@@ -572,7 +572,9 @@ export class InventoryPanel {
       row.root.dataset['state'] = order.blocked ? 'blocked' : order.progress === null ? 'waiting' : 'active';
       row.root.title = order.blocked
         ? `${order.name} is finished and your bag is full — make room for it.`
-        : `${order.name} ×${order.remaining}`;
+        : order.forChain
+          ? `${order.name} ×${order.remaining}, for a craft after it. Cancelling it cancels the whole chain.`
+          : `${order.name} ×${order.remaining}`;
     }
   }
 }

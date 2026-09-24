@@ -52,7 +52,7 @@ import type { ItemIdMapping } from '../registries/item-registry.js';
  * alters what the file says. A save carries both because neither answers the
  * other's question.
  */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 /** The magic string that marks a file as one of ours. §14, and C26's header. */
 export const SAVE_FORMAT = 'ironflow-save';
@@ -153,6 +153,8 @@ export interface SerializedCraftOrder {
   readonly recipe: string;
   readonly remaining: number;
   readonly progressTicks: number;
+  /** v7: products owed to the next orders (a crafting chain). v6 had none. */
+  readonly feeds: number;
 }
 
 /** The player character (C10, C21A). Position is in subtiles, never tiles. */

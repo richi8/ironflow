@@ -77,10 +77,16 @@ export interface CraftOptionView {
   readonly craftTicks: number;
   /**
    * How many the bag could pay for right now, capped at what one command may
-   * ask for. Zero means the button is dead, and `inputs` says which line is
-   * short.
+   * ask for — counting what the bag could make of its missing parts first
+   * (2026-09-24). Zero means the button is dead, and `inputs` says which line
+   * is short.
    */
   readonly craftable: number;
+  /**
+   * Some of `craftable` needs its missing parts crafted first: a click queues
+   * them ahead of it. An ingredient held short is then not a problem.
+   */
+  readonly chained: boolean;
   /**
    * Has research revealed it (C22)? A locked recipe is in the list anyway and
    * the panel hides its button, because the panel's buttons are a pool built
@@ -111,6 +117,11 @@ export interface CraftQueueView {
   readonly productId: string;
   /** How many are still to be made, including the one in progress. */
   readonly remaining: number;
+  /**
+   * A part made for the order after it, in a chain (2026-09-24). Its products
+   * go to that order, and cancelling it cancels the chain.
+   */
+  readonly forChain: boolean;
   /**
    * How far through the current item, 0..1 — or `null` for an order that is
    * not at the head, because only the head is being worked on.

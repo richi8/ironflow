@@ -2,13 +2,13 @@
  * Every migration this build has, oldest first. See ironflow.md C27.
  *
  * ```text
- *   SAVE_VERSION = 6        MIGRATIONS = [v1 -> v2, ..., v4 -> v5, v5 -> v6]
+ *   SAVE_VERSION = 7        MIGRATIONS = [v1 -> v2, ..., v5 -> v6, v6 -> v7]
  * ```
  *
  * v2 (2026-09-23) added the player's hotbar layout to the metadata, and v3
  * (the same day) gave the player's bag positions, v4 gave chests the
- * same, v5 recorded whether F is held, and v6 (C31) added the quest log
- * to the metadata. The
+ * same, v5 recorded whether F is held, v6 (C31) added the quest log
+ * to the metadata, and v7 (2026-09-24) what a craft order owes a chain. The
  * registry is not decoration: `save-migrator.ts` checks that the chain reaches
  * `SAVE_VERSION`, and `tests/integration/save-fixtures.test.ts` checks that
  * every version from 1 up has a committed fixture — so the day `SAVE_VERSION`
@@ -73,6 +73,7 @@ import { v2ToV3 } from './v2-to-v3.js';
 import { v3ToV4 } from './v3-to-v4.js';
 import { v4ToV5 } from './v4-to-v5.js';
 import { v5ToV6 } from './v5-to-v6.js';
+import { v6ToV7 } from './v6-to-v7.js';
 
 /** Oldest first, contiguous, ending at `SAVE_VERSION`. */
-export const MIGRATIONS: readonly Migration[] = Object.freeze([v1ToV2, v2ToV3, v3ToV4, v4ToV5, v5ToV6]);
+export const MIGRATIONS: readonly Migration[] = Object.freeze([v1ToV2, v2ToV3, v3ToV4, v4ToV5, v5ToV6, v6ToV7]);

@@ -48,15 +48,28 @@
  * queue, and one `craft_blocked` alert says so. It is not lost and it is not
  * silent, and the moment a slot frees the item appears. This is the same
  * bargain C11's miner makes with `output_full`, one level down.
+ *
+ * ## Chains: the missing parts are made first (2026-09-24)
+ *
+ * A craft the bag cannot pay for directly is planned through the recipes that
+ * make its missing parts (`craft-planner.ts`), and when the bag covers the
+ * whole tree the parts are queued ahead of it and paid for with it. Everything
+ * above still holds — the chain is paid in full on the click — with one
+ * addition: a part's products are owed to the order waiting on them
+ * (`CraftOrder.feeds`) and go there rather than to the bag. Cancelling any
+ * order of a chain cancels the chain, because the rest of it was paid for with
+ * products that will now never be made.
  */
 
 import type { CommandRejectionReason } from '../commands/command.js';
 import type { AlertLog } from '../alerts.js';
 import { NO_ENTITY } from '../entities/entity.js';
-import { MAX_CRAFT_BATCH, MAX_CRAFT_ORDERS, type PlayerState } from '../player/player-state.js';
+import { MAX_CRAFT_BATCH, MAX_CRAFT_ORDERS, type CraftOrder, type PlayerState } from '../player/player-state.js';
 import { CANNOT_CRAFT, type CraftDurations } from '../registries/craft-durations.js';
+import type { ItemId } from '../registries/item-registry.js';
 import type { Recipe, RecipeRegistry } from '../registries/recipe-registry.js';
 import type { Unlocks } from '../research/unlocks.js';
+import { planCraft } from './craft-planner.js';
 
 export interface CraftingSystemOptions {
   readonly player: PlayerState;
@@ -102,7 +115,7 @@ export class CraftingSystem {
    * unknown_recipe    no such thing
    * locked            research has not revealed it (C22)
    * not_craftable     §15 says that one needs a machine
-   * unaffordable      you are not carrying the ingredients
+   * unaffordable      you are not carrying the ingredients, nor what makes them
    * craft_queue_full  you have too many orders already
    * ```
    *
@@ -123,23 +136,32 @@ export class CraftingSystem {
     const wanted = Math.min(count, MAX_CRAFT_BATCH);
 
     const bag = this.player.inventory;
-    for (const input of recipe.inputs) {
-      if (bag.count(input.itemId) < input.count * wanted) return 'unaffordable';
-    }
+    const plan = planCraft(
+      { recipes: this.recipes, durations: this.durations, unlocks: this.unlocks, held: (itemId) => bag.count(itemId) },
+      recipe,
+      wanted,
+    );
+    if (plan === null) return 'unaffordable';
 
     // Merged into the tail when it is the same recipe, so a player pressing
     // the button ten times has one order of ten rather than ten of one — and
-    // so the queue cap counts *kinds* of work rather than clicks.
+    // so the queue cap counts *kinds* of work rather than clicks. A chain is
+    // never merged: its parts have to stay ahead of what they are for.
     const tail = this.player.crafts[this.player.crafts.length - 1];
-    const merging = tail !== undefined && tail.recipe === recipe.recipeId;
-    if (!merging && this.player.crafts.length >= MAX_CRAFT_ORDERS) return 'craft_queue_full';
+    const merging = plan.steps.length === 1 && tail !== undefined && tail.recipe === recipe.recipeId;
+    const added = merging ? 0 : plan.steps.length;
+    if (this.player.crafts.length + added > MAX_CRAFT_ORDERS) return 'craft_queue_full';
 
     // Nothing has moved until here, so every refusal above leaves the bag
     // exactly as it was.
-    for (const input of recipe.inputs) bag.remove(input.itemId, input.count * wanted);
+    for (const part of plan.take) bag.remove(part.itemId, part.count);
 
     if (merging && tail !== undefined) tail.remaining += wanted;
-    else this.player.crafts.push({ recipe: recipe.recipeId, remaining: wanted, progressTicks: 0 });
+    else {
+      for (const step of plan.steps) {
+        this.player.crafts.push({ recipe: step.recipe, remaining: step.count, progressTicks: 0, feeds: step.feeds });
+      }
+    }
     return null;
   }
 
@@ -156,20 +178,47 @@ export class CraftingSystem {
    * player was trying to get rid of.
    */
   cancel(index: number): CommandRejectionReason | null {
-    const order = this.player.crafts[index];
-    if (order === undefined) return 'nothing_queued';
+    const crafts = this.player.crafts;
+    if (crafts[index] === undefined) return 'nothing_queued';
 
-    const recipe = this.recipes.byId(order.recipe);
-    const bag = this.player.inventory;
-    for (const input of recipe.inputs) {
-      if (bag.spaceFor(input.itemId) < input.count * order.remaining) return 'inventory_full';
+    // The chain the order belongs to: back over the parts made for it, and on
+    // to the order its own products are owed to.
+    let first = index;
+    while (first > 0 && (crafts[first - 1]?.feeds ?? 0) > 0) first -= 1;
+    let last = index;
+    while (last < crafts.length - 1 && (crafts[last]?.feeds ?? 0) > 0) last += 1;
+
+    // Every order's ingredients come back, less the ones a part of the same
+    // chain was still to make and now will not. What a part has already made
+    // is in the count, as an ingredient of the order it was for.
+    const refund = new Map<ItemId, number>();
+    const items: ItemId[] = [];
+    const credit = (itemId: ItemId, amount: number): void => {
+      if (!refund.has(itemId)) items.push(itemId);
+      refund.set(itemId, (refund.get(itemId) ?? 0) + amount);
+    };
+    for (let i = first; i <= last; i++) {
+      const order = crafts[i];
+      if (order === undefined) continue;
+      const recipe = this.recipes.byId(order.recipe);
+      for (const input of recipe.inputs) credit(input.itemId, input.count * order.remaining);
+      const product = recipe.outputs[0];
+      if (product !== undefined && order.feeds > 0) credit(product.itemId, -order.feeds);
     }
 
-    for (const input of recipe.inputs) bag.add(input.itemId, input.count * order.remaining);
-    this.player.crafts.splice(index, 1);
+    const bag = this.player.inventory;
+    for (const itemId of items) {
+      if (bag.spaceFor(itemId) < Math.max(0, refund.get(itemId) ?? 0)) return 'inventory_full';
+    }
+
+    for (const itemId of items) {
+      const amount = refund.get(itemId) ?? 0;
+      if (amount > 0) bag.add(itemId, amount);
+    }
+    crafts.splice(first, last - first + 1);
     // The head may have changed, so whatever the old one had already said is
     // no longer the thing the player is being told about.
-    if (index === 0) this.blockedAnnounced = false;
+    if (first === 0) this.blockedAnnounced = false;
     return null;
   }
 
@@ -200,7 +249,7 @@ export class CraftingSystem {
       if (order.progressTicks < duration) return;
     }
 
-    if (!this.deliver(recipe)) {
+    if (!this.deliver(recipe, order)) {
       if (!this.blockedAnnounced) {
         this.blockedAnnounced = true;
         this.alerts.push({
@@ -228,13 +277,24 @@ export class CraftingSystem {
    * All or nothing, checked before anything moves: `make_belt` produces two
    * belts, and delivering one of them would turn "the bag is full" into an
    * item that quietly went missing.
+   *
+   * What the order still owes a chain is withheld first and needs no room:
+   * the order it is for was paid with it when the chain was queued.
    */
-  private deliver(recipe: Recipe): boolean {
+  private deliver(recipe: Recipe, order: CraftOrder): boolean {
     const bag = this.player.inventory;
-    for (const output of recipe.outputs) {
-      if (bag.spaceFor(output.itemId) < output.count) return false;
+    const owed = Math.min(order.feeds, recipe.outputs[0]?.count ?? 0);
+    const { outputs } = recipe;
+    for (let i = 0; i < outputs.length; i++) {
+      const output = outputs[i];
+      if (output !== undefined && bag.spaceFor(output.itemId) < output.count - (i === 0 ? owed : 0)) return false;
     }
-    for (const output of recipe.outputs) bag.add(output.itemId, output.count);
+    for (let i = 0; i < outputs.length; i++) {
+      const output = outputs[i];
+      const amount = output === undefined ? 0 : output.count - (i === 0 ? owed : 0);
+      if (output !== undefined && amount > 0) bag.add(output.itemId, amount);
+    }
+    order.feeds -= owed;
     return true;
   }
 }
