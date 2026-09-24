@@ -55,7 +55,7 @@ import {
 } from './renderer/entity-view.js';
 import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
 import { createItemIconSource } from './renderer/item-icons.js';
-import type { PlayerView } from './game/views/player-view.js';
+import type { MiningView, PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
 import { DETAIL_ZOOM, ProceduralAtlas, spriteLift, type SpriteAtlas } from './renderer/sprite-atlas.js';
@@ -239,6 +239,9 @@ const AUDIO_UPDATE_MS = 200;
 
 /** Belt items on screen at which the belt ambience is at full level. */
 const BELT_ITEMS_FULL = 80;
+
+/** Pick strikes heard per item mined by hand: at two seconds an item, one a second. */
+const MINE_STRIKES_PER_ITEM = 2;
 
 /** The player's bindings: what they saved, or the shipped ones. */
 function bindingsFrom(settings: Settings): KeyBindings {
@@ -695,7 +698,34 @@ async function bootstrap(): Promise<void> {
   let heardSize = simulation.entities.size;
   let audioAccumulatorMs = 0;
 
-  function updateAudio(elapsedMs: number, beltItems: number): void {
+  /*
+   * Mining by hand is heard as pick strikes, read off the player view's
+   * progress: one as the player starts on a tile, so the click is answered,
+   * then one each time the progress passes a `MINE_STRIKES_PER_ITEM`th of an
+   * item. Progress only moves while the simulation ticks, so a paused player
+   * falls silent with no check of their own, and a frame at 8x that passes
+   * several strikes is one sound.
+   */
+  let heardMiningX = Number.NaN;
+  let heardMiningY = Number.NaN;
+  let heardStrike = 0;
+
+  function strikeOf(mining: MiningView | null): boolean {
+    if (mining === null) {
+      heardMiningX = Number.NaN;
+      heardMiningY = Number.NaN;
+      return false;
+    }
+    const strike = Math.floor(mining.progress * MINE_STRIKES_PER_ITEM);
+    const sameTile = mining.x === heardMiningX && mining.y === heardMiningY;
+    const struck = !sameTile || strike !== heardStrike;
+    heardMiningX = mining.x;
+    heardMiningY = mining.y;
+    heardStrike = strike;
+    return struck;
+  }
+
+  function updateAudio(elapsedMs: number, beltItems: number, mining: MiningView | null): void {
     const nextId = simulation.entities.nextId;
     const size = simulation.entities.size;
     const placed = nextId - heardNextId;
@@ -704,6 +734,7 @@ async function bootstrap(): Promise<void> {
     heardSize = size;
     if (placed > 0) audio.play('place');
     if (removed > 0) audio.play('remove');
+    if (strikeOf(mining)) audio.play('mine');
 
     audioAccumulatorMs += elapsedMs;
     if (audioAccumulatorMs < AUDIO_UPDATE_MS) return;
@@ -769,7 +800,8 @@ async function bootstrap(): Promise<void> {
     // pixel wide is shimmer, and the atlas's plain levels have no frames.
     // Nor with reduced motion (C30), where the player's walk is still too.
     const animate = camera.zoom >= DETAIL_ZOOM && !reducedMotion;
-    const player = describePlayer(controller.getPlayerView(), renderSeconds, animate);
+    const playerView = controller.getPlayerView();
+    const player = describePlayer(playerView, renderSeconds, animate);
     followPlayer(player.x, player.y);
 
     // Described after the camera has settled for the frame, over the same
@@ -805,7 +837,7 @@ async function bootstrap(): Promise<void> {
     // and only then does the controller hand anything to the UI.
     controller.pump();
     ui.update(elapsedMs);
-    updateAudio(elapsedMs, state.items.length);
+    updateAudio(elapsedMs, state.items.length, playerView.mining);
     // C25 task 4. Driven from the frame rather than from a timer, so "every
     // three minutes" is three minutes of *play* — see `autosave.ts` — and so
     // the snapshot it takes is between ticks by construction: the loop has

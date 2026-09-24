@@ -74,7 +74,7 @@ interface Tone {
   readonly level: number;
 }
 
-export type SoundName = 'place' | 'remove' | 'research' | 'alert';
+export type SoundName = 'place' | 'remove' | 'mine' | 'research' | 'alert';
 
 /**
  * What each event sounds like. Short, low and soft: these play hundreds of
@@ -85,6 +85,12 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
   place: [{ wave: 'triangle', from: 220, to: 130, delay: 0, attack: 0.006, length: 0.11, level: 0.35 }],
   // Rising and thinner: something lifted away.
   remove: [{ wave: 'triangle', from: 170, to: 300, delay: 0, attack: 0.006, length: 0.12, level: 0.25 }],
+  // A pick on rock: a short low knock under a quick bright tick. Shorter and
+  // drier than `place`, since a player mining by hand hears it every second.
+  mine: [
+    { wave: 'triangle', from: 150, to: 85, delay: 0, attack: 0.005, length: 0.07, level: 0.3 },
+    { wave: 'square', from: 1900, to: 1300, delay: 0, attack: 0.005, length: 0.035, level: 0.045 },
+  ],
   // Three notes up a major triad: the one sound that is good news.
   research: [
     { wave: 'sine', from: 523, to: 523, delay: 0, attack: 0.01, length: 0.22, level: 0.22 },

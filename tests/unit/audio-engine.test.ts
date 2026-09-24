@@ -175,7 +175,7 @@ function makeEngine(options: { volume?: number; muted?: boolean } = {}): { engin
   return { engine, context };
 }
 
-const SOUNDS: readonly SoundName[] = ['place', 'remove', 'research', 'alert'];
+const SOUNDS: readonly SoundName[] = ['place', 'remove', 'mine', 'research', 'alert'];
 
 describe('AudioEngine before a gesture', () => {
   it('builds nothing and plays nothing until it is unlocked', () => {

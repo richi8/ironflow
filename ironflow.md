@@ -7272,6 +7272,11 @@ are no asset files.
   is one sound. `research_complete` gets a rising triad, and every other alert
   a two-note fall. Command rejections get no sound; the toast is enough, and a
   drag across occupied tiles would be a drum roll.
+  *(Added 2026-09-24: mining by hand plays `mine`, a pick strike — a low knock
+  under a short bright tick. It is read off the player view's mining progress:
+  one strike when the player starts on a tile, then one each half item, which
+  is one a second. Progress only moves while the simulation ticks, so a paused
+  player is silent without a check of its own.)*
 - **The cap is hard and counted at `start()`.** `MAX_SOURCES` is 16. The hum is
   a fixed pool of `HUM_VOICES` (4) persistent voices, retuned every 200 ms to
   the nearest working machines on screen. The rest are culled by distance from
