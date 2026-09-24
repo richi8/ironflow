@@ -61,13 +61,11 @@ const MINING_RING_WIDTH = 4;
 /** Height of a badge's item icon, in CSS pixels. */
 const BADGE_SIZE = 18;
 
-/** Space between the icon and the count. */
+/** Space between two icons in one badge. */
 const BADGE_GAP = 4;
 
 /** Padding inside the badge's plate. */
 const BADGE_PAD = 4;
-
-const BADGE_TEXT_SIZE = 11;
 
 /** How solid the plate behind a badge is. Dark enough to read over ore. */
 const BADGE_PLATE_ALPHA = 0.8;
@@ -163,11 +161,11 @@ export class OverlayLayer {
     const middle = centre.y - annotation.lift * 0.5 * camera.zoom;
     const y = middle + (BADGE_SIZE - BADGE_PAD) * 0.5;
 
-    const label = annotation.count === null ? '' : String(annotation.count);
-    const textWidth = label === '' ? 0 : this.measureBadge(ctx, label);
-    const width = BADGE_SIZE + (textWidth === 0 ? 0 : textWidth + BADGE_GAP);
+    const count = annotation.sprites.length;
+    const width = count * BADGE_SIZE + (count - 1) * BADGE_GAP;
+    const left = centre.x - width * 0.5;
 
-    roundedRect(ctx, centre.x - width * 0.5 - BADGE_PAD, y - BADGE_SIZE, width + BADGE_PAD * 2, BADGE_SIZE + BADGE_PAD);
+    roundedRect(ctx, left - BADGE_PAD, y - BADGE_SIZE, width + BADGE_PAD * 2, BADGE_SIZE + BADGE_PAD);
     ctx.fillStyle = color('bg-deep');
     const previousAlpha = ctx.globalAlpha;
     ctx.globalAlpha = previousAlpha * BADGE_PLATE_ALPHA;
@@ -178,19 +176,10 @@ export class OverlayLayer {
     ctx.stroke();
 
     // At zoom 1 whatever the camera is doing: see the header above.
-    this.atlas.draw(ctx, annotation.sprite, centre.x - width * 0.5 + BADGE_SIZE * 0.5, y - BADGE_SIZE * 0.3, 1);
-
-    if (label === '') return;
-    ctx.font = `${BADGE_TEXT_SIZE}px ${FONT_STACK}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = color('text');
-    ctx.fillText(label, centre.x - width * 0.5 + BADGE_SIZE + BADGE_GAP, y - BADGE_SIZE * 0.4);
-  }
-
-  private measureBadge(ctx: CanvasRenderingContext2D, label: string): number {
-    ctx.font = `${BADGE_TEXT_SIZE}px ${FONT_STACK}`;
-    return ctx.measureText(label).width;
+    annotation.sprites.forEach((sprite, i) => {
+      const x = left + i * (BADGE_SIZE + BADGE_GAP) + BADGE_SIZE * 0.5;
+      this.atlas.draw(ctx, sprite, x, y - BADGE_SIZE * 0.3, 1);
+    });
   }
 
   /**

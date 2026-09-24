@@ -51,6 +51,7 @@ import type { EntityIndex } from './entity-index.js';
 import type { LevelSpec } from './image-atlas.js';
 
 import {
+  MAX_BADGE_ITEMS,
   RenderLayer,
   type MachineAnnotation,
   type PlayerRenderView,
@@ -695,8 +696,8 @@ export function describeAnnotations(
   const out: MachineAnnotation[] = [];
 
   store.forEach((entity) => {
-    const badge = annotationItem(entity, buildings, recipes, items);
-    if (badge === null) return;
+    const badge = annotationItems(entity, buildings, recipes, items);
+    if (badge.length === 0) return;
 
     const definition = buildings.forEntityType(entity.type);
     const extent = footprintExtent(definition.size, entity.rotation);
@@ -705,8 +706,7 @@ export function describeAnnotations(
       y: entity.y,
       width: extent.width,
       height: extent.height,
-      sprite: itemSprite(badge.itemId),
-      count: badge.count,
+      sprites: badge.map(itemSprite),
       // Measured from the machine's own sprite, which is the one standing up.
       lift: spriteLift(spriteFor(entity, definition, buildings, store, 0, true)),
     });
@@ -715,42 +715,42 @@ export function describeAnnotations(
   return out;
 }
 
-/** The item a machine's badge names, and how many of it, or null for no badge. */
-function annotationItem(
+/** The items a machine's badge names, most important first; empty for no badge. */
+function annotationItems(
   entity: Entity,
   buildings: BuildingRegistry,
   recipes: RecipeRegistry,
   items: ItemRegistry,
-): { readonly itemId: string; readonly count: number | null } | null {
+): string[] {
   const miner = asMiner(entity);
   if (miner !== null) {
     const itemId = resourceItemId(miner.resourceType);
-    return itemId === null ? null : { itemId, count: miner.outputCount };
+    return itemId === null ? [] : [itemId];
   }
 
   const machine = asMachine(entity, buildings);
   if (machine !== null) {
-    if (!recipes.isRecipeId(machine.recipe)) return null;
-    const product = recipes.byId(machine.recipe).outputs[0];
-    if (product === undefined) return null;
-    return { itemId: items.byId(product.itemId).id, count: null };
+    if (!recipes.isRecipeId(machine.recipe)) return [];
+    return recipes
+      .byId(machine.recipe)
+      .outputs.slice(0, MAX_BADGE_ITEMS)
+      .map((product) => items.byId(product.itemId).id);
   }
 
   const chest = asChest(entity);
   if (chest !== null) {
-    // The one it holds most of, and ties go to the lower item id so the badge
+    // The ones it holds most of, and ties go to the lower item id so the badge
     // does not flicker between two equal stacks as they fill.
     // Totalled per item first: since chests became grids, one item can be
     // several stacks.
     const totals = new Map<number, number>();
     for (const entry of chest.contents) totals.set(entry[1], (totals.get(entry[1]) ?? 0) + entry[2]);
-    let best: readonly [number, number] | null = null;
-    for (const entry of [...totals].sort((a, b) => a[0] - b[0])) {
-      if (best === null || entry[1] > best[1]) best = entry;
-    }
-    if (best === null || !items.isItemId(best[0])) return null;
-    return { itemId: items.byId(best[0]).id, count: best[1] };
+    return [...totals]
+      .filter((entry) => items.isItemId(entry[0]))
+      .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+      .slice(0, MAX_BADGE_ITEMS)
+      .map((entry) => items.byId(entry[0]).id);
   }
 
-  return null;
+  return [];
 }

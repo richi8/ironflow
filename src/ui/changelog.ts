@@ -68,6 +68,10 @@ export const CHANGELOG: readonly ChangelogDay[] = Object.freeze([
         kind: 'improved',
         text: 'When the stack in your hand runs out, you pick up the next stack of the same item. When you have none left, your hand empties.',
       },
+      {
+        kind: 'improved',
+        text: 'In the “what machines make” view, a chest shows up to four of the things inside it instead of one, and the numbers are gone so the pictures are easier to read.',
+      },
     ],
   },
 ]);

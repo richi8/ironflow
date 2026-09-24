@@ -5199,6 +5199,11 @@ assert a lying `output_full`.
   full of plates still goes with the chest. That is a bigger decision than a
   refund (where do fifty plates go when the bag holds thirty?) and belongs with
   whatever chunk gives the player somewhere to put them.
+- **An alt-mode badge shows up to four items, without counts (2026-09-24).**
+  A chest's badge was its biggest stack and how many; it is now its four
+  biggest, most first, and a recipe's first four outputs, with no numbers —
+  the mode answers *what* is where, and a count on every badge was noise at
+  the zoom it is read at. `MAX_BADGE_ITEMS` in `render-state.ts`.
 - **The alt-mode badge is drawn per machine per frame, unculled.** It walks the
   whole entity store and allocates one object per labelled machine, which is
   the shape `describeEntities` already has and the same answer applies: C28

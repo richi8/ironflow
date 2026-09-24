@@ -171,20 +171,23 @@ export interface GhostView {
  * has — "which of these forty furnaces is on copper?" — is about all of them
  * at once. Reading it forty times is not reading it.
  *
- * It carries a sprite rather than an item id because it is a render view and
+ * It carries sprites rather than item ids because it is a render view and
  * the composition root has already made that translation (§4, and the same
- * split `GhostView` makes). `count` is what a container is holding; null for a
- * machine, whose badge is about what it *makes* rather than what it has.
+ * split `GhostView` makes). Up to four, and no counts (2026-09-24): a chest's
+ * badge was its one biggest stack with a number, and the question the mode
+ * answers is *what* is in there, which a mixed chest's biggest stack alone
+ * does not.
  */
+/** The most items one alt-mode badge shows. */
+export const MAX_BADGE_ITEMS = 4;
+
 export interface MachineAnnotation {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
-  /** The item sprite drawn in the badge. */
-  readonly sprite: SpriteId;
-  /** How many are in there, for a container. Null for a machine. */
-  readonly count: number | null;
+  /** The item sprites drawn in the badge, left to right: one to `MAX_BADGE_ITEMS`. */
+  readonly sprites: readonly SpriteId[];
   /**
    * How far the machine under this badge rises, in world pixels at zoom 1.
    *

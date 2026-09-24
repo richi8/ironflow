@@ -55,7 +55,7 @@ describe('describeAnnotations', () => {
     assembler.recipe = simulation.recipes.get('make_belt').recipeId;
     simulation.entities.create(assembler);
 
-    expect(annotate(simulation).map((a) => a.sprite)).toEqual(['item:copper_plate', 'item:belt']);
+    expect(annotate(simulation).map((a) => a.sprites)).toEqual([['item:copper_plate'], ['item:belt']]);
   });
 
   it('says nothing about a machine that has not been told what to make', () => {
@@ -67,17 +67,15 @@ describe('describeAnnotations', () => {
     expect(annotate(simulation)).toEqual([]);
   });
 
-  it('names the ore under a miner, with how much is waiting in it', () => {
+  it('names the ore under a miner', () => {
     const simulation = new Simulation({ world: world() });
     simulation.entities.create(newMiner(0, 0, NORTH));
     simulation.tick();
 
-    const [badge] = annotate(simulation);
-    expect(badge?.sprite).toBe('item:iron_ore');
-    expect(badge?.count).toBe(0);
+    expect(annotate(simulation)[0]?.sprites).toEqual(['item:iron_ore']);
   });
 
-  it('names what a chest holds most of, with the count', () => {
+  it('names what a chest holds, most first', () => {
     const simulation = new Simulation({ world: world() });
     const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
     // Gears in two stacks: the badge totals them.
@@ -87,9 +85,16 @@ describe('describeAnnotations', () => {
       [5, simulation.items.idOf('gear'), 7],
     ];
 
-    const [badge] = annotate(simulation);
-    expect(badge?.sprite).toBe('item:gear');
-    expect(badge?.count).toBe(17);
+    expect(annotate(simulation)[0]?.sprites).toEqual(['item:gear', 'item:iron_plate']);
+  });
+
+  it('names at most four of what a chest holds', () => {
+    const simulation = new Simulation({ world: world() });
+    const chest = simulation.entities.create<ChestEntity>(newChest(0, 0, NORTH));
+    const names = ['iron_ore', 'copper_ore', 'coal', 'stone', 'iron_plate'];
+    chest.contents = names.map((name, slot) => [slot, simulation.items.idOf(name), 10 - slot] as const);
+
+    expect(annotate(simulation)[0]?.sprites).toEqual(['item:iron_ore', 'item:copper_ore', 'item:coal', 'item:stone']);
   });
 
   it('leaves belts and splitters out, because there are hundreds of them', () => {
@@ -127,6 +132,6 @@ describe('describeAnnotations', () => {
     expect(annotation?.lift).toBe(spriteLift(machine));
     expect(annotation?.lift).toBeGreaterThan(0);
     // Not the badge's own sprite, which is a flat item and lifts nothing.
-    expect(spriteLift(annotation?.sprite ?? '')).toBe(0);
+    expect(spriteLift(annotation?.sprites[0] ?? '')).toBe(0);
   });
 });
