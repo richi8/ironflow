@@ -52,10 +52,11 @@ import {
   describeEntities,
   describePlayer,
   isWorking,
+  pickStrikes,
 } from './renderer/entity-view.js';
 import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
 import { createItemIconSource } from './renderer/item-icons.js';
-import type { MiningView, PlayerView } from './game/views/player-view.js';
+import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
 import { DETAIL_ZOOM, ProceduralAtlas, spriteLift, type SpriteAtlas } from './renderer/sprite-atlas.js';
@@ -239,9 +240,6 @@ const AUDIO_UPDATE_MS = 200;
 
 /** Belt items on screen at which the belt ambience is at full level. */
 const BELT_ITEMS_FULL = 80;
-
-/** Pick strikes heard per item mined by hand: at two seconds an item, one a second. */
-const MINE_STRIKES_PER_ITEM = 2;
 
 /** The player's bindings: what they saved, or the shipped ones. */
 function bindingsFrom(settings: Settings): KeyBindings {
@@ -699,33 +697,23 @@ async function bootstrap(): Promise<void> {
   let audioAccumulatorMs = 0;
 
   /*
-   * Mining by hand is heard as pick strikes, read off the player view's
-   * progress: one as the player starts on a tile, so the click is answered,
-   * then one each time the progress passes a `MINE_STRIKES_PER_ITEM`th of an
-   * item. Progress only moves while the simulation ticks, so a paused player
-   * falls silent with no check of their own, and a frame at 8x that passes
-   * several strikes is one sound.
+   * Mining by hand is heard as pick strikes, one each time the swing drawn
+   * on the player lands (`pickStrikes`), so the sound is on the blow the
+   * player sees. The swing runs on `renderSeconds`, which stops with the
+   * game, so a paused player falls silent with no check of their own. Where
+   * the swing is not drawn (zoomed out, reduced motion) the strikes keep its
+   * rhythm anyway: the player is still working.
    */
-  let heardMiningX = Number.NaN;
-  let heardMiningY = Number.NaN;
-  let heardStrike = 0;
+  let heardStrikes = Number.NaN;
 
-  function strikeOf(mining: MiningView | null): boolean {
-    if (mining === null) {
-      heardMiningX = Number.NaN;
-      heardMiningY = Number.NaN;
-      return false;
-    }
-    const strike = Math.floor(mining.progress * MINE_STRIKES_PER_ITEM);
-    const sameTile = mining.x === heardMiningX && mining.y === heardMiningY;
-    const struck = !sameTile || strike !== heardStrike;
-    heardMiningX = mining.x;
-    heardMiningY = mining.y;
-    heardStrike = strike;
-    return struck;
+  function struck(mining: boolean): boolean {
+    const strikes = pickStrikes(renderSeconds);
+    const landed = mining && strikes !== heardStrikes && !Number.isNaN(heardStrikes);
+    heardStrikes = mining ? strikes : Number.NaN;
+    return landed;
   }
 
-  function updateAudio(elapsedMs: number, beltItems: number, mining: MiningView | null): void {
+  function updateAudio(elapsedMs: number, beltItems: number, mining: boolean): void {
     const nextId = simulation.entities.nextId;
     const size = simulation.entities.size;
     const placed = nextId - heardNextId;
@@ -734,7 +722,7 @@ async function bootstrap(): Promise<void> {
     heardSize = size;
     if (placed > 0) audio.play('place');
     if (removed > 0) audio.play('remove');
-    if (strikeOf(mining)) audio.play('mine');
+    if (struck(mining)) audio.play('mine');
 
     audioAccumulatorMs += elapsedMs;
     if (audioAccumulatorMs < AUDIO_UPDATE_MS) return;
@@ -837,7 +825,7 @@ async function bootstrap(): Promise<void> {
     // and only then does the controller hand anything to the UI.
     controller.pump();
     ui.update(elapsedMs);
-    updateAudio(elapsedMs, state.items.length, playerView.mining);
+    updateAudio(elapsedMs, state.items.length, playerView.mining !== null);
     // C25 task 4. Driven from the frame rather than from a timer, so "every
     // three minutes" is three minutes of *play* — see `autosave.ts` — and so
     // the snapshot it takes is between ticks by construction: the loop has

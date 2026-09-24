@@ -570,6 +570,22 @@ export function playerFrame(activity: PlayerView['activity'], seconds: number): 
   return step < 0 ? step + ACTIVITY_FRAMES : step;
 }
 
+/**
+ * The work frame the pick lands on: the one `sprite-painter.ts`'s `SWING`
+ * has below the horizontal. Move the one, move the other.
+ */
+export const PICK_IMPACT_FRAME = 3;
+
+/**
+ * How many times the pick has landed, `seconds` in: the count steps up at the
+ * start of each `PICK_IMPACT_FRAME`. A counter rather than "is this the impact
+ * frame" so that a frame long enough to skip the impact still hears it —
+ * which is how the mining sound stays on the blow the player sees.
+ */
+export function pickStrikes(seconds: number): number {
+  return Math.floor((seconds * PLAYER_FPS.work - PICK_IMPACT_FRAME) / ACTIVITY_FRAMES);
+}
+
 /** The plain levels' and the detailed levels' scales. See `image-atlas.ts`. */
 const PLAIN_SCALES: readonly number[] = Object.freeze([0.25, 0.5, 1]);
 const DETAILED_SCALES: readonly number[] = Object.freeze([0.5, 1, 2]);

@@ -63,9 +63,18 @@ const REPEAT_GUARD_S = 0.06;
 const HUM_LEVEL = 0.05;
 const BELT_LEVEL = 0.035;
 
-/** The shape of one tone in a one-shot. Times in seconds, from the sound's start. */
+/**
+ * The shape of one tone in a one-shot. Times in seconds, from the sound's start.
+ *
+ * A tone is an oscillator, or — `wave: 'noise'` — the shared second of noise
+ * through a filter of `filter`'s type, whose frequency `from` and `to` then
+ * sweep. Noise is what rock sounds like: a pick on stone is a crack and a
+ * crumble, not a pitch.
+ */
 interface Tone {
-  readonly wave: OscillatorType;
+  readonly wave: OscillatorType | 'noise';
+  readonly filter?: BiquadFilterType;
+  readonly q?: number;
   readonly from: number;
   readonly to: number;
   readonly delay: number;
@@ -85,11 +94,15 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
   place: [{ wave: 'triangle', from: 220, to: 130, delay: 0, attack: 0.006, length: 0.11, level: 0.35 }],
   // Rising and thinner: something lifted away.
   remove: [{ wave: 'triangle', from: 170, to: 300, delay: 0, attack: 0.006, length: 0.12, level: 0.25 }],
-  // A pick on rock: a short low knock under a quick bright tick. Shorter and
-  // drier than `place`, since a player mining by hand hears it every second.
+  // A pick on rock, the way other games voice it: a bright crack of noise on
+  // impact, the thump of the blow under it, a faint ring off the pick's steel,
+  // and the chips falling a moment after. Played once a swing, so it is
+  // short, and `PITCH_SPREAD` keeps two swings from sounding the same.
   mine: [
-    { wave: 'triangle', from: 150, to: 85, delay: 0, attack: 0.005, length: 0.07, level: 0.3 },
-    { wave: 'square', from: 1900, to: 1300, delay: 0, attack: 0.005, length: 0.035, level: 0.045 },
+    { wave: 'noise', filter: 'bandpass', q: 1.4, from: 3200, to: 1800, delay: 0, attack: 0.002, length: 0.05, level: 0.9 },
+    { wave: 'sine', from: 140, to: 55, delay: 0, attack: 0.003, length: 0.09, level: 0.45 },
+    { wave: 'triangle', from: 2350, to: 2300, delay: 0.004, attack: 0.003, length: 0.14, level: 0.035 },
+    { wave: 'noise', filter: 'bandpass', q: 0.9, from: 1400, to: 700, delay: 0.035, attack: 0.01, length: 0.15, level: 0.3 },
   ],
   // Three notes up a major triad: the one sound that is good news.
   research: [
@@ -103,6 +116,13 @@ const SOUNDS: Readonly<Record<SoundName, readonly Tone[]>> = Object.freeze({
     { wave: 'triangle', from: 554, to: 554, delay: 0.12, attack: 0.008, length: 0.16, level: 0.2 },
   ],
 });
+
+/**
+ * How far a sound's pitch wanders from one play to the next, as a fraction.
+ * A sound heard every half second that is identical every time is a machine
+ * gun; one that wanders a few percent is a person working.
+ */
+const PITCH_SPREAD: Readonly<Partial<Record<SoundName, number>>> = Object.freeze({ mine: 0.1 });
 
 /** How many sources a sound needs, so the cap can be checked before any start. */
 export function sourcesFor(sound: SoundName): number {
@@ -144,6 +164,7 @@ export class AudioEngine {
 
   private hum: HumVoice[] | null = null;
   private beltGain: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
 
   constructor(options: AudioEngineOptions) {
     this.createContext = options.createContext;
@@ -214,7 +235,10 @@ export class AudioEngine {
     if (this.active + tones.length > MAX_SOURCES) return false;
     this.lastPlayed.set(sound, now);
 
-    for (const tone of tones) this.startTone(context, master, now, tone);
+    const spread = PITCH_SPREAD[sound] ?? 0;
+    // Math.random is fine here: this is sound, not simulation (§6's list).
+    const pitch = 1 + spread * (Math.random() * 2 - 1);
+    for (const tone of tones) this.startTone(context, master, now, tone, pitch);
     return true;
   }
 
@@ -258,6 +282,7 @@ export class AudioEngine {
     this.master = null;
     this.hum = null;
     this.beltGain = null;
+    this.noise = null;
     this.active = 0;
     void context.close().catch(() => undefined);
   }
@@ -277,15 +302,35 @@ export class AudioEngine {
     });
   }
 
-  private startTone(context: AudioContext, master: GainNode, now: number, tone: Tone): void {
+  private startTone(context: AudioContext, master: GainNode, now: number, tone: Tone, pitch: number): void {
     const start = now + tone.delay;
     const attack = Math.max(MIN_RAMP_S, tone.attack);
     const end = start + Math.max(tone.length, attack + MIN_RAMP_S);
+    const from = tone.from * pitch;
+    const to = tone.to * pitch;
 
-    const oscillator = context.createOscillator();
-    oscillator.type = tone.wave;
-    oscillator.frequency.setValueAtTime(tone.from, start);
-    if (tone.to !== tone.from) oscillator.frequency.exponentialRampToValueAtTime(tone.to, end);
+    // An oscillator sweeps its own frequency; noise sweeps its filter's.
+    let source: AudioScheduledSourceNode;
+    let output: AudioNode;
+    if (tone.wave === 'noise') {
+      const noise = context.createBufferSource();
+      noise.buffer = this.noiseBuffer(context);
+      const filter = context.createBiquadFilter();
+      filter.type = tone.filter ?? 'bandpass';
+      filter.Q.setValueAtTime(tone.q ?? 1, start);
+      filter.frequency.setValueAtTime(from, start);
+      if (to !== from) filter.frequency.exponentialRampToValueAtTime(to, end);
+      noise.connect(filter);
+      source = noise;
+      output = filter;
+    } else {
+      const oscillator = context.createOscillator();
+      oscillator.type = tone.wave;
+      oscillator.frequency.setValueAtTime(from, start);
+      if (to !== from) oscillator.frequency.exponentialRampToValueAtTime(to, end);
+      source = oscillator;
+      output = oscillator;
+    }
 
     const envelope = context.createGain();
     // Silent, up, and back to silent before the stop: no edge anywhere.
@@ -293,11 +338,23 @@ export class AudioEngine {
     envelope.gain.linearRampToValueAtTime(tone.level, start + attack);
     envelope.gain.linearRampToValueAtTime(0, end);
 
-    oscillator.connect(envelope);
+    output.connect(envelope);
     envelope.connect(master);
-    this.track(oscillator);
-    oscillator.start(start);
-    oscillator.stop(end + MIN_RAMP_S);
+    this.track(source);
+    source.start(start);
+    source.stop(end + MIN_RAMP_S);
+  }
+
+  /** A second of white noise, made once and shared by the belts and every noise tone. */
+  private noiseBuffer(context: AudioContext): AudioBuffer {
+    if (this.noise !== null) return this.noise;
+    const length = Math.max(1, Math.floor(context.sampleRate));
+    const buffer = context.createBuffer(1, length, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    // Math.random is fine here: this is sound, not simulation (§6's list).
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    this.noise = buffer;
+    return buffer;
   }
 
   /**
@@ -345,14 +402,8 @@ export class AudioEngine {
     const master = this.master;
     if (master === null || this.active + 1 > MAX_SOURCES) return null;
 
-    const length = Math.max(1, Math.floor(context.sampleRate));
-    const buffer = context.createBuffer(1, length, context.sampleRate);
-    const data = buffer.getChannelData(0);
-    // Math.random is fine here: this is sound, not simulation (§6's list).
-    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
-
     const source = context.createBufferSource();
-    source.buffer = buffer;
+    source.buffer = this.noiseBuffer(context);
     source.loop = true;
     const filter = context.createBiquadFilter();
     filter.type = 'bandpass';

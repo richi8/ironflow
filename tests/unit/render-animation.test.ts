@@ -10,7 +10,14 @@ import { EAST, NORTH, SOUTH } from '../../src/game/world/coordinates.js';
 import { TILE_TYPE_COUNT, TileType } from '../../src/game/world/tile.js';
 import { World } from '../../src/game/world/world.js';
 import { Camera } from '../../src/renderer/camera.js';
-import { activityFrame, describeEntities, describePlayer, playerFrame } from '../../src/renderer/entity-view.js';
+import {
+  PICK_IMPACT_FRAME,
+  activityFrame,
+  describeEntities,
+  describePlayer,
+  pickStrikes,
+  playerFrame,
+} from '../../src/renderer/entity-view.js';
 import { EntityLayer, depthKey } from '../../src/renderer/layers/entity-layer.js';
 import { tileVariant } from '../../src/renderer/layers/terrain-layer.js';
 import { RenderLayer, type RenderEntity } from '../../src/renderer/render-state.js';
@@ -156,6 +163,22 @@ describe('machines animate while they work (C29 art task 3)', () => {
     const frames = new Set<number>();
     for (let t = 0; t < 2; t += 0.01) frames.add(playerFrame('walk', t));
     expect([...frames].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  it('counts a pick strike exactly where the swing enters its impact frame, once a swing', () => {
+    let previousFrame = playerFrame('work', 0);
+    let previousStrikes = pickStrikes(0);
+    let strikes = 0;
+    for (let t = 0.001; t < 4; t += 0.001) {
+      const frame = playerFrame('work', t);
+      const count = pickStrikes(t);
+      expect(count !== previousStrikes).toBe(frame === PICK_IMPACT_FRAME && previousFrame !== PICK_IMPACT_FRAME);
+      if (count !== previousStrikes) strikes += 1;
+      previousFrame = frame;
+      previousStrikes = count;
+    }
+    // Six frames a second, four to a swing: a blow every two thirds of a second.
+    expect(strikes).toBe(6);
   });
 });
 

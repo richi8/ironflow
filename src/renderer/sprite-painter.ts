@@ -1133,7 +1133,7 @@ const PLAYER_SCALE = 1.3;
 const STRIDE: readonly number[] = Object.freeze([0, 0.08, 0, -0.08]);
 /** The idle breath, in bulk units. */
 const BREATH: readonly number[] = Object.freeze([0, 0.02, 0.035, 0.02]);
-/** The pick's angle per work frame, in radians above the horizontal. */
+/** The pick's angle per work frame, in radians above the horizontal. Frame 3 is the blow: `PICK_IMPACT_FRAME`, which the mining sound keeps time with. */
 const SWING: readonly number[] = Object.freeze([0.2, 1.1, 1.4, -0.3]);
 
 /**

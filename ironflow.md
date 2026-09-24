@@ -7272,11 +7272,15 @@ are no asset files.
   is one sound. `research_complete` gets a rising triad, and every other alert
   a two-note fall. Command rejections get no sound; the toast is enough, and a
   drag across occupied tiles would be a drum roll.
-  *(Added 2026-09-24: mining by hand plays `mine`, a pick strike — a low knock
-  under a short bright tick. It is read off the player view's mining progress:
-  one strike when the player starts on a tile, then one each half item, which
-  is one a second. Progress only moves while the simulation ticks, so a paused
-  player is silent without a check of its own.)*
+  *(Added 2026-09-24: mining by hand plays `mine`, a pick on rock: a crack of
+  band-passed noise, a low thump, a faint ring off the steel and a crumble of
+  chips after, its pitch wandering ±10% a swing so the repeats do not sound
+  identical. Noise tones share the belts' one second of noise. It keeps time with the
+  drawn swing, not with mining progress: `pickStrikes` counts the swing's
+  impact frame (`PICK_IMPACT_FRAME`, the pick below the horizontal in
+  `SWING`), so a blow sounds every two thirds of a second, on the frame it
+  lands. That clock is `renderSeconds`, so a paused player is silent; zoomed
+  out or with reduced motion the swing is not drawn but its rhythm is kept.)*
 - **The cap is hard and counted at `start()`.** `MAX_SOURCES` is 16. The hum is
   a fixed pool of `HUM_VOICES` (4) persistent voices, retuned every 200 ms to
   the nearest working machines on screen. The rest are culled by distance from
