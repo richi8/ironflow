@@ -55,7 +55,7 @@ import {
   pickStrikes,
 } from './renderer/entity-view.js';
 import { ImageAtlas, bakedLevels, layoutAtlas, type AtlasSurface } from './renderer/image-atlas.js';
-import { createItemIconSource } from './renderer/item-icons.js';
+import { createCountedIconSource, createItemIconSource } from './renderer/item-icons.js';
 import type { PlayerView } from './game/views/player-view.js';
 import { ScenePicker } from './renderer/picker.js';
 import type { GhostView, MachineAnnotation, RenderState } from './renderer/render-state.js';
@@ -572,26 +572,29 @@ async function bootstrap(): Promise<void> {
 
   // C32's item pictures, from one atlas: the panels' at 2x, and the cursor's.
   const iconAtlas = new ProceduralAtlas();
-  const cursorIcons = createItemIconSource({
+  const cursorIcons = createCountedIconSource({
     atlas: iconAtlas,
     buildings: simulation.buildings,
     createCanvas: createIconCanvas,
     size: CURSOR_ICON_PX,
   });
-  let cursorItem: string | null = null;
+  let cursorKey: string | null = null;
 
   /**
    * A material in the hand is the pointer (2026-09-24, on request, as in
    * Factorio): the canvas cursor becomes the item's picture, hotspot at its
-   * centre, which is where it lands. A camera drag keeps its grab hand. Set
-   * inline only when the item changes, so the stylesheet's cursors stand the
-   * rest of the time.
+   * centre, which is where it lands, with the bag's count in its corner. A
+   * camera drag keeps its grab hand. Set inline only when the item or its
+   * count changes, so the stylesheet's cursors stand the rest of the time.
    */
   function syncHeldCursor(): void {
     const itemId = input.isDraggingCamera ? null : (input.heldItem?.itemId ?? null);
-    if (itemId === cursorItem) return;
-    cursorItem = itemId;
-    const url = itemId === null ? null : cursorIcons(itemId);
+    // The count rides in the picture's corner: how many the bag has left.
+    const count = itemId === null ? 0 : simulation.inventory.count(itemId);
+    const key = itemId === null ? null : `${itemId}:${count}`;
+    if (key === cursorKey) return;
+    cursorKey = key;
+    const url = itemId === null ? null : cursorIcons(itemId, count);
     const hotspot = CURSOR_ICON_PX / 2;
     if (url === null) canvas.style.removeProperty('cursor');
     else canvas.style.cursor = `url("${url}") ${hotspot} ${hotspot}, crosshair`;

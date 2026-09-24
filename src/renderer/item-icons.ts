@@ -78,26 +78,87 @@ export function iconSpriteFor(itemId: string, buildings: BuildingRegistry): { sp
 /** An item id to a PNG data URL, baked on first request; null if it cannot be. */
 export function createItemIconSource(options: ItemIconOptions): (itemId: string) => string | null {
   const cache = new Map<string, string | null>();
-  let scratch: CanvasRenderingContext2D | null | undefined;
+  const pictures = createPictureSource(options);
 
   return (itemId: string): string | null => {
     const cached = cache.get(itemId);
     if (cached !== undefined) return cached;
-    // Read back once per item, so the browser is told to keep it in memory.
-    if (scratch === undefined) scratch = context(options.createCanvas(SCRATCH_PX, SCRATCH_PX), true);
-    let url: string | null = null;
-    try {
-      url = scratch === null ? null : bake(scratch, itemId, options);
-    } catch {
-      // A picture is decoration: an item that cannot be drawn keeps its letters.
-      url = null;
-    }
+    const url = pictures(itemId)?.toDataURL('image/png') ?? null;
     cache.set(itemId, url);
     return url;
   };
 }
 
-function bake(scratch: CanvasRenderingContext2D, itemId: string, options: ItemIconOptions): string | null {
+/**
+ * An item id and a count to a PNG data URL: the item's picture with the count
+ * in its lower right corner, as a stack is drawn in the genre. For the held
+ * item's cursor (2026-09-24), which shows how many the bag has left.
+ *
+ * The picture is baked once per item; the count is painted over a copy of it
+ * on every call, so a caller asks only when the count changes.
+ */
+export function createCountedIconSource(options: ItemIconOptions): (itemId: string, count: number) => string | null {
+  const pictures = createPictureSource(options);
+  let target: CanvasRenderingContext2D | null | undefined;
+
+  return (itemId: string, count: number): string | null => {
+    const picture = pictures(itemId);
+    if (picture === null) return null;
+    if (target === undefined) target = context(options.createCanvas(options.size, options.size), false);
+    if (target === null) return null;
+    const size = options.size;
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.clearRect(0, 0, size, size);
+    target.drawImage(picture, 0, 0);
+
+    const text = compactCount(count);
+    target.font = `bold ${Math.round(size * COUNT_FONT_SHARE)}px sans-serif`;
+    target.textAlign = 'right';
+    target.textBaseline = 'bottom';
+    target.lineJoin = 'round';
+    target.lineWidth = 3;
+    target.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+    target.strokeText(text, size - 1, size);
+    target.fillStyle = '#ffffff';
+    target.fillText(text, size - 1, size);
+    return target.canvas.toDataURL('image/png');
+  };
+}
+
+/** A count that fits a cursor's corner: 999, 1.2k, 12k. */
+export function compactCount(count: number): string {
+  const whole = Math.max(0, Math.round(count));
+  if (whole < 1000) return String(whole);
+  if (whole < 10_000) return `${Math.floor(whole / 100) / 10}k`;
+  return `${Math.floor(whole / 1000)}k`;
+}
+
+/** The count's type size, as a share of the icon's side. */
+const COUNT_FONT_SHARE = 0.36;
+
+/** An item id to its baked picture, cached; null if it cannot be drawn. */
+function createPictureSource(options: ItemIconOptions): (itemId: string) => HTMLCanvasElement | null {
+  const cache = new Map<string, HTMLCanvasElement | null>();
+  let scratch: CanvasRenderingContext2D | null | undefined;
+
+  return (itemId: string): HTMLCanvasElement | null => {
+    const cached = cache.get(itemId);
+    if (cached !== undefined) return cached;
+    // Read back once per item, so the browser is told to keep it in memory.
+    if (scratch === undefined) scratch = context(options.createCanvas(SCRATCH_PX, SCRATCH_PX), true);
+    let picture: HTMLCanvasElement | null = null;
+    try {
+      picture = scratch === null ? null : bake(scratch, itemId, options);
+    } catch {
+      // A picture is decoration: an item that cannot be drawn keeps its letters.
+      picture = null;
+    }
+    cache.set(itemId, picture);
+    return picture;
+  };
+}
+
+function bake(scratch: CanvasRenderingContext2D, itemId: string, options: ItemIconOptions): HTMLCanvasElement | null {
   const { sprite, zoom } = iconSpriteFor(itemId, options.buildings);
   scratch.setTransform(1, 0, 0, 1, 0, 0);
   scratch.clearRect(0, 0, SCRATCH_PX, SCRATCH_PX);
@@ -117,7 +178,7 @@ function bake(scratch: CanvasRenderingContext2D, itemId: string, options: ItemIc
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(scratch.canvas, box.x, box.y, box.width, box.height, (size - width) / 2, (size - height) / 2, width, height);
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 /**

@@ -1435,6 +1435,10 @@ to arrange. What each change means:
   item changes, and cleared during a camera drag so `.is-dragging`'s grab hand
   still shows. A held *building* keeps the crosshair; its ghost on the ground
   already says what it is.
+  The picture carries the bag's count of the item in its lower right corner,
+  white on a dark outline, as a stack is drawn in the genre
+  (`createCountedIconSource`, `compactCount`: 999, then 1.2k, then 12k). It
+  is repainted only when the item or its count changes.
 - **The hand follows the bag down** *(2026-09-24, on request, as in
   Factorio)*. `GameController.followHand`, run in `pump`, notes what the hand
   held and how many the bag had. When the count falls, from feeding a machine

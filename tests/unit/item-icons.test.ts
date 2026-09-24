@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BuildingRegistry } from '../../src/game/registries/building-registry.js';
 import { BUILDINGS } from '../../src/game/data/buildings.js';
-import { iconSpriteFor, paintedBox } from '../../src/renderer/item-icons.js';
+import { compactCount, iconSpriteFor, paintedBox } from '../../src/renderer/item-icons.js';
 import { describeSprite } from '../../src/renderer/sprite-atlas.js';
 
 /**
@@ -32,6 +32,16 @@ describe('which sprite pictures an item', () => {
     for (const definition of buildings.all()) {
       expect(describeSprite(iconSpriteFor(definition.id, buildings).sprite).kind).not.toBe('missing');
     }
+  });
+});
+
+describe("the held item's count", () => {
+  it('fits a cursor corner: whole below a thousand, then thousands', () => {
+    expect(compactCount(0)).toBe('0');
+    expect(compactCount(999)).toBe('999');
+    expect(compactCount(1250)).toBe('1.2k');
+    expect(compactCount(9999)).toBe('9.9k');
+    expect(compactCount(12_345)).toBe('12k');
   });
 });
 
